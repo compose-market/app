@@ -44,19 +44,19 @@ export function SessionBudgetDialog() {
         <Button 
           variant="outline" 
           size="sm"
-          className="border-primary/30 bg-primary/5 text-primary hover:bg-primary/10"
+          className="border-cyan-500/30 bg-cyan-500/5 text-cyan-400 hover:bg-cyan-500/10 font-mono"
         >
           <Zap className="w-4 h-4 mr-2" />
           {session.isActive ? "Session Active" : "Enable Fast Mode"}
         </Button>
       </DialogTrigger>
-      <DialogContent className="bg-card border-border max-w-md">
+      <DialogContent className="bg-card border-sidebar-border max-w-md">
         <DialogHeader>
-          <DialogTitle className="font-display text-primary flex items-center gap-2">
+          <DialogTitle className="font-display text-cyan-400 flex items-center gap-2">
             <Shield className="w-5 h-5" />
             Session Budget
           </DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="text-muted-foreground">
             Set a spending limit to skip wallet signatures for each AI call.
             One approval, unlimited inference within your budget.
           </DialogDescription>
@@ -65,7 +65,7 @@ export function SessionBudgetDialog() {
         <div className="space-y-6 py-4">
           {/* Budget Selection */}
           <div className="space-y-3">
-            <label className="text-sm font-medium text-muted-foreground">
+            <label className="text-sm font-medium text-muted-foreground font-mono">
               Budget Limit (USDC)
             </label>
             <div className="grid grid-cols-5 gap-2">
@@ -77,8 +77,8 @@ export function SessionBudgetDialog() {
                   onClick={() => setSelectedBudget(preset.value)}
                   className={
                     selectedBudget === preset.value
-                      ? "bg-primary text-primary-foreground"
-                      : "border-border hover:border-primary/50"
+                      ? "bg-cyan-500 text-black font-mono"
+                      : "border-sidebar-border hover:border-cyan-500/50 font-mono"
                   }
                 >
                   {preset.label}
@@ -89,7 +89,7 @@ export function SessionBudgetDialog() {
 
           {/* Duration Selection */}
           <div className="space-y-3">
-            <label className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+            <label className="text-sm font-medium text-muted-foreground flex items-center gap-2 font-mono">
               <Clock className="w-4 h-4" />
               Session Duration
             </label>
@@ -102,8 +102,8 @@ export function SessionBudgetDialog() {
                   onClick={() => setDuration(hours)}
                   className={
                     duration === hours
-                      ? "bg-primary text-primary-foreground"
-                      : "border-border hover:border-primary/50"
+                      ? "bg-cyan-500 text-black font-mono"
+                      : "border-sidebar-border hover:border-cyan-500/50 font-mono"
                   }
                 >
                   {hours}h
@@ -113,25 +113,25 @@ export function SessionBudgetDialog() {
           </div>
 
           {/* Info Box */}
-          <div className="bg-muted/50 rounded-lg p-4 space-y-2">
+          <div className="bg-sidebar-accent rounded-sm p-4 space-y-2 border border-sidebar-border">
             <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Max Spend</span>
-              <span className="font-mono text-primary">
+              <span className="text-muted-foreground font-mono">Max Spend</span>
+              <span className="font-mono text-cyan-400">
                 ${(selectedBudget / 1_000_000).toFixed(2)} USDC
               </span>
             </div>
             <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Expires After</span>
-              <span className="font-mono">{duration} hours</span>
+              <span className="text-muted-foreground font-mono">Expires After</span>
+              <span className="font-mono text-foreground">{duration} hours</span>
             </div>
             <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Signatures Required</span>
-              <span className="font-mono text-accent">1 (now)</span>
+              <span className="text-muted-foreground font-mono">Signatures Required</span>
+              <span className="font-mono text-fuchsia-400">1 (now)</span>
             </div>
           </div>
 
           {error && (
-            <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-3 text-sm text-destructive">
+            <div className="bg-destructive/10 border border-destructive/30 rounded-sm p-3 text-sm text-destructive">
               {error}
             </div>
           )}
@@ -139,11 +139,11 @@ export function SessionBudgetDialog() {
           <Button
             onClick={handleCreate}
             disabled={isCreating}
-            className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
+            className="w-full bg-cyan-500 text-black hover:bg-cyan-400 font-mono font-bold"
           >
             {isCreating ? (
               <>
-                <div className="w-4 h-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin mr-2" />
+                <div className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin mr-2" />
                 Creating Session...
               </>
             ) : (
@@ -179,11 +179,11 @@ export function SessionStatusCard() {
   const minutesRemaining = Math.floor((timeRemaining % (1000 * 60 * 60)) / (1000 * 60));
 
   return (
-    <Card className="glass-panel border-primary/20">
+    <Card className="glass-panel border-cyan-500/20">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm font-display flex items-center gap-2">
-            <Zap className="w-4 h-4 text-primary" />
+            <Zap className="w-4 h-4 text-cyan-400" />
             Fast Mode Active
           </CardTitle>
           <Button
@@ -195,22 +195,22 @@ export function SessionStatusCard() {
             <X className="w-4 h-4" />
           </Button>
         </div>
-        <CardDescription className="text-xs">
+        <CardDescription className="text-xs font-mono">
           No signatures needed • {hoursRemaining}h {minutesRemaining}m remaining
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="space-y-1">
-          <div className="flex justify-between text-xs">
+          <div className="flex justify-between text-xs font-mono">
             <span className="text-muted-foreground">Budget Used</span>
-            <span className="font-mono">
+            <span>
               ${(session.budgetUsed / 1_000_000).toFixed(4)} / ${totalUSDC.toFixed(2)}
             </span>
           </div>
           <Progress value={usagePercent} className="h-2" />
         </div>
         <div className="flex items-center justify-between">
-          <Badge variant="outline" className="text-xs border-primary/30 text-primary">
+          <Badge variant="outline" className="text-xs border-cyan-500/30 text-cyan-400 font-mono">
             ${remainingUSDC.toFixed(4)} remaining
           </Badge>
         </div>
@@ -235,7 +235,7 @@ export function SessionIndicator() {
     <div className="flex items-center gap-2">
       <Badge 
         variant="outline" 
-        className="border-primary/50 bg-primary/10 text-primary font-mono text-xs"
+        className="border-cyan-500/50 bg-cyan-500/10 text-cyan-400 font-mono text-xs"
       >
         <Zap className="w-3 h-3 mr-1" />
         ${remainingUSDC.toFixed(2)}
@@ -244,4 +244,3 @@ export function SessionIndicator() {
     </div>
   );
 }
-
