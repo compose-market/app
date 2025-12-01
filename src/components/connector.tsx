@@ -90,6 +90,7 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
         [paymentChain.id]: [paymentToken],
       }}
       theme={{
+        type: "dark",
         colors: {
           // Compose.Market brand colors - Cyan primary, Fuchsia accent
           primaryButtonBg: "hsl(188 95% 43%)", // Cyan
@@ -100,6 +101,7 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
           borderColor: "hsl(217 33% 15%)",
           separatorLine: "hsl(217 33% 15%)",
           modalBg: "hsl(222 40% 5%)",
+          modalOverlayBg: "hsl(222 47% 3% / 0.8)",
           inputAutofillBg: "hsl(222 40% 6%)",
           secondaryButtonBg: "hsl(270 60% 20%)",
           secondaryButtonHoverBg: "hsl(270 60% 25%)",
@@ -114,6 +116,12 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
           selectedTextColor: "hsl(188 95% 43%)",
           skeletonBg: "hsl(217 33% 15%)",
           tertiaryBg: "hsl(222 40% 6%)",
+          tooltipBg: "hsl(222 40% 10%)",
+          tooltipText: "hsl(210 40% 80%)",
+          scrollbarBg: "hsl(217 33% 15%)",
+          secondaryIconColor: "hsl(215 16% 47%)",
+          secondaryIconHoverBg: "hsl(222 40% 12%)",
+          secondaryIconHoverColor: "hsl(188 95% 43%)",
         },
         fontFamily: "var(--font-sans), Rajdhani, sans-serif",
       }}

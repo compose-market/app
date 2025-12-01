@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo } from "react";
 import { useChat, type UseChatOptions } from "@ai-sdk/react";
+import type { UIMessage } from "ai";
 import { DefaultChatTransport } from "ai";
 import { wrapFetchWithPayment } from "thirdweb/x402";
 import { useActiveWallet } from "thirdweb/react";
@@ -82,15 +83,10 @@ export function useInference(options: UseInferenceOptions) {
     });
   }, [fetchWithPayment, session.isActive, session.sessionKeyAddress, session.budgetRemaining]);
 
-  const chatOptions: UseChatOptions = {
+  const chatOptions: UseChatOptions<UIMessage> = {
     id: `inference-${model.id}`,
     transport,
-    body: {
-      modelId: model.id,
-      systemPrompt,
-      sessionActive: session.isActive,
-    },
-    onError: (error) => {
+    onError: (error: Error) => {
       try {
         const errorData = JSON.parse(error.message);
         if (errorData.error === "insufficient_funds" && errorData.fundWalletLink) {
@@ -105,14 +101,14 @@ export function useInference(options: UseInferenceOptions) {
       }
       setState((s) => ({ ...s, isGenerating: false }));
     },
-    onFinish: (message) => {
+    onFinish: ({ message }) => {
       // Extract token count from metadata if available
-      const metadata = message.annotations?.find((a: unknown) => 
-        a && typeof a === "object" && "totalTokens" in a
-      );
+      // In new AI SDK, metadata is in message.metadata instead of annotations
+      const messageMetadata = message.metadata as Record<string, unknown> | undefined;
+      const totalTokens = messageMetadata?.totalTokens;
       
-      if (metadata && typeof metadata === "object" && "totalTokens" in metadata) {
-        const tokens = metadata.totalTokens as number;
+      if (typeof totalTokens === "number") {
+        const tokens = totalTokens;
         const costWei = Math.ceil(PRICE_PER_TOKEN_WEI * model.priceMultiplier * tokens);
         const cost = calculateCostUSDC(tokens * model.priceMultiplier);
         
@@ -156,9 +152,21 @@ export function useInference(options: UseInferenceOptions) {
       }
       
       setState((s) => ({ ...s, isGenerating: true }));
-      chat.append({ role: "user", content });
+      
+      // Use the new sendMessage API
+      // First arg is message, second arg is request options
+      chat.sendMessage(
+        { text: content },
+        { 
+          body: {
+            modelId: model.id,
+            systemPrompt,
+            sessionActive: session.isActive,
+          },
+        }
+      );
     },
-    [wallet, chat, session.isActive, hasBudget, model.priceMultiplier, onPaymentRequired, onSessionBudgetExceeded]
+    [wallet, chat, session.isActive, hasBudget, model.priceMultiplier, model.id, systemPrompt, onPaymentRequired, onSessionBudgetExceeded]
   );
 
   return {
@@ -200,4 +208,3 @@ export function useModels() {
 
   return { models, loading, error, refetch: fetchModels };
 }
-

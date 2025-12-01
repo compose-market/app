@@ -1,3 +1,4 @@
+import React from "react";
 import { cn } from "@/lib/utils";
 
 interface LogoProps {
@@ -54,7 +55,7 @@ export function WorkflowCube({ className }: LogoProps) {
  */
 interface GlitchTextProps {
   text: string;
-  as?: keyof JSX.IntrinsicElements;
+  as?: React.ElementType;
   className?: string;
 }
 

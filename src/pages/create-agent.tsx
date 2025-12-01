@@ -1,6 +1,8 @@
+import { useEffect, useState } from "react";
 import { useForm, type SubmitHandler } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import {
   Form,
@@ -17,8 +19,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { Cpu, DollarSign, ShieldCheck, Upload } from "lucide-react";
-import { AVAILABLE_MODELS } from "@/lib/models";
+import { Cpu, DollarSign, ShieldCheck, Upload, ExternalLink, Sparkles } from "lucide-react";
+import { AVAILABLE_MODELS, type AIModel } from "@/lib/models";
+
+interface SelectedHFModel {
+  id: string;
+  name: string;
+  provider: string;
+  priceMultiplier: number;
+  contextLength: number;
+}
 
 const formSchema = z.object({
   name: z.string().min(2).max(50),
@@ -34,18 +44,41 @@ type FormValues = z.infer<typeof formSchema>;
 
 export default function CreateAgent() {
   const { toast } = useToast();
+  const [selectedHFModel, setSelectedHFModel] = useState<SelectedHFModel | null>(null);
+  
+  // Check for selected HF model from models page
+  useEffect(() => {
+    const stored = sessionStorage.getItem("selectedHFModel");
+    if (stored) {
+      try {
+        const model = JSON.parse(stored) as SelectedHFModel;
+        setSelectedHFModel(model);
+        sessionStorage.removeItem("selectedHFModel");
+      } catch {
+        // Ignore parse errors
+      }
+    }
+  }, []);
+  
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       name: "",
       description: "",
-      model: "llama-3-70b",
+      model: "asi1-mini",
       pricePerUse: "0.01",
       endpoint: "https://",
       isCloneable: false,
       cloneFee: "",
     },
   });
+  
+  // Update form when HF model is selected
+  useEffect(() => {
+    if (selectedHFModel) {
+      form.setValue("model", selectedHFModel.id);
+    }
+  }, [selectedHFModel, form]);
 
   const onSubmit: SubmitHandler<FormValues> = (values) => {
     console.log(values);
@@ -118,20 +151,63 @@ export default function CreateAgent() {
                       render={({ field }) => (
                         <FormItem>
                           <FormLabel className="font-mono text-foreground">LLM Model</FormLabel>
-                          <Select onValueChange={field.onChange} defaultValue={field.value}>
-                            <FormControl>
-                              <SelectTrigger className="bg-background/50 border-sidebar-border">
-                                <SelectValue placeholder="Select a model" />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              {AVAILABLE_MODELS.map((model) => (
-                                <SelectItem key={model.id} value={model.id}>
-                                  {model.name} (${model.priceMultiplier}/1M tokens)
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          {selectedHFModel ? (
+                            <div className="space-y-2">
+                              <div className="p-3 rounded-sm bg-cyan-500/10 border border-cyan-500/30">
+                                <div className="flex items-center justify-between">
+                                  <div>
+                                    <p className="font-mono font-bold text-cyan-400 text-sm">{selectedHFModel.name}</p>
+                                    <p className="text-xs text-muted-foreground font-mono">
+                                      via {selectedHFModel.provider} · ${selectedHFModel.priceMultiplier.toFixed(2)}/1M tokens
+                                    </p>
+                                  </div>
+                                  <Sparkles className="w-4 h-4 text-cyan-400" />
+                                </div>
+                              </div>
+                              <div className="flex gap-2">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setSelectedHFModel(null)}
+                                  className="text-xs text-muted-foreground hover:text-foreground"
+                                >
+                                  Use built-in model
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              <Select onValueChange={field.onChange} value={field.value}>
+                                <FormControl>
+                                  <SelectTrigger className="bg-background/50 border-sidebar-border">
+                                    <SelectValue placeholder="Select a model" />
+                                  </SelectTrigger>
+                                </FormControl>
+                                <SelectContent>
+                                  {AVAILABLE_MODELS.filter((m, i, arr) => 
+                                    // Remove duplicate asi1-mini entries
+                                    arr.findIndex(x => x.id === m.id) === i
+                                  ).map((model) => (
+                                    <SelectItem key={model.id} value={model.id}>
+                                      {model.name} (${model.priceMultiplier}/1M tokens)
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <Link href="/models">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-xs text-cyan-400 hover:text-cyan-300 p-0 h-auto"
+                                >
+                                  <ExternalLink className="w-3 h-3 mr-1" />
+                                  Browse HuggingFace models →
+                                </Button>
+                              </Link>
+                            </div>
+                          )}
                           <FormMessage />
                         </FormItem>
                       )}

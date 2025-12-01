@@ -35,51 +35,51 @@ export function Sidebar() {
       <nav className="flex-1 py-6 space-y-1 overflow-y-auto">
         <div className="px-4 mb-2 text-xs font-mono text-muted-foreground uppercase tracking-widest">Modules</div>
         {moduleLinks.map((link) => (
-          <Link key={link.href} href={link.href}>
-            <a
-              className={cn(
-                "w-full flex items-center gap-3 px-4 py-3 text-sm font-medium transition-all border-l-2 group",
-                location === link.href
-                  ? "border-cyan-400 bg-cyan-950/30 text-cyan-400"
-                  : "border-transparent text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
-              )}
-            >
-              <link.icon className={cn(
-                "w-4 h-4",
-                location === link.href 
-                  ? "text-cyan-400 drop-shadow-[0_0_10px_cyan]" 
-                  : "group-hover:text-cyan-400"
-              )} />
-              <span className="font-mono tracking-wider">{link.label}</span>
-              {location === link.href && (
-                <div className="ml-auto w-1.5 h-1.5 bg-cyan-400 rounded-full animate-ping" />
-              )}
-            </a>
+          <Link
+            key={link.href}
+            href={link.href}
+            className={cn(
+              "w-full flex items-center gap-3 px-4 py-3 text-sm font-medium transition-all border-l-2 group",
+              location === link.href
+                ? "border-cyan-400 bg-cyan-950/30 text-cyan-400"
+                : "border-transparent text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
+            )}
+          >
+            <link.icon className={cn(
+              "w-4 h-4",
+              location === link.href 
+                ? "text-cyan-400 drop-shadow-[0_0_10px_cyan]" 
+                : "group-hover:text-cyan-400"
+            )} />
+            <span className="font-mono tracking-wider">{link.label}</span>
+            {location === link.href && (
+              <div className="ml-auto w-1.5 h-1.5 bg-cyan-400 rounded-full animate-ping" />
+            )}
           </Link>
         ))}
 
         <div className="px-4 mt-6 mb-2 text-xs font-mono text-muted-foreground uppercase tracking-widest">Network</div>
         {networkLinks.map((link) => (
-          <Link key={link.href} href={link.href}>
-            <a
-              className={cn(
-                "w-full flex items-center gap-3 px-4 py-3 text-sm font-medium transition-all border-l-2 group",
-                location === link.href
-                  ? "border-cyan-400 bg-cyan-950/30 text-cyan-400"
-                  : "border-transparent text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
-              )}
-            >
-              <link.icon className={cn(
-                "w-4 h-4",
-                location === link.href 
-                  ? "text-cyan-400 drop-shadow-[0_0_10px_cyan]" 
-                  : "group-hover:text-cyan-400"
-              )} />
-              <span className="font-mono tracking-wider">{link.label}</span>
-              {location === link.href && (
-                <div className="ml-auto w-1.5 h-1.5 bg-cyan-400 rounded-full animate-ping" />
-              )}
-            </a>
+          <Link
+            key={link.href}
+            href={link.href}
+            className={cn(
+              "w-full flex items-center gap-3 px-4 py-3 text-sm font-medium transition-all border-l-2 group",
+              location === link.href
+                ? "border-cyan-400 bg-cyan-950/30 text-cyan-400"
+                : "border-transparent text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
+            )}
+          >
+            <link.icon className={cn(
+              "w-4 h-4",
+              location === link.href 
+                ? "text-cyan-400 drop-shadow-[0_0_10px_cyan]" 
+                : "group-hover:text-cyan-400"
+            )} />
+            <span className="font-mono tracking-wider">{link.label}</span>
+            {location === link.href && (
+              <div className="ml-auto w-1.5 h-1.5 bg-cyan-400 rounded-full animate-ping" />
+            )}
           </Link>
         ))}
       </nav>

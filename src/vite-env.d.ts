@@ -12,6 +12,11 @@ interface ImportMetaEnv {
   
   // API endpoint (optional, defaults to same origin)
   readonly VITE_API_URL?: string;
+  
+  // Backend Services
+  readonly VITE_CONNECTOR_SERVICE_URL?: string;
+  readonly VITE_SANDBOX_SERVICE_URL?: string;
+  readonly VITE_EXPORTER_SERVICE_URL?: string;
 }
 
 interface ImportMeta {

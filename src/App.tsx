@@ -12,6 +12,7 @@ import Home from "@/pages/home";
 import Market from "@/pages/market";
 import CreateAgent from "@/pages/create-agent";
 import Compose from "@/pages/compose";
+import Models from "@/pages/models";
 
 function Router() {
   return (
@@ -21,6 +22,7 @@ function Router() {
         <Route path="/market" component={Market} />
         <Route path="/create-agent" component={CreateAgent} />
         <Route path="/compose" component={Compose} />
+        <Route path="/models" component={Models} />
         <Route component={NotFound} />
       </Switch>
     </Layout>

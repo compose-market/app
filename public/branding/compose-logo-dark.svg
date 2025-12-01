@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" fill="none">
+  <!-- Compose.Market Logo - With Dark Background -->
+  
+  <!-- Dark Background -->
+  <rect width="100" height="100" fill="#020617" rx="8"/>
+  
+  <!-- Abstract construct representing composition -->
+  <path d="M30 30 L30 70 L70 70" stroke="#22d3ee" stroke-width="4" stroke-linecap="round" fill="none"/>
+  <path d="M70 30 L70 50" stroke="#d946ef" stroke-width="4" stroke-linecap="round" fill="none"/>
+  
+  <!-- Connection Nodes -->
+  <circle cx="30" cy="30" r="6" fill="#083344" stroke="#22d3ee" stroke-width="2"/>
+  <circle cx="30" cy="70" r="6" fill="#083344" stroke="#22d3ee" stroke-width="2"/>
+  <circle cx="70" cy="70" r="6" fill="#083344" stroke="#22d3ee" stroke-width="2"/>
+  <circle cx="70" cy="30" r="6" fill="#083344" stroke="#d946ef" stroke-width="2"/>
+  
+  <!-- Digital Grid Elements -->
+  <path d="M30 30 L70 30" stroke="rgba(6, 182, 212, 0.3)" stroke-width="1" stroke-dasharray="4 4" fill="none"/>
+  <path d="M70 70 L70 50" stroke="rgba(217, 70, 239, 0.5)" stroke-width="1" fill="none"/>
+</svg>
+
+
+
+
