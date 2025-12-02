@@ -6,6 +6,7 @@ import { wrapFetchWithPayment } from "thirdweb/x402";
 import { useActiveWallet } from "thirdweb/react";
 import { thirdwebClient, calculateCostUSDC, PRICE_PER_TOKEN_WEI } from "@/lib/thirdweb";
 import { useSession } from "@/hooks/use-session";
+import { apiUrl, apiFetch } from "@/lib/api";
 import type { AIModel } from "@/lib/models";
 
 interface UseInferenceOptions {
@@ -79,7 +80,7 @@ export function useInference(options: UseInferenceOptions) {
     
     return new DefaultChatTransport({ 
       fetch: sessionAwareFetch,
-      api: "/api/inference",
+      api: apiUrl("/api/inference"),
     });
   }, [fetchWithPayment, session.isActive, session.sessionKeyAddress, session.budgetRemaining]);
 
@@ -195,7 +196,7 @@ export function useModels() {
   const fetchModels = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await fetch("/api/models");
+      const response = await apiFetch("/api/models");
       if (!response.ok) throw new Error("Failed to fetch models");
       const data = await response.json();
       setModels(data.models);

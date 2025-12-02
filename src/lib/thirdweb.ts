@@ -1,14 +1,31 @@
 import { createThirdwebClient, getContract } from "thirdweb";
+import { avalancheFuji, avalanche } from "thirdweb/chains";
 import type { SmartWalletOptions } from "thirdweb/wallets";
-import { 
-  avalancheFuji, 
-  avalanche, 
-  USDC_ADDRESSES,
-  PRICE_PER_TOKEN_WEI,
-  MAX_TOKENS_PER_CALL,
-  SESSION_BUDGET_PRESETS,
-  calculateCostUSDC,
-} from "@shared/thirdweb";
+
+// USDC addresses per chain (supports ERC-3009 for x402)
+export const USDC_ADDRESSES: Record<number, `0x${string}`> = {
+  [avalancheFuji.id]: "0x5425890298aed601595a70AB815c96711a31Bc65", // Fuji USDC
+  [avalanche.id]: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E", // Avalanche USDC
+};
+
+// Pricing configuration for AI inference
+export const PRICE_PER_TOKEN_WEI = 1; // 0.000001 USDC per inference token
+export const MAX_TOKENS_PER_CALL = 100000; // 100k tokens max per call
+
+// Session budget presets (in USDC wei - 6 decimals)
+export const SESSION_BUDGET_PRESETS = [
+  { label: "$1", value: 1_000_000 },
+  { label: "$5", value: 5_000_000 },
+  { label: "$10", value: 10_000_000 },
+  { label: "$25", value: 25_000_000 },
+  { label: "$50", value: 50_000_000 },
+];
+
+// Calculate cost in human-readable format
+export function calculateCostUSDC(tokens: number): string {
+  const cost = (PRICE_PER_TOKEN_WEI * tokens) / 10 ** 6;
+  return cost.toFixed(6);
+}
 
 // Validate clientId at startup
 const clientId = import.meta.env.VITE_THIRDWEB_CLIENT_ID;
@@ -18,7 +35,7 @@ if (!clientId) {
 ╔══════════════════════════════════════════════════════════════════════╗
 ║  THIRDWEB CLIENT ID MISSING                                          ║
 ╠══════════════════════════════════════════════════════════════════════╣
-║  Create a .env file in the project root with:                        ║
+║  Create a .env file with:                                            ║
 ║                                                                      ║
 ║  VITE_THIRDWEB_CLIENT_ID=your_client_id_here                         ║
 ║  VITE_TREASURY_WALLET=0xYourWalletAddress                            ║
@@ -29,12 +46,12 @@ if (!clientId) {
 `);
 }
 
-// Client-side thirdweb client (uses client ID - safe to expose)
+// Client-side thirdweb client
 export const thirdwebClient = createThirdwebClient({
-  clientId: clientId || "placeholder", // Will fail gracefully with helpful error above
+  clientId: clientId || "placeholder",
 });
 
-// Payment configuration - use Fuji for testnet, Avalanche for mainnet
+// Payment chain - Fuji for testnet, Avalanche for mainnet
 export const paymentChain = import.meta.env.VITE_USE_MAINNET === "true" 
   ? avalanche 
   : avalancheFuji;
@@ -58,17 +75,8 @@ export function getPaymentTokenContract() {
 // Account abstraction config for gas sponsorship (ERC-4337)
 export const accountAbstraction: SmartWalletOptions = {
   chain: paymentChain,
-  sponsorGas: true, // Thirdweb sponsors gas fees
+  sponsorGas: true,
 };
 
 // Treasury wallet that receives payments
 export const TREASURY_WALLET = import.meta.env.VITE_TREASURY_WALLET as `0x${string}`;
-
-// Re-export shared constants for convenience
-export { 
-  PRICE_PER_TOKEN_WEI, 
-  MAX_TOKENS_PER_CALL, 
-  SESSION_BUDGET_PRESETS, 
-  calculateCostUSDC 
-};
-

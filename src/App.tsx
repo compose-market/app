@@ -13,6 +13,7 @@ import Market from "@/pages/market";
 import CreateAgent from "@/pages/create-agent";
 import Compose from "@/pages/compose";
 import Models from "@/pages/models";
+import Agents from "@/pages/agents";
 
 function Router() {
   return (
@@ -23,6 +24,7 @@ function Router() {
         <Route path="/create-agent" component={CreateAgent} />
         <Route path="/compose" component={Compose} />
         <Route path="/models" component={Models} />
+        <Route path="/agents" component={Agents} />
         <Route component={NotFound} />
       </Switch>
     </Layout>

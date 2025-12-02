@@ -186,7 +186,7 @@ export default function ModelsPage() {
       {data && !isLoading && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {data.models.map((model) => (
-            <ModelCard key={`${model.id}-${model.provider}`} model={model} onSelect={handleSelectModel} />
+            <ModelCard key={model.id} model={model} onSelect={handleSelectModel} />
           ))}
         </div>
       )}
