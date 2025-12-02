@@ -10,6 +10,9 @@ import {
   type Agent,
 } from "@/lib/agents";
 
+// Re-export types for convenience
+export type { Agent, AgentSearchResponse, SearchAgentsOptions };
+
 /**
  * Hook to search and fetch agents across registries
  */

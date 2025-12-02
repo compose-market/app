@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useForm, type SubmitHandler } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -18,9 +18,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
-import { Cpu, DollarSign, ShieldCheck, Upload, ExternalLink, Sparkles } from "lucide-react";
+import { Cpu, DollarSign, ShieldCheck, Upload, ExternalLink, Sparkles, Plug, Search, X, Star, ChevronRight, Loader2 } from "lucide-react";
 import { AVAILABLE_MODELS, type AIModel } from "@/lib/models";
+import { useRegistryServers, useRegistrySearch, type RegistryServer, type ServerOrigin } from "@/hooks/use-registry";
 
 interface SelectedHFModel {
   id: string;
@@ -28,6 +31,13 @@ interface SelectedHFModel {
   provider: string;
   priceMultiplier: number;
   contextLength: number;
+}
+
+interface SelectedPlugin {
+  id: string;
+  name: string;
+  description: string;
+  origin: ServerOrigin;
 }
 
 const formSchema = z.object({
@@ -45,6 +55,9 @@ type FormValues = z.infer<typeof formSchema>;
 export default function CreateAgent() {
   const { toast } = useToast();
   const [selectedHFModel, setSelectedHFModel] = useState<SelectedHFModel | null>(null);
+  const [selectedPlugins, setSelectedPlugins] = useState<SelectedPlugin[]>([]);
+  const [pluginSearch, setPluginSearch] = useState("");
+  const [showPluginPicker, setShowPluginPicker] = useState(false);
   
   // Check for selected HF model from models page
   useEffect(() => {
@@ -59,6 +72,47 @@ export default function CreateAgent() {
       }
     }
   }, []);
+  
+  // Fetch plugins/MCPs
+  const { data: searchData, isLoading: isSearching } = useRegistrySearch(
+    pluginSearch,
+    20
+  );
+  
+  const { data: defaultPlugins, isLoading: isLoadingDefault } = useRegistryServers({
+    origin: "goat,eliza",
+    limit: 20,
+  });
+  
+  const availablePlugins = pluginSearch.trim()
+    ? searchData?.servers.filter(s => s.origin === "goat" || s.origin === "eliza") || []
+    : defaultPlugins?.servers || [];
+  
+  const isLoadingPlugins = pluginSearch.trim() ? isSearching : isLoadingDefault;
+  
+  const addPlugin = (server: RegistryServer) => {
+    if (selectedPlugins.some(p => p.id === server.registryId)) return;
+    setSelectedPlugins(prev => [...prev, {
+      id: server.registryId,
+      name: server.name,
+      description: server.description,
+      origin: server.origin,
+    }]);
+    setPluginSearch("");
+    setShowPluginPicker(false);
+  };
+  
+  const removePlugin = (id: string) => {
+    setSelectedPlugins(prev => prev.filter(p => p.id !== id));
+  };
+  
+  const getOriginColor = (origin: ServerOrigin) => {
+    switch (origin) {
+      case "goat": return "border-green-500/50 text-green-400 bg-green-500/10";
+      case "eliza": return "border-fuchsia-500/50 text-fuchsia-400 bg-fuchsia-500/10";
+      default: return "border-cyan-500/50 text-cyan-400 bg-cyan-500/10";
+    }
+  };
   
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -226,6 +280,136 @@ export default function CreateAgent() {
                       )}
                     />
                   </div>
+                </CardContent>
+              </Card>
+
+              {/* Plugin/Capability Picker */}
+              <Card className="glass-panel border-green-500/20">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-lg font-bold font-display text-green-400">
+                    <Plug className="w-5 h-5" />
+                    PLUGINS & CAPABILITIES
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {/* Selected Plugins */}
+                  {selectedPlugins.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {selectedPlugins.map(plugin => (
+                        <Badge
+                          key={plugin.id}
+                          variant="outline"
+                          className={`${getOriginColor(plugin.origin)} pl-2 pr-1 py-1 text-xs font-mono`}
+                        >
+                          {plugin.name}
+                          <button
+                            type="button"
+                            onClick={() => removePlugin(plugin.id)}
+                            className="ml-1 p-0.5 rounded hover:bg-white/10"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                  
+                  {/* Plugin Search */}
+                  <div className="relative">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Search GOAT, ElizaOS plugins..."
+                        value={pluginSearch}
+                        onChange={(e) => {
+                          setPluginSearch(e.target.value);
+                          setShowPluginPicker(true);
+                        }}
+                        onFocus={() => setShowPluginPicker(true)}
+                        className="pl-10 bg-background/50 font-mono border-sidebar-border focus:border-green-500"
+                      />
+                    </div>
+                    
+                    {/* Dropdown Results */}
+                    {showPluginPicker && (
+                      <div className="absolute z-50 w-full mt-1 bg-sidebar border border-sidebar-border rounded-sm shadow-lg">
+                        <div className="flex items-center justify-between px-3 py-2 border-b border-sidebar-border">
+                          <span className="text-[10px] font-mono text-muted-foreground uppercase">
+                            {pluginSearch ? "Search Results" : "Popular Plugins"}
+                          </span>
+                          <Link href="/registry">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="text-[10px] text-green-400 hover:text-green-300 h-auto py-0.5 px-1"
+                            >
+                              See all <ChevronRight className="w-3 h-3 ml-0.5" />
+                            </Button>
+                          </Link>
+                        </div>
+                        <ScrollArea className="h-48">
+                          {isLoadingPlugins ? (
+                            <div className="flex items-center justify-center py-8">
+                              <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+                            </div>
+                          ) : availablePlugins.length === 0 ? (
+                            <div className="py-8 text-center text-xs text-muted-foreground">
+                              No plugins found
+                            </div>
+                          ) : (
+                            <div className="p-1">
+                              {availablePlugins.map(server => {
+                                const isSelected = selectedPlugins.some(p => p.id === server.registryId);
+                                return (
+                                  <button
+                                    key={server.registryId}
+                                    type="button"
+                                    onClick={() => addPlugin(server)}
+                                    disabled={isSelected}
+                                    className={`w-full text-left p-2 rounded-sm text-xs transition-all ${
+                                      isSelected
+                                        ? "opacity-50 cursor-not-allowed"
+                                        : "hover:bg-green-500/10"
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      <Badge
+                                        variant="outline"
+                                        className={`${getOriginColor(server.origin)} text-[9px] px-1 py-0`}
+                                      >
+                                        {server.origin === "goat" ? "GOAT" : "Eliza"}
+                                      </Badge>
+                                      <span className="font-mono text-foreground truncate flex-1">
+                                        {server.name}
+                                      </span>
+                                      {isSelected && <span className="text-green-400 text-[10px]">Added</span>}
+                                    </div>
+                                    <p className="text-[10px] text-muted-foreground line-clamp-1 mt-0.5 ml-12">
+                                      {server.description}
+                                    </p>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </ScrollArea>
+                        <div className="px-3 py-2 border-t border-sidebar-border">
+                          <button
+                            type="button"
+                            onClick={() => setShowPluginPicker(false)}
+                            className="text-[10px] text-muted-foreground hover:text-foreground"
+                          >
+                            Close
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  
+                  <p className="text-[10px] text-muted-foreground">
+                    Add DeFi tools (GOAT) or AI capabilities (ElizaOS) to your agent.
+                  </p>
                 </CardContent>
               </Card>
 

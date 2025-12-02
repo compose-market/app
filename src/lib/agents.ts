@@ -1,6 +1,11 @@
 /**
  * Agent Discovery System
  * Generic types and functions for discovering agents across multiple registries
+ * 
+ * Registries:
+ * - Agentverse: Fetch.ai autonomous agent marketplace
+ * - GOAT: DeFi tool plugins (60+ plugins)
+ * - ElizaOS: Agent framework plugins (200+ plugins)
  */
 
 import { apiUrl } from "./api";
@@ -11,7 +16,6 @@ import { apiUrl } from "./api";
 
 /**
  * Agent registries/ecosystems that can be queried
- * Similar to model providers in backend/lambda/lib/models.ts
  */
 export const AGENT_REGISTRIES = {
   agentverse: {
@@ -19,6 +23,23 @@ export const AGENT_REGISTRIES = {
     name: "Agentverse",
     description: "Fetch.ai autonomous agent marketplace",
     url: "https://agentverse.ai",
+    color: "purple",
+    enabled: true,
+  },
+  goat: {
+    id: "goat",
+    name: "GOAT SDK",
+    description: "DeFi & Web3 tool plugins (60+ plugins)",
+    url: "https://ohmygoat.dev",
+    color: "green",
+    enabled: true,
+  },
+  eliza: {
+    id: "eliza",
+    name: "ElizaOS",
+    description: "Agent framework plugins (200+ plugins)",
+    url: "https://elizaos.ai",
+    color: "fuchsia",
     enabled: true,
   },
   manowar: {
@@ -26,6 +47,7 @@ export const AGENT_REGISTRIES = {
     name: "ManoWar",
     description: "Compose.Market native agents",
     url: null,
+    color: "cyan",
     enabled: false, // Coming soon
   },
 } as const;
@@ -153,9 +175,79 @@ interface AgentverseSearchResponse {
 // =============================================================================
 
 /**
+ * Tags to filter out (not useful for users)
+ */
+const FILTERED_TAGS = new Set([
+  "fetch-ai",
+  "fetchai",
+  "hosted",
+  "local",
+  "system",
+  "internal",
+]);
+
+/**
+ * Normalize tags for better display
+ */
+function normalizeTags(tags: string[]): string[] {
+  return tags
+    .filter(t => !FILTERED_TAGS.has(t.toLowerCase()))
+    .map(t => t.toLowerCase().replace(/[_-]/g, " "))
+    .filter((t, i, arr) => arr.indexOf(t) === i) // dedupe
+    .slice(0, 5); // limit to 5 tags
+}
+
+/**
+ * Extract capability tags from description and protocols
+ */
+function extractCapabilityTags(description: string, protocols: AgentProtocol[]): string[] {
+  const tags = new Set<string>();
+  const descLower = description.toLowerCase();
+  
+  // Capability keywords
+  const capabilities: Record<string, string[]> = {
+    "defi": ["swap", "trade", "liquidity", "yield", "lending", "borrow", "stake"],
+    "trading": ["trade", "exchange", "buy", "sell", "order", "market"],
+    "nft": ["nft", "mint", "collection", "artwork", "token"],
+    "social": ["twitter", "discord", "telegram", "post", "message", "chat"],
+    "ai": ["gpt", "llm", "model", "inference", "generate", "analyze"],
+    "data": ["data", "api", "fetch", "query", "analytics", "price"],
+    "automation": ["automate", "schedule", "trigger", "workflow", "bot"],
+    "payments": ["pay", "transfer", "send", "receive", "wallet"],
+  };
+  
+  for (const [tag, keywords] of Object.entries(capabilities)) {
+    if (keywords.some(kw => descLower.includes(kw))) {
+      tags.add(tag);
+    }
+  }
+  
+  // Check protocols
+  protocols.forEach(p => {
+    const pName = p.name.toLowerCase();
+    if (pName.includes("swap") || pName.includes("trade")) tags.add("trading");
+    if (pName.includes("nft")) tags.add("nft");
+    if (pName.includes("chat") || pName.includes("message")) tags.add("social");
+  });
+  
+  return Array.from(tags);
+}
+
+/**
  * Convert Agentverse agent to unified Agent type
  */
 function agentverseToAgent(av: AgentverseAgent): Agent {
+  const protocols = av.protocols?.map(p => ({
+    name: p.name,
+    version: p.version,
+    digest: p.digest,
+  })) || [];
+  
+  // Get normalized tags + capability tags
+  const baseTags = normalizeTags(av.system_wide_tags || []);
+  const capabilityTags = extractCapabilityTags(av.description || av.readme || "", protocols);
+  const allTags = Array.from(new Set([...baseTags, ...capabilityTags]));
+  
   return {
     id: av.address,
     address: av.address,
@@ -163,11 +255,7 @@ function agentverseToAgent(av: AgentverseAgent): Agent {
     description: av.description || getReadmeExcerpt(av.readme),
     registry: "agentverse",
     readme: av.readme,
-    protocols: av.protocols?.map(p => ({
-      name: p.name,
-      version: p.version,
-      digest: p.digest,
-    })) || [],
+    protocols,
     avatarUrl: av.avatar_href,
     totalInteractions: av.total_interactions,
     recentInteractions: av.recent_interactions,
@@ -176,13 +264,81 @@ function agentverseToAgent(av: AgentverseAgent): Agent {
     type: av.type,
     featured: av.featured,
     verified: av.system_wide_tags?.includes("verified") || false,
-    category: av.category,
-    tags: av.system_wide_tags || [],
+    category: av.category || deriveCategory(allTags),
+    tags: allTags,
     owner: av.owner,
     createdAt: av.created_at,
     updatedAt: av.last_updated,
     externalUrl: `https://agentverse.ai/agents/details/${av.address}/profile`,
   };
+}
+
+/**
+ * Registry server record (from connector registry)
+ */
+interface RegistryServer {
+  registryId: string;
+  origin: string;
+  name: string;
+  namespace: string;
+  slug: string;
+  description: string;
+  category?: string;
+  tags: string[];
+  toolCount: number;
+  tools?: Array<{ name: string; description?: string }>;
+}
+
+/**
+ * Convert registry server to Agent type
+ */
+function registryServerToAgent(server: RegistryServer, registry: AgentRegistryId): Agent {
+  const protocols = server.tools?.map(t => ({
+    name: t.name,
+    version: "1.0.0",
+  })) || [];
+  
+  const capabilityTags = extractCapabilityTags(server.description, protocols);
+  const allTags = Array.from(new Set([...server.tags, ...capabilityTags])).slice(0, 8);
+  
+  return {
+    id: server.registryId,
+    address: server.registryId,
+    name: server.name,
+    description: server.description,
+    registry,
+    readme: "",
+    protocols,
+    avatarUrl: null,
+    totalInteractions: 0,
+    recentInteractions: 0,
+    rating: 4.5, // Default rating for plugins
+    status: "active",
+    type: "hosted",
+    featured: false,
+    verified: true, // GOAT/ElizaOS plugins are verified
+    category: server.category || deriveCategory(allTags),
+    tags: allTags,
+    owner: server.namespace,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Derive category from tags
+ */
+function deriveCategory(tags: string[]): string {
+  const tagSet = new Set(tags.map(t => t.toLowerCase()));
+  
+  if (tagSet.has("defi") || tagSet.has("trading") || tagSet.has("swap")) return "DeFi";
+  if (tagSet.has("nft")) return "NFT";
+  if (tagSet.has("social") || tagSet.has("discord") || tagSet.has("twitter")) return "Social";
+  if (tagSet.has("ai") || tagSet.has("llm")) return "AI";
+  if (tagSet.has("data") || tagSet.has("analytics")) return "Data";
+  if (tagSet.has("automation")) return "Automation";
+  
+  return "Utility";
 }
 
 // =============================================================================
@@ -224,6 +380,150 @@ async function searchAgentverse(
 }
 
 /**
+ * Get connector registry base URL
+ */
+function getConnectorBaseUrl(): string {
+  const connectorUrl = import.meta.env.VITE_CONNECTOR_URL;
+  if (connectorUrl) {
+    return connectorUrl.replace(/\/$/, "");
+  }
+  
+  // Derive from API URL (connector is on a different subdomain)
+  const apiUrl = import.meta.env.VITE_API_URL;
+  if (apiUrl) {
+    return apiUrl
+      .replace(/\/api$/, "")
+      .replace("api.", "connector.");
+  }
+  
+  return "http://localhost:4001";
+}
+
+/**
+ * Search GOAT plugins from connector registry
+ */
+async function searchGoat(
+  options: SearchAgentsOptions
+): Promise<{ agents: Agent[]; total: number; tags: string[]; categories: string[] }> {
+  try {
+    const params = new URLSearchParams({
+      origin: "goat",
+      limit: String(options.limit || 50),
+      offset: String(options.offset || 0),
+    });
+    
+    const response = await fetch(`${getConnectorBaseUrl()}/registry/servers?${params}`);
+    
+    if (!response.ok) {
+      console.warn("Failed to fetch GOAT plugins:", response.status);
+      return { agents: [], total: 0, tags: [], categories: [] };
+    }
+    
+    const data = await response.json();
+    const servers: RegistryServer[] = data.servers || [];
+    
+    // Filter by search if provided
+    let filtered = servers;
+    if (options.search) {
+      const q = options.search.toLowerCase();
+      filtered = servers.filter(s => 
+        s.name.toLowerCase().includes(q) ||
+        s.description.toLowerCase().includes(q) ||
+        s.tags.some(t => t.toLowerCase().includes(q))
+      );
+    }
+    
+    // Filter by tags
+    if (options.tags?.length) {
+      filtered = filtered.filter(s =>
+        options.tags!.some(t => s.tags.includes(t.toLowerCase()))
+      );
+    }
+    
+    const agents = filtered.map(s => registryServerToAgent(s, "goat"));
+    const allTags = new Set<string>();
+    const allCategories = new Set<string>();
+    
+    agents.forEach(a => {
+      a.tags.forEach(t => allTags.add(t));
+      if (a.category) allCategories.add(a.category);
+    });
+    
+    return {
+      agents,
+      total: data.total || agents.length,
+      tags: Array.from(allTags).sort(),
+      categories: Array.from(allCategories).sort(),
+    };
+  } catch (err) {
+    console.warn("Error fetching GOAT plugins:", err);
+    return { agents: [], total: 0, tags: [], categories: [] };
+  }
+}
+
+/**
+ * Search ElizaOS plugins from connector registry
+ */
+async function searchEliza(
+  options: SearchAgentsOptions
+): Promise<{ agents: Agent[]; total: number; tags: string[]; categories: string[] }> {
+  try {
+    const params = new URLSearchParams({
+      origin: "eliza",
+      limit: String(options.limit || 50),
+      offset: String(options.offset || 0),
+    });
+    
+    const response = await fetch(`${getConnectorBaseUrl()}/registry/servers?${params}`);
+    
+    if (!response.ok) {
+      console.warn("Failed to fetch ElizaOS plugins:", response.status);
+      return { agents: [], total: 0, tags: [], categories: [] };
+    }
+    
+    const data = await response.json();
+    const servers: RegistryServer[] = data.servers || [];
+    
+    // Filter by search if provided
+    let filtered = servers;
+    if (options.search) {
+      const q = options.search.toLowerCase();
+      filtered = servers.filter(s => 
+        s.name.toLowerCase().includes(q) ||
+        s.description.toLowerCase().includes(q) ||
+        s.tags.some(t => t.toLowerCase().includes(q))
+      );
+    }
+    
+    // Filter by tags
+    if (options.tags?.length) {
+      filtered = filtered.filter(s =>
+        options.tags!.some(t => s.tags.includes(t.toLowerCase()))
+      );
+    }
+    
+    const agents = filtered.map(s => registryServerToAgent(s, "eliza"));
+    const allTags = new Set<string>();
+    const allCategories = new Set<string>();
+    
+    agents.forEach(a => {
+      a.tags.forEach(t => allTags.add(t));
+      if (a.category) allCategories.add(a.category);
+    });
+    
+    return {
+      agents,
+      total: data.total || agents.length,
+      tags: Array.from(allTags).sort(),
+      categories: Array.from(allCategories).sort(),
+    };
+  } catch (err) {
+    console.warn("Error fetching ElizaOS plugins:", err);
+    return { agents: [], total: 0, tags: [], categories: [] };
+  }
+}
+
+/**
  * Search ManoWar registry (placeholder for future)
  */
 async function searchManowar(
@@ -249,6 +549,10 @@ export async function searchAgents(
       switch (registry) {
         case "agentverse":
           return searchAgentverse(options);
+        case "goat":
+          return searchGoat(options);
+        case "eliza":
+          return searchEliza(options);
         case "manowar":
           return searchManowar(options);
         default:
@@ -287,6 +591,14 @@ export async function searchAgents(
         ? new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
         : new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
+  } else if (options.sort === "relevancy" && options.search) {
+    // Score-based relevancy sort
+    const q = options.search.toLowerCase();
+    allAgents.sort((a, b) => {
+      const scoreA = getRelevancyScore(a, q);
+      const scoreB = getRelevancyScore(b, q);
+      return options.direction === "asc" ? scoreA - scoreB : scoreB - scoreA;
+    });
   }
   
   return {
@@ -298,6 +610,37 @@ export async function searchAgents(
     categories: Array.from(allCategories).sort(),
     registries,
   };
+}
+
+/**
+ * Calculate relevancy score for search ranking
+ */
+function getRelevancyScore(agent: Agent, query: string): number {
+  let score = 0;
+  const nameLower = agent.name.toLowerCase();
+  const descLower = agent.description.toLowerCase();
+  
+  // Exact name match
+  if (nameLower === query) score += 100;
+  // Name contains query
+  else if (nameLower.includes(query)) score += 50;
+  
+  // Description contains query
+  if (descLower.includes(query)) score += 20;
+  
+  // Tag match
+  if (agent.tags.some(t => t.toLowerCase().includes(query))) score += 15;
+  
+  // Category match
+  if (agent.category?.toLowerCase().includes(query)) score += 10;
+  
+  // Verified boost
+  if (agent.verified) score += 5;
+  
+  // Interaction boost
+  score += Math.min(agent.totalInteractions / 1000, 10);
+  
+  return score;
 }
 
 /**
@@ -360,16 +703,22 @@ export function getRatingColor(rating: number): string {
 }
 
 /**
- * Common tags for filtering
+ * Common tags for filtering (capability-based)
  */
 export const COMMON_TAGS = [
-  "verified",
-  "fetch-ai",
-  "finance",
+  "defi",
+  "trading",
+  "nft",
+  "social",
   "ai",
-  "automation",
   "data",
-  "web3",
+  "automation",
+  "payments",
+  "discord",
+  "twitter",
+  "telegram",
+  "ethereum",
+  "solana",
 ] as const;
 
 /**

@@ -14,6 +14,7 @@ import CreateAgent from "@/pages/create-agent";
 import Compose from "@/pages/compose";
 import Models from "@/pages/models";
 import Agents from "@/pages/agents";
+import Registry from "@/pages/registry";
 
 function Router() {
   return (
@@ -25,6 +26,7 @@ function Router() {
         <Route path="/compose" component={Compose} />
         <Route path="/models" component={Models} />
         <Route path="/agents" component={Agents} />
+        <Route path="/registry" component={Registry} />
         <Route component={NotFound} />
       </Switch>
     </Layout>

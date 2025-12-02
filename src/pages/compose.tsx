@@ -58,6 +58,11 @@ import {
   useWorkflowBuilder 
 } from "@/hooks/use-services";
 import { useAgents } from "@/hooks/use-agents";
+import { 
+  useRegistryServers,
+  useRegistrySearch,
+  type RegistryServer,
+} from "@/hooks/use-registry";
 import type { ConnectorInfo, ConnectorTool, WorkflowStep } from "@/lib/services";
 import { type Agent, type AgentRegistryId, AGENT_REGISTRIES, formatInteractions, getReadmeExcerpt, COMMON_TAGS } from "@/lib/agents";
 
@@ -127,7 +132,7 @@ const nodeTypes = {
 };
 
 // =============================================================================
-// Connector Picker
+// Connector Picker (Unified search across all sources)
 // =============================================================================
 
 function ConnectorPicker({ 
@@ -135,72 +140,134 @@ function ConnectorPicker({
 }: { 
   onSelect: (connectorId: string, tool: ConnectorTool) => void 
 }) {
-  const { data: connectors, isLoading: loadingConnectors } = useConnectors();
-  const [selectedConnector, setSelectedConnector] = useState<string | null>(null);
-  const { data: tools, isLoading: loadingTools } = useConnectorTools(selectedConnector);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedServer, setSelectedServer] = useState<RegistryServer | null>(null);
+  
+  // Fetch all servers with search
+  const { data: searchData, isLoading: isSearching } = useRegistrySearch(
+    searchQuery, 
+    30
+  );
+  
+  // Fetch all servers when no search
+  const { data: allData, isLoading: isLoadingAll } = useRegistryServers({
+    limit: 50,
+  });
+  
+  const servers = searchQuery.trim() 
+    ? searchData?.servers || [] 
+    : allData?.servers || [];
+  const isLoading = searchQuery.trim() ? isSearching : isLoadingAll;
 
-  const availableConnectors = connectors?.filter(c => c.available) || [];
+  const handleToolSelect = (tool: { name: string; description?: string }) => {
+    if (!selectedServer) return;
+    
+    const connectorTool: ConnectorTool = {
+      name: tool.name,
+      description: tool.description || "",
+      inputSchema: { type: "object", properties: {} },
+    };
+    
+    onSelect(selectedServer.registryId, connectorTool);
+    setSelectedServer(null);
+  };
+
+  const getOriginBadge = (origin: string) => {
+    switch (origin) {
+      case "internal": return <Badge variant="default" className="text-[8px] h-4 px-1">Compose</Badge>;
+      case "glama": return <Badge variant="secondary" className="text-[8px] h-4 px-1">MCP</Badge>;
+      case "goat": return <Badge variant="outline" className="text-[8px] h-4 px-1 border-green-500/50 text-green-400">GOAT</Badge>;
+      case "eliza": return <Badge variant="outline" className="text-[8px] h-4 px-1 border-fuchsia-500/50 text-fuchsia-400">Eliza</Badge>;
+      default: return null;
+    }
+  };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
+      {/* Search Input */}
       <div>
-        <Label className="text-xs font-mono text-muted-foreground mb-2 block">SELECT CONNECTOR</Label>
-        {loadingConnectors ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="w-4 h-4 animate-spin" />
-            Loading connectors...
+        <Label className="text-[10px] font-mono text-muted-foreground mb-1.5 block">
+          SEARCH TOOLS
+        </Label>
+        <Input
+          placeholder="Search connectors, plugins, MCPs..."
+          value={searchQuery}
+          onChange={(e) => {
+            setSearchQuery(e.target.value);
+            setSelectedServer(null);
+          }}
+          className="h-8 text-xs bg-background/50 border-sidebar-border"
+        />
+      </div>
+
+      {/* Server/Plugin List */}
+      <div>
+        <Label className="text-[10px] font-mono text-muted-foreground mb-1.5 block">
+          SELECT CONNECTOR
+        </Label>
+        {isLoading ? (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground py-4">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            Loading...
           </div>
-        ) : availableConnectors.length === 0 ? (
-          <div className="text-sm text-muted-foreground">No connectors available</div>
+        ) : servers.length === 0 ? (
+          <div className="text-xs text-muted-foreground py-4 text-center">
+            {searchQuery ? "No matches found" : "No tools available"}
+          </div>
         ) : (
-          <div className="grid grid-cols-2 gap-2">
-            {availableConnectors.map((connector) => (
-              <Button
-                key={connector.id}
-                variant={selectedConnector === connector.id ? "default" : "outline"}
-                className={`justify-start h-auto py-2 ${selectedConnector === connector.id ? "bg-cyan-500 text-black" : ""}`}
-                onClick={() => setSelectedConnector(connector.id)}
-              >
-                <Plug className="w-4 h-4 mr-2" />
-                <span className="truncate">{connector.label}</span>
-              </Button>
-            ))}
-          </div>
+          <ScrollArea className="h-40">
+            <div className="space-y-1 pr-2">
+              {servers.map((server) => (
+                <button
+                  key={server.registryId}
+                  onClick={() => setSelectedServer(server)}
+                  className={`w-full text-left p-2 rounded-sm border transition-all ${
+                    selectedServer?.registryId === server.registryId
+                      ? "border-cyan-500/50 bg-cyan-500/10"
+                      : "border-sidebar-border hover:border-cyan-500/30 hover:bg-background/50"
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Plug className="w-3 h-3 text-cyan-400" />
+                    <span className="font-mono text-xs truncate flex-1">{server.name}</span>
+                    {getOriginBadge(server.origin)}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground truncate mt-0.5 ml-5">
+                    {server.description}
+                  </p>
+                </button>
+              ))}
+            </div>
+          </ScrollArea>
         )}
       </div>
 
-      {selectedConnector && (
+      {/* Tools from selected server */}
+      {selectedServer && selectedServer.tools && selectedServer.tools.length > 0 && (
         <div>
-          <Label className="text-xs font-mono text-muted-foreground mb-2 block">SELECT TOOL</Label>
-          {loadingTools ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Loading tools...
+          <Label className="text-[10px] font-mono text-muted-foreground mb-1.5 block">
+            SELECT TOOL ({selectedServer.tools.length})
+          </Label>
+          <ScrollArea className="h-32">
+            <div className="space-y-1 pr-2">
+              {selectedServer.tools.map((tool) => (
+                <Button
+                  key={tool.name}
+                  variant="ghost"
+                  className="w-full justify-start h-auto py-2 text-left hover:bg-cyan-500/10"
+                  onClick={() => handleToolSelect(tool)}
+                >
+                  <ChevronRight className="w-3 h-3 mr-2 text-cyan-400" />
+                  <div className="flex-1 overflow-hidden">
+                    <div className="font-mono text-xs truncate">{tool.name}</div>
+                    {tool.description && (
+                      <div className="text-[10px] text-muted-foreground truncate">{tool.description}</div>
+                    )}
+                  </div>
+                </Button>
+              ))}
             </div>
-          ) : !tools?.length ? (
-            <div className="text-sm text-muted-foreground">No tools available</div>
-          ) : (
-            <ScrollArea className="h-48">
-              <div className="space-y-1">
-                {tools.map((tool) => (
-                  <Button
-                    key={tool.name}
-                    variant="ghost"
-                    className="w-full justify-start h-auto py-2 text-left"
-                    onClick={() => onSelect(selectedConnector, tool)}
-                  >
-                    <ChevronRight className="w-4 h-4 mr-2 text-muted-foreground" />
-                    <div className="flex-1 overflow-hidden">
-                      <div className="font-mono text-sm truncate">{tool.name}</div>
-                      {tool.description && (
-                        <div className="text-[10px] text-muted-foreground truncate">{tool.description}</div>
-                      )}
-                    </div>
-                  </Button>
-                ))}
-              </div>
-            </ScrollArea>
-          )}
+          </ScrollArea>
         </div>
       )}
     </div>
