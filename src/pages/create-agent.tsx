@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useForm, type SubmitHandler } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -21,9 +21,29 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
-import { Cpu, DollarSign, ShieldCheck, Upload, ExternalLink, Sparkles, Plug, Search, X, Star, ChevronRight, Loader2, Zap, Play } from "lucide-react";
+import { Cpu, DollarSign, ShieldCheck, Upload, ExternalLink, Sparkles, Plug, Search, X, ChevronRight, Loader2, Play, AlertCircle, CheckCircle2 } from "lucide-react";
 import { AVAILABLE_MODELS, type AIModel } from "@/lib/models";
 import { useRegistryServers, useRegistrySearch, type RegistryServer, type ServerOrigin } from "@/hooks/use-registry";
+import { 
+  uploadAgentAvatar, 
+  uploadAgentCard, 
+  getIpfsUri, 
+  getIpfsUrl,
+  fileToDataUrl,
+  isPinataConfigured,
+  type AgentCard 
+} from "@/lib/pinata";
+import { 
+  getAgentFactoryContract, 
+  computeDnaHash, 
+  usdcToWei,
+  getContractAddress 
+} from "@/lib/contracts";
+import { CHAIN_IDS, CHAIN_CONFIG } from "@/lib/thirdweb";
+import { useActiveAccount } from "thirdweb/react";
+import { TransactionButton, useSendTransaction } from "thirdweb/react";
+import { prepareContractCall } from "thirdweb";
+import { accountAbstraction } from "@/lib/thirdweb";
 
 interface SelectedHFModel {
   id: string;
@@ -50,17 +70,27 @@ const formSchema = z.object({
   pricePerUse: z.string(),
   endpoint: z.string().url(),
   isCloneable: z.boolean(),
-  cloneFee: z.string().optional(),
+  units: z.string().optional(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
 
 export default function CreateAgent() {
   const { toast } = useToast();
+  const account = useActiveAccount();
+  const { mutateAsync: sendTransaction, isPending: isSending } = useSendTransaction();
+  
   const [selectedHFModel, setSelectedHFModel] = useState<SelectedHFModel | null>(null);
   const [selectedPlugins, setSelectedPlugins] = useState<SelectedPlugin[]>([]);
   const [pluginSearch, setPluginSearch] = useState("");
   const [showPluginPicker, setShowPluginPicker] = useState(false);
+  
+  // Avatar upload state
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [mintStep, setMintStep] = useState<"idle" | "uploading" | "minting" | "done">("idle");
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   // Check for selected HF model from models page
   useEffect(() => {
@@ -126,7 +156,7 @@ export default function CreateAgent() {
       pricePerUse: "0.01",
       endpoint: "https://",
       isCloneable: false,
-      cloneFee: "",
+      units: "",
     },
   });
   
@@ -137,48 +167,170 @@ export default function CreateAgent() {
     }
   }, [selectedHFModel, form]);
 
-  const onSubmit: SubmitHandler<FormValues> = (values) => {
-    // Build the agent card with plugins
-    const agentCard = {
-      schemaVersion: "1.0.0",
-      id: `agent://${values.name.toLowerCase().replace(/\s+/g, "-")}`,
-      name: values.name,
-      description: values.description,
-      model: selectedHFModel ? {
-        id: selectedHFModel.id,
-        name: selectedHFModel.name,
-        provider: selectedHFModel.provider,
-        priceMultiplier: selectedHFModel.priceMultiplier,
-      } : {
-        id: values.model,
-        name: values.model,
-      },
-      endpoint: values.endpoint,
-      plugins: selectedPlugins.map(p => ({
-        registryId: p.id,
-        name: p.name,
-        origin: p.origin,
-        config: {}, // User can configure later
-      })),
-      pricing: {
-        pricePerUse: values.pricePerUse,
-        currency: "USDC",
-      },
-      cloning: {
-        enabled: values.isCloneable,
-        fee: values.cloneFee || "0",
-      },
-      createdAt: new Date().toISOString(),
-    };
+  // Handle avatar file selection
+  const handleAvatarSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
     
-    console.log("Agent Card:", agentCard);
+    // Validate file type
+    if (!file.type.startsWith("image/")) {
+      toast({
+        title: "Invalid file type",
+        description: "Please select an image file",
+        variant: "destructive",
+      });
+      return;
+    }
     
-    // TODO: Deploy to blockchain and IPFS
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast({
+        title: "File too large",
+        description: "Maximum file size is 5MB",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    setAvatarFile(file);
+    const dataUrl = await fileToDataUrl(file);
+    setAvatarPreview(dataUrl);
+  }, [toast]);
+
+  // Prepare transaction data for minting
+  const [preparedTx, setPreparedTx] = useState<{
+    dnaHash: `0x${string}`;
+    units: bigint;
+    price: bigint;
+    cloneable: boolean;
+    agentCardUri: string;
+  } | null>(null);
+
+  // Handle form validation and IPFS upload before minting
+  const prepareForMint = async (values: FormValues): Promise<boolean> => {
+    if (!isPinataConfigured()) {
+      toast({
+        title: "IPFS not configured",
+        description: "Pinata JWT is missing. Check environment variables.",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    try {
+      setMintStep("uploading");
+      
+      // 1. Upload avatar to IPFS (if provided)
+      let avatarUri = "none";
+      if (avatarFile) {
+        const avatarCid = await uploadAgentAvatar(avatarFile, values.name);
+        avatarUri = getIpfsUri(avatarCid);
+      }
+      
+      // 2. Build and upload Agent Card to IPFS
+      const chainId = CHAIN_IDS.avalancheFuji;
+      const modelId = selectedHFModel?.id || values.model;
+      const skills = selectedPlugins.map(p => p.id);
+      
+      const agentCard: AgentCard = {
+        schemaVersion: "1.0.0",
+        name: values.name,
+        description: values.description,
+        skills,
+        avatar: avatarUri,
+        dnaHash: "", // Will be computed on-chain
+        chain: chainId,
+        model: modelId,
+        price: usdcToWei(parseFloat(values.pricePerUse)).toString(),
+        units: values.units ? parseInt(values.units) : 0,
+        cloneable: values.isCloneable,
+        endpoint: values.endpoint,
+        protocols: [{ name: "x402", version: "1.0" }],
+        plugins: selectedPlugins.map(p => ({
+          registryId: p.id,
+          name: p.name,
+          origin: p.origin,
+        })),
+        createdAt: new Date().toISOString(),
+        creator: account?.address || "",
+      };
+      
+      const cardCid = await uploadAgentCard(agentCard);
+      const agentCardUri = getIpfsUri(cardCid);
+      
+      // 3. Compute DNA hash
+      const dnaHash = computeDnaHash(skills, chainId, modelId);
+      const priceWei = usdcToWei(parseFloat(values.pricePerUse));
+      const units = values.units ? BigInt(values.units) : BigInt(0);
+      
+      setPreparedTx({
+        dnaHash,
+        units,
+        price: priceWei,
+        cloneable: values.isCloneable,
+        agentCardUri,
+      });
+      
+      setMintStep("minting");
+      return true;
+    } catch (error) {
+      console.error("Prepare error:", error);
+      setMintStep("idle");
+      toast({
+        title: "Upload Failed",
+        description: error instanceof Error ? error.message : "Failed to upload to IPFS",
+        variant: "destructive",
+      });
+      return false;
+    }
+  };
+
+  const handleMintSuccess = (result: { transactionHash: string }) => {
+    const chainId = CHAIN_IDS.avalancheFuji;
     toast({
       title: "Agent Minted Successfully!",
-      description: `${values.name} with ${selectedPlugins.length} plugins deployed to Avalanche Fuji.`,
+      description: (
+        <div className="space-y-1">
+          <p>{form.getValues("name")} deployed to Avalanche Fuji.</p>
+          <a 
+            href={`${CHAIN_CONFIG[chainId].explorer}/tx/${result.transactionHash}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-cyan-400 hover:underline text-xs flex items-center gap-1"
+          >
+            View transaction <ExternalLink className="w-3 h-3" />
+          </a>
+        </div>
+      ),
+    });
+    
+    // Reset form
+    form.reset();
+    setSelectedPlugins([]);
+    setSelectedHFModel(null);
+    setAvatarFile(null);
+    setAvatarPreview(null);
+    setPreparedTx(null);
+    setMintStep("idle");
+  };
+
+  const handleMintError = (error: Error) => {
+    console.error("Mint error:", error);
+    setMintStep("idle");
+    setPreparedTx(null);
+    toast({
+      title: "Minting Failed",
+      description: error.message || "Unknown error occurred",
+      variant: "destructive",
     });
   };
+
+  // Legacy submit for form validation only
+  const onSubmit: SubmitHandler<FormValues> = async (values) => {
+    await prepareForMint(values);
+  };
+
+  const isProcessing = mintStep !== "idle" && mintStep !== "done";
 
   return (
     <div className="max-w-3xl mx-auto pb-20">
@@ -466,22 +618,40 @@ export default function CreateAgent() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <FormField
-                    control={form.control}
-                    name="pricePerUse"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel className="font-mono text-foreground">Price Per Request (x402)</FormLabel>
-                        <FormControl>
-                          <Input type="number" step="0.001" {...field} className="bg-background/50 font-mono border-sidebar-border focus:border-fuchsia-500" />
-                        </FormControl>
-                        <FormDescription className="text-muted-foreground">
-                          The amount deducted from the user's stream for each interaction.
-                        </FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                  <div className="grid grid-cols-2 gap-4">
+                    <FormField
+                      control={form.control}
+                      name="pricePerUse"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="font-mono text-foreground">Price Per Request (USDC)</FormLabel>
+                          <FormControl>
+                            <Input type="number" step="0.001" {...field} className="bg-background/50 font-mono border-sidebar-border focus:border-fuchsia-500" />
+                          </FormControl>
+                          <FormDescription className="text-muted-foreground text-xs">
+                            Amount deducted via x402 per call
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="units"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="font-mono text-foreground">Supply Cap</FormLabel>
+                          <FormControl>
+                            <Input type="number" placeholder="∞ (leave empty)" {...field} className="bg-background/50 font-mono border-sidebar-border focus:border-fuchsia-500" />
+                          </FormControl>
+                          <FormDescription className="text-muted-foreground text-xs">
+                            Max units (empty = infinite)
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
                   
                   <FormField
                     control={form.control}
@@ -491,7 +661,7 @@ export default function CreateAgent() {
                         <div className="space-y-0.5">
                           <FormLabel className="text-base font-mono text-foreground">Allow Cloning?</FormLabel>
                           <FormDescription className="text-muted-foreground">
-                            Let others fork this agent. You earn a franchise fee.
+                            Let others fork this agent with modified parameters.
                           </FormDescription>
                         </div>
                         <FormControl>
@@ -506,31 +676,143 @@ export default function CreateAgent() {
                 </CardContent>
               </Card>
 
-              <Button type="submit" size="lg" className="w-full bg-cyan-500 text-black font-bold font-mono hover:bg-cyan-400 h-14 text-lg shadow-[0_0_20px_-5px_hsl(var(--primary))] tracking-wider">
-                MINT AGENT ON AVALANCHE
-              </Button>
+              {/* Mint Progress */}
+              {mintStep === "uploading" && (
+                <Card className="glass-panel border-cyan-500/50">
+                  <CardContent className="py-4">
+                    <div className="flex items-center gap-3">
+                      <Loader2 className="w-5 h-5 text-cyan-400 animate-spin" />
+                      <div>
+                        <p className="font-mono text-sm text-foreground">Uploading to IPFS...</p>
+                        <p className="text-xs text-muted-foreground">Storing avatar and agent card metadata</p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Two-step process: First upload, then mint */}
+              {!preparedTx ? (
+                <Button 
+                  type="submit" 
+                  size="lg" 
+                  disabled={!account || mintStep === "uploading"}
+                  className="w-full bg-cyan-500 text-black font-bold font-mono hover:bg-cyan-400 h-14 text-lg shadow-[0_0_20px_-5px_hsl(var(--primary))] tracking-wider disabled:opacity-50"
+                >
+                  {mintStep === "uploading" ? (
+                    <>
+                      <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                      UPLOADING...
+                    </>
+                  ) : !account ? (
+                    "SIGN IN TO MINT"
+                  ) : (
+                    "PREPARE & MINT AGENT"
+                  )}
+                </Button>
+              ) : (
+                <TransactionButton
+                  transaction={() => {
+                    const contract = getAgentFactoryContract();
+                    return prepareContractCall({
+                      contract,
+                      method: "function mintAgent(bytes32 dnaHash, uint256 units, uint256 price, bool cloneable, string agentCardUri) returns (uint256 agentId)",
+                      params: [
+                        preparedTx.dnaHash,
+                        preparedTx.units,
+                        preparedTx.price,
+                        preparedTx.cloneable,
+                        preparedTx.agentCardUri,
+                      ],
+                    });
+                  }}
+                  onTransactionConfirmed={handleMintSuccess}
+                  onError={handleMintError}
+                  className="w-full !bg-gradient-to-r !from-cyan-500 !to-fuchsia-500 !text-white !font-bold !font-mono !h-14 !text-lg !shadow-[0_0_20px_-5px_hsl(var(--primary))] !tracking-wider !rounded-sm"
+                >
+                  MINT AGENT ON AVALANCHE
+                </TransactionButton>
+              )}
             </form>
           </Form>
         </div>
 
         {/* Sidebar Info */}
         <div className="space-y-6">
+          {/* Avatar Upload */}
           <div className="glass-panel p-6 rounded-sm space-y-4 border border-fuchsia-500/20 corner-decoration">
-            <div className="w-full aspect-square rounded-sm bg-background/50 border border-sidebar-border border-dashed flex flex-col items-center justify-center text-muted-foreground cursor-pointer hover:border-cyan-500 hover:text-cyan-400 transition-colors">
-              <Upload className="w-8 h-8 mb-2" />
-              <span className="text-xs font-mono">UPLOAD AVATAR</span>
-            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleAvatarSelect}
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="w-full aspect-square rounded-sm bg-background/50 border border-sidebar-border border-dashed flex flex-col items-center justify-center text-muted-foreground cursor-pointer hover:border-cyan-500 hover:text-cyan-400 transition-colors overflow-hidden"
+            >
+              {avatarPreview ? (
+                <img src={avatarPreview} alt="Avatar preview" className="w-full h-full object-cover" />
+              ) : (
+                <>
+                  <Upload className="w-8 h-8 mb-2" />
+                  <span className="text-xs font-mono">UPLOAD AVATAR</span>
+                </>
+              )}
+            </button>
+            {avatarPreview && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setAvatarFile(null);
+                  setAvatarPreview(null);
+                }}
+                className="w-full text-xs text-muted-foreground"
+              >
+                Remove avatar
+              </Button>
+            )}
             <div className="space-y-2">
               <h3 className="font-bold font-display text-white">Minting Info</h3>
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground font-mono">Gas Estimate</span>
-                <span className="font-mono text-cyan-400">~0.02 AVAX</span>
+                <span className="text-muted-foreground font-mono">Network</span>
+                <span className="font-mono text-cyan-400">Avalanche Fuji</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground font-mono">Contract</span>
                 <span className="font-mono text-cyan-400">ERC8004</span>
               </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground font-mono">Storage</span>
+                <span className="font-mono text-cyan-400">Pinata IPFS</span>
+              </div>
             </div>
+          </div>
+
+          {/* Account Status */}
+          <div className={`p-4 rounded-sm border text-sm ${
+            account 
+              ? "bg-green-500/10 border-green-500/20 text-green-200"
+              : "bg-yellow-500/10 border-yellow-500/20 text-yellow-200"
+          }`}>
+            {account ? (
+              <>
+                <CheckCircle2 className="w-5 h-5 mb-2 text-green-400" />
+                <p>
+                  Signed in: <span className="font-mono">{account.address.slice(0, 6)}...{account.address.slice(-4)}</span>
+                </p>
+                <p className="text-xs text-green-300/70 mt-1">Gas sponsored • No fees</p>
+              </>
+            ) : (
+              <>
+                <AlertCircle className="w-5 h-5 mb-2 text-yellow-400" />
+                <p>Sign in with email, social, or wallet to mint.</p>
+              </>
+            )}
           </div>
 
           <div className="p-4 rounded-sm bg-cyan-500/10 border border-cyan-500/20 text-sm text-cyan-200">

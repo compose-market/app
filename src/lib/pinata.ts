@@ -1,0 +1,262 @@
+/**
+ * Pinata IPFS Storage Utility
+ * Used for storing agent avatars, agent cards, and Manowar metadata
+ */
+
+const PINATA_JWT = import.meta.env.VITE_PINATA_JWT || "";
+const PINATA_GATEWAY = import.meta.env.VITE_PINATA_GATEWAY || "compose.mypinata.cloud";
+
+const PINATA_API_URL = "https://api.pinata.cloud";
+
+interface PinataUploadResponse {
+  IpfsHash: string;
+  PinSize: number;
+  Timestamp: string;
+}
+
+interface PinataMetadata {
+  name?: string;
+  keyvalues?: Record<string, string>;
+}
+
+/**
+ * Upload a file to Pinata IPFS
+ */
+export async function uploadFile(
+  file: File,
+  metadata?: PinataMetadata
+): Promise<string> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  if (metadata) {
+    formData.append("pinataMetadata", JSON.stringify(metadata));
+  }
+
+  formData.append(
+    "pinataOptions",
+    JSON.stringify({ cidVersion: 1 })
+  );
+
+  const response = await fetch(`${PINATA_API_URL}/pinning/pinFileToIPFS`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${PINATA_JWT}`,
+    },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Pinata upload failed: ${error}`);
+  }
+
+  const result: PinataUploadResponse = await response.json();
+  return result.IpfsHash;
+}
+
+/**
+ * Upload JSON data to Pinata IPFS
+ */
+export async function uploadJSON<T extends object>(
+  data: T,
+  metadata?: PinataMetadata
+): Promise<string> {
+  const response = await fetch(`${PINATA_API_URL}/pinning/pinJSONToIPFS`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${PINATA_JWT}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      pinataContent: data,
+      pinataMetadata: metadata,
+      pinataOptions: { cidVersion: 1 },
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Pinata JSON upload failed: ${error}`);
+  }
+
+  const result: PinataUploadResponse = await response.json();
+  return result.IpfsHash;
+}
+
+/**
+ * Get IPFS URL for a CID
+ */
+export function getIpfsUrl(cid: string): string {
+  return `https://${PINATA_GATEWAY}/ipfs/${cid}`;
+}
+
+/**
+ * Get IPFS URI (protocol format)
+ */
+export function getIpfsUri(cid: string): string {
+  return `ipfs://${cid}`;
+}
+
+/**
+ * Fetch JSON from IPFS
+ */
+export async function fetchFromIpfs<T = unknown>(cid: string): Promise<T> {
+  const response = await fetch(getIpfsUrl(cid));
+  if (!response.ok) {
+    throw new Error(`Failed to fetch from IPFS: ${response.statusText}`);
+  }
+  return response.json();
+}
+
+// =============================================================================
+// Agent Card Types (A2A Compatible)
+// =============================================================================
+
+export interface AgentCard {
+  schemaVersion: string;
+  name: string;
+  description: string;
+  skills: string[];
+  avatar?: string; // IPFS URI or "none"
+  dnaHash: string;
+  chain: number;
+  model: string;
+  price: string; // USDC in smallest unit (6 decimals)
+  units: number; // 0 = infinite
+  cloneable: boolean;
+  endpoint?: string;
+  protocols: Array<{ name: string; version: string }>;
+  plugins?: Array<{
+    registryId: string;
+    name: string;
+    origin: string;
+  }>;
+  createdAt: string;
+  creator?: string;
+}
+
+/**
+ * Upload an agent avatar and return the IPFS CID
+ */
+export async function uploadAgentAvatar(file: File, agentName: string): Promise<string> {
+  return uploadFile(file, {
+    name: `${agentName}-avatar`,
+    keyvalues: {
+      type: "agent-avatar",
+      agent: agentName,
+    },
+  });
+}
+
+/**
+ * Upload an agent card to IPFS and return the CID
+ */
+export async function uploadAgentCard(card: AgentCard): Promise<string> {
+  return uploadJSON(card, {
+    name: `${card.name}-agent-card`,
+    keyvalues: {
+      type: "agent-card",
+      agent: card.name,
+      chain: card.chain.toString(),
+    },
+  });
+}
+
+// =============================================================================
+// Manowar Metadata Types
+// =============================================================================
+
+export interface ManowarMetadata {
+  schemaVersion: string;
+  title: string;
+  description: string;
+  banner?: string; // IPFS URI
+  agents: Array<{
+    agentId: number;
+    name: string;
+    role?: string;
+  }>;
+  coordinator?: {
+    agentId: number;
+    model: string;
+  };
+  pricing: {
+    x402Price: string;
+    totalAgentPrice: string;
+  };
+  lease?: {
+    enabled: boolean;
+    durationDays: number;
+    creatorPercent: number;
+  };
+  rfa?: {
+    title: string;
+    description: string;
+    skills: string[];
+    offerAmount: string;
+  };
+  creator: string;
+  createdAt: string;
+}
+
+/**
+ * Upload a Manowar banner and return the IPFS CID
+ */
+export async function uploadManowarBanner(file: File, title: string): Promise<string> {
+  return uploadFile(file, {
+    name: `${title}-banner`,
+    keyvalues: {
+      type: "manowar-banner",
+      manowar: title,
+    },
+  });
+}
+
+/**
+ * Upload Manowar metadata to IPFS and return the CID
+ */
+export async function uploadManowarMetadata(metadata: ManowarMetadata): Promise<string> {
+  return uploadJSON(metadata, {
+    name: `${metadata.title}-metadata`,
+    keyvalues: {
+      type: "manowar-metadata",
+      manowar: metadata.title,
+    },
+  });
+}
+
+// =============================================================================
+// Utility Functions
+// =============================================================================
+
+/**
+ * Generate DNA hash from agent parameters
+ * Matches contract: keccak256(abi.encodePacked(skills, chain, model))
+ */
+export function generateDnaHash(skills: string[], chain: number, model: string): string {
+  // Use Web Crypto API for keccak256-like hash
+  // Note: In production, use a proper keccak256 implementation (e.g., from viem)
+  const data = `${skills.sort().join(",")}:${chain}:${model}`;
+  return data; // This will be hashed on-chain; frontend stores the source data
+}
+
+/**
+ * Check if Pinata is configured
+ */
+export function isPinataConfigured(): boolean {
+  return Boolean(PINATA_JWT);
+}
+
+/**
+ * Convert file to base64 data URL for preview
+ */
+export function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+

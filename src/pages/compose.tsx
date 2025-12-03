@@ -22,13 +22,20 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { 
   Play, Save, Download, Info, Loader2, CheckCircle2, XCircle, 
   Plug, Trash2, Settings, ChevronRight, Bot, ExternalLink, Filter, Star, Shield,
-  Wrench, Github, Zap, Server, Copy, FlaskConical
+  Wrench, Github, Zap, Server, Copy, FlaskConical, Sparkles, Upload, DollarSign, Clock, AlertCircle
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { useActiveAccount, TransactionButton } from "thirdweb/react";
+import { prepareContractCall } from "thirdweb";
+import { getManowarContract, usdcToWei } from "@/lib/contracts";
+import { uploadManowarBanner, uploadManowarMetadata, getIpfsUri, fileToDataUrl, isPinataConfigured, type ManowarMetadata } from "@/lib/pinata";
+import { CHAIN_IDS, CHAIN_CONFIG } from "@/lib/thirdweb";
+import { AVAILABLE_MODELS } from "@/lib/models";
 import {
   Dialog,
   DialogContent,
@@ -810,6 +817,391 @@ function AgentPickerCard({
 }
 
 // =============================================================================
+// Mint Manowar Dialog
+// =============================================================================
+
+interface MintManowarDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  workflowName: string;
+  workflowDescription: string;
+  agentIds: number[];
+}
+
+function MintManowarDialog({ 
+  open, 
+  onOpenChange, 
+  workflowName, 
+  workflowDescription,
+  agentIds 
+}: MintManowarDialogProps) {
+  const { toast } = useToast();
+  const account = useActiveAccount();
+  
+  const [title, setTitle] = useState(workflowName);
+  const [description, setDescription] = useState(workflowDescription);
+  const [x402Price, setX402Price] = useState("0.01");
+  const [units, setUnits] = useState("");
+  const [leaseEnabled, setLeaseEnabled] = useState(false);
+  const [leaseDuration, setLeaseDuration] = useState("30");
+  const [leasePercent, setLeasePercent] = useState("10");
+  const [coordinatorModel, setCoordinatorModel] = useState("");
+  const [bannerFile, setBannerFile] = useState<File | null>(null);
+  const [bannerPreview, setBannerPreview] = useState<string | null>(null);
+  const [mintStep, setMintStep] = useState<"idle" | "uploading" | "ready">("idle");
+  const [preparedData, setPreparedData] = useState<{
+    bannerUri: string;
+    params: {
+      title: string;
+      description: string;
+      banner: string;
+      x402Price: bigint;
+      units: bigint;
+      leaseEnabled: boolean;
+      leaseDuration: bigint;
+      leasePercent: number;
+      coordinatorAgentId: bigint;
+      coordinatorModel: string;
+    };
+  } | null>(null);
+  const bannerInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setTitle(workflowName);
+    setDescription(workflowDescription);
+  }, [workflowName, workflowDescription]);
+
+  const handleBannerSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast({ title: "Invalid file type", variant: "destructive" });
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast({ title: "File too large (max 5MB)", variant: "destructive" });
+      return;
+    }
+    setBannerFile(file);
+    const dataUrl = await fileToDataUrl(file);
+    setBannerPreview(dataUrl);
+  };
+
+  const handlePrepare = async () => {
+    if (!title.trim()) {
+      toast({ title: "Title required", variant: "destructive" });
+      return;
+    }
+    if (!isPinataConfigured()) {
+      toast({ title: "IPFS not configured", variant: "destructive" });
+      return;
+    }
+
+    try {
+      setMintStep("uploading");
+      
+      // Upload banner if provided
+      let bannerUri = "";
+      if (bannerFile) {
+        const bannerCid = await uploadManowarBanner(bannerFile, title);
+        bannerUri = getIpfsUri(bannerCid);
+      }
+
+      // Build and upload metadata
+      const metadata: ManowarMetadata = {
+        schemaVersion: "1.0.0",
+        title,
+        description,
+        banner: bannerUri,
+        agents: agentIds.map((id, idx) => ({ agentId: id, name: `Agent ${idx + 1}` })),
+        coordinator: coordinatorModel ? { agentId: 0, model: coordinatorModel } : undefined,
+        pricing: {
+          x402Price: usdcToWei(parseFloat(x402Price)).toString(),
+          totalAgentPrice: "0",
+        },
+        lease: leaseEnabled ? {
+          enabled: true,
+          durationDays: parseInt(leaseDuration),
+          creatorPercent: parseInt(leasePercent),
+        } : undefined,
+        creator: account?.address || "",
+        createdAt: new Date().toISOString(),
+      };
+
+      await uploadManowarMetadata(metadata);
+
+      // Prepare params for contract
+      setPreparedData({
+        bannerUri,
+        params: {
+          title,
+          description,
+          banner: bannerUri,
+          x402Price: usdcToWei(parseFloat(x402Price)),
+          units: units ? BigInt(units) : BigInt(0),
+          leaseEnabled,
+          leaseDuration: BigInt(parseInt(leaseDuration) || 0),
+          leasePercent: parseInt(leasePercent) || 0,
+          coordinatorAgentId: BigInt(0),
+          coordinatorModel: coordinatorModel || "",
+        },
+      });
+      
+      setMintStep("ready");
+    } catch (error) {
+      console.error("Prepare error:", error);
+      setMintStep("idle");
+      toast({
+        title: "Upload Failed",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleMintSuccess = (result: { transactionHash: string }) => {
+    toast({
+      title: "Manowar Minted!",
+      description: (
+        <div className="space-y-1">
+          <p>{title} deployed to Avalanche Fuji.</p>
+          <a 
+            href={`${CHAIN_CONFIG[CHAIN_IDS.avalancheFuji].explorer}/tx/${result.transactionHash}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-cyan-400 hover:underline text-xs flex items-center gap-1"
+          >
+            View transaction <ExternalLink className="w-3 h-3" />
+          </a>
+        </div>
+      ),
+    });
+    onOpenChange(false);
+    setMintStep("idle");
+    setPreparedData(null);
+  };
+
+  const handleMintError = (error: Error) => {
+    console.error("Mint error:", error);
+    setMintStep("idle");
+    setPreparedData(null);
+    toast({
+      title: "Minting Failed",
+      description: error.message || "Unknown error",
+      variant: "destructive",
+    });
+  };
+
+  const isUploading = mintStep === "uploading";
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg bg-card border-fuchsia-500/30">
+        <DialogHeader>
+          <DialogTitle className="font-display text-xl flex items-center gap-2">
+            <Sparkles className="w-5 h-5 text-fuchsia-400" />
+            Mint as Manowar
+          </DialogTitle>
+          <DialogDescription>
+            Deploy this workflow as an ERC-7401 nestable NFT on Avalanche Fuji
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-4">
+          {/* Banner Upload */}
+          <div>
+            <Label className="text-xs font-mono text-muted-foreground mb-2 block">BANNER IMAGE</Label>
+            <input
+              ref={bannerInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleBannerSelect}
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={() => bannerInputRef.current?.click()}
+              className="w-full h-24 rounded-sm bg-background/50 border border-sidebar-border border-dashed flex items-center justify-center text-muted-foreground hover:border-fuchsia-500 hover:text-fuchsia-400 transition-colors overflow-hidden"
+            >
+              {bannerPreview ? (
+                <img src={bannerPreview} alt="Banner" className="w-full h-full object-cover" />
+              ) : (
+                <div className="flex items-center gap-2">
+                  <Upload className="w-4 h-4" />
+                  <span className="text-xs font-mono">Upload banner (optional)</span>
+                </div>
+              )}
+            </button>
+          </div>
+
+          {/* Title & Description */}
+          <div className="space-y-2">
+            <Label className="text-xs font-mono text-muted-foreground">TITLE</Label>
+            <Input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="My Workflow"
+              className="bg-background/50 font-mono border-sidebar-border"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label className="text-xs font-mono text-muted-foreground">DESCRIPTION</Label>
+            <Textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="What does this workflow do?"
+              className="bg-background/50 font-mono border-sidebar-border resize-none"
+              rows={2}
+            />
+          </div>
+
+          {/* Pricing */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label className="text-xs font-mono text-muted-foreground flex items-center gap-1">
+                <DollarSign className="w-3 h-3" /> X402 PRICE (USDC)
+              </Label>
+              <Input
+                type="number"
+                step="0.001"
+                value={x402Price}
+                onChange={(e) => setX402Price(e.target.value)}
+                className="bg-background/50 font-mono border-sidebar-border"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs font-mono text-muted-foreground">SUPPLY CAP</Label>
+              <Input
+                type="number"
+                value={units}
+                onChange={(e) => setUnits(e.target.value)}
+                placeholder="∞"
+                className="bg-background/50 font-mono border-sidebar-border"
+              />
+            </div>
+          </div>
+
+          {/* Coordinator */}
+          <div className="space-y-2">
+            <Label className="text-xs font-mono text-muted-foreground">COORDINATOR MODEL (optional)</Label>
+            <Select value={coordinatorModel} onValueChange={setCoordinatorModel}>
+              <SelectTrigger className="bg-background/50 border-sidebar-border">
+                <SelectValue placeholder="No coordinator" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">No coordinator</SelectItem>
+                {AVAILABLE_MODELS.filter((m, i, arr) => arr.findIndex(x => x.id === m.id) === i).map((model) => (
+                  <SelectItem key={model.id} value={model.id}>
+                    {model.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[10px] text-muted-foreground">
+              Supervisor agent to coordinate workflow steps
+            </p>
+          </div>
+
+          {/* Lease Toggle */}
+          <div className="flex items-center justify-between p-3 rounded-sm border border-sidebar-border bg-background/30">
+            <div className="space-y-0.5">
+              <Label className="text-sm font-mono flex items-center gap-1">
+                <Clock className="w-3 h-3" /> Enable Leasing
+              </Label>
+              <p className="text-[10px] text-muted-foreground">
+                Allow others to lease this workflow
+              </p>
+            </div>
+            <Switch checked={leaseEnabled} onCheckedChange={setLeaseEnabled} />
+          </div>
+
+          {leaseEnabled && (
+            <div className="grid grid-cols-2 gap-4 pl-4 border-l-2 border-fuchsia-500/30">
+              <div className="space-y-2">
+                <Label className="text-xs font-mono text-muted-foreground">DURATION (days)</Label>
+                <Input
+                  type="number"
+                  value={leaseDuration}
+                  onChange={(e) => setLeaseDuration(e.target.value)}
+                  className="bg-background/50 font-mono border-sidebar-border"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-mono text-muted-foreground">YOUR % (max 20)</Label>
+                <Input
+                  type="number"
+                  max={20}
+                  value={leasePercent}
+                  onChange={(e) => setLeasePercent(e.target.value)}
+                  className="bg-background/50 font-mono border-sidebar-border"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Account status */}
+          {!account && (
+            <div className="flex items-center gap-2 p-3 rounded-sm bg-yellow-500/10 border border-yellow-500/30 text-yellow-200 text-sm">
+              <AlertCircle className="w-4 h-4" />
+              Sign in to mint (gas sponsored)
+            </div>
+          )}
+          {account && (
+            <div className="flex items-center gap-2 p-2 rounded-sm bg-green-500/10 border border-green-500/30 text-green-200 text-xs">
+              <CheckCircle2 className="w-3 h-3" />
+              <span className="font-mono">{account.address.slice(0, 6)}...{account.address.slice(-4)}</span>
+              <span className="text-green-300/70">• Gas sponsored</span>
+            </div>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          {!preparedData ? (
+            <Button
+              onClick={handlePrepare}
+              disabled={!account || isUploading}
+              className="bg-fuchsia-500 hover:bg-fuchsia-600 text-white font-bold"
+            >
+              {isUploading ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Uploading...
+                </>
+              ) : (
+                <>
+                  <Upload className="w-4 h-4 mr-2" />
+                  Prepare
+                </>
+              )}
+            </Button>
+          ) : (
+            <TransactionButton
+              transaction={() => {
+                const contract = getManowarContract();
+                return prepareContractCall({
+                  contract,
+                  method: "function mintManowar((string title, string description, string banner, uint256 x402Price, uint256 units, bool leaseEnabled, uint256 leaseDuration, uint8 leasePercent, uint256 coordinatorAgentId, string coordinatorModel) params, uint256[] agentIds) returns (uint256 manowarId)",
+                  params: [preparedData.params, agentIds.map(id => BigInt(id))],
+                });
+              }}
+              onTransactionConfirmed={handleMintSuccess}
+              onError={handleMintError}
+              className="!bg-gradient-to-r !from-cyan-500 !to-fuchsia-500 !text-white !font-bold"
+            >
+              <Sparkles className="w-4 h-4 mr-2" />
+              Mint Manowar
+            </TransactionButton>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// =============================================================================
 // Main Component
 // =============================================================================
 
@@ -828,6 +1220,9 @@ function ComposeFlow() {
   const [workflowName, setWorkflowName] = useState("");
   const [workflowDescription, setWorkflowDescription] = useState("");
   const [inputJson, setInputJson] = useState("{}");
+  
+  // Manowar minting
+  const [showMintDialog, setShowMintDialog] = useState(false);
   
   // Execution state
   const { execute, isRunning, logs, result, error: execError, reset: resetExecution } = useWorkflowExecution();
@@ -1122,6 +1517,16 @@ function ComposeFlow() {
             EXPORT
           </Button>
 
+          {/* Mint as Manowar Button */}
+          <Button
+            onClick={() => setShowMintDialog(true)}
+            disabled={nodes.length === 0}
+            className="bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white hover:from-cyan-400 hover:to-fuchsia-400 font-bold font-mono shadow-lg"
+          >
+            <Sparkles className="w-4 h-4 mr-2" />
+            MINT NFT
+          </Button>
+
           {/* Settings Dialog */}
           <Sheet>
             <SheetTrigger asChild>
@@ -1217,6 +1622,15 @@ function ComposeFlow() {
           </div>
         )}
       </div>
+
+      {/* Mint Manowar Dialog */}
+      <MintManowarDialog
+        open={showMintDialog}
+        onOpenChange={setShowMintDialog}
+        workflowName={workflowName}
+        workflowDescription={workflowDescription}
+        agentIds={[]} // TODO: Extract agent IDs from workflow steps
+      />
     </div>
   );
 }
