@@ -21,7 +21,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
-import { Cpu, DollarSign, ShieldCheck, Upload, ExternalLink, Sparkles, Plug, Search, X, Star, ChevronRight, Loader2 } from "lucide-react";
+import { Cpu, DollarSign, ShieldCheck, Upload, ExternalLink, Sparkles, Plug, Search, X, Star, ChevronRight, Loader2, Zap, Play } from "lucide-react";
 import { AVAILABLE_MODELS, type AIModel } from "@/lib/models";
 import { useRegistryServers, useRegistrySearch, type RegistryServer, type ServerOrigin } from "@/hooks/use-registry";
 
@@ -39,6 +39,9 @@ interface SelectedPlugin {
   description: string;
   origin: ServerOrigin;
 }
+
+// Plugins that can be tested via the runtime
+const EXECUTABLE_PLUGINS = ["goat-erc20", "goat-coingecko"];
 
 const formSchema = z.object({
   name: z.string().min(2).max(50),
@@ -135,10 +138,45 @@ export default function CreateAgent() {
   }, [selectedHFModel, form]);
 
   const onSubmit: SubmitHandler<FormValues> = (values) => {
-    console.log(values);
+    // Build the agent card with plugins
+    const agentCard = {
+      schemaVersion: "1.0.0",
+      id: `agent://${values.name.toLowerCase().replace(/\s+/g, "-")}`,
+      name: values.name,
+      description: values.description,
+      model: selectedHFModel ? {
+        id: selectedHFModel.id,
+        name: selectedHFModel.name,
+        provider: selectedHFModel.provider,
+        priceMultiplier: selectedHFModel.priceMultiplier,
+      } : {
+        id: values.model,
+        name: values.model,
+      },
+      endpoint: values.endpoint,
+      plugins: selectedPlugins.map(p => ({
+        registryId: p.id,
+        name: p.name,
+        origin: p.origin,
+        config: {}, // User can configure later
+      })),
+      pricing: {
+        pricePerUse: values.pricePerUse,
+        currency: "USDC",
+      },
+      cloning: {
+        enabled: values.isCloneable,
+        fee: values.cloneFee || "0",
+      },
+      createdAt: new Date().toISOString(),
+    };
+    
+    console.log("Agent Card:", agentCard);
+    
+    // TODO: Deploy to blockchain and IPFS
     toast({
       title: "Agent Minted Successfully!",
-      description: "Your ERC8004 Identity has been deployed to Avalanche Fuji.",
+      description: `${values.name} with ${selectedPlugins.length} plugins deployed to Avalanche Fuji.`,
     });
   };
 
@@ -361,6 +399,7 @@ export default function CreateAgent() {
                             <div className="p-1">
                               {availablePlugins.map(server => {
                                 const isSelected = selectedPlugins.some(p => p.id === server.registryId);
+                                const isExecutable = EXECUTABLE_PLUGINS.includes(server.registryId);
                                 return (
                                   <button
                                     key={server.registryId}
@@ -383,6 +422,12 @@ export default function CreateAgent() {
                                       <span className="font-mono text-foreground truncate flex-1">
                                         {server.name}
                                       </span>
+                                      {isExecutable && (
+                                        <Badge variant="outline" className="text-[8px] px-1 py-0 border-cyan-500/30 text-cyan-400">
+                                          <Play className="w-2 h-2 mr-0.5" />
+                                          Testable
+                                        </Badge>
+                                      )}
                                       {isSelected && <span className="text-green-400 text-[10px]">Added</span>}
                                     </div>
                                     <p className="text-[10px] text-muted-foreground line-clamp-1 mt-0.5 ml-12">

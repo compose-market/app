@@ -25,7 +25,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useToast } from "@/hooks/use-toast";
 import { 
   Play, Save, Download, Info, Loader2, CheckCircle2, XCircle, 
-  Plug, Trash2, Settings, ChevronRight, Bot, ExternalLink, Filter, Star, Shield
+  Plug, Trash2, Settings, ChevronRight, Bot, ExternalLink, Filter, Star, Shield,
+  Wrench, Github, Zap, Server, Copy, FlaskConical
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -64,6 +65,7 @@ import {
   type RegistryServer,
 } from "@/hooks/use-registry";
 import type { ConnectorInfo, ConnectorTool, WorkflowStep } from "@/lib/services";
+import { executeRegistryTool } from "@/lib/services";
 import { type Agent, type AgentRegistryId, AGENT_REGISTRIES, formatInteractions, getReadmeExcerpt, COMMON_TAGS } from "@/lib/agents";
 
 // =============================================================================
@@ -142,15 +144,18 @@ function ConnectorPicker({
 }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedServer, setSelectedServer] = useState<RegistryServer | null>(null);
+  const [detailServer, setDetailServer] = useState<RegistryServer | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
   
-  // Fetch all servers with search
+  // Fetch all servers with search (only plugins, not agents)
   const { data: searchData, isLoading: isSearching } = useRegistrySearch(
     searchQuery, 
     30
   );
   
-  // Fetch all servers when no search
+  // Fetch all servers when no search (only plugins)
   const { data: allData, isLoading: isLoadingAll } = useRegistryServers({
+    type: "plugin",
     limit: 50,
   });
   
@@ -159,6 +164,7 @@ function ConnectorPicker({
     : allData?.servers || [];
   const isLoading = searchQuery.trim() ? isSearching : isLoadingAll;
 
+  // Add a connector with a specific tool
   const handleToolSelect = (tool: { name: string; description?: string }) => {
     if (!selectedServer) return;
     
@@ -172,6 +178,28 @@ function ConnectorPicker({
     setSelectedServer(null);
   };
 
+  // Quick add a connector with a default "execute" action
+  const handleQuickAdd = () => {
+    if (!selectedServer) return;
+    
+    // Create a default tool based on the server type
+    const defaultTool: ConnectorTool = {
+      name: "execute",
+      description: `Execute ${selectedServer.name}`,
+      inputSchema: { type: "object", properties: {} },
+    };
+    
+    onSelect(selectedServer.registryId, defaultTool);
+    setSelectedServer(null);
+  };
+
+  // Open detail dialog
+  const handleShowDetails = (server: RegistryServer, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDetailServer(server);
+    setDetailOpen(true);
+  };
+
   const getOriginBadge = (origin: string) => {
     switch (origin) {
       case "internal": return <Badge variant="default" className="text-[8px] h-4 px-1">Compose</Badge>;
@@ -181,6 +209,8 @@ function ConnectorPicker({
       default: return null;
     }
   };
+
+  const hasTools = selectedServer?.tools && selectedServer.tools.length > 0;
 
   return (
     <div className="space-y-3">
@@ -218,10 +248,13 @@ function ConnectorPicker({
           <ScrollArea className="h-40">
             <div className="space-y-1 pr-2">
               {servers.map((server) => (
-                <button
+                <div
                   key={server.registryId}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => setSelectedServer(server)}
-                  className={`w-full text-left p-2 rounded-sm border transition-all ${
+                  onKeyDown={(e) => e.key === "Enter" && setSelectedServer(server)}
+                  className={`w-full text-left p-2 rounded-sm border transition-all group cursor-pointer ${
                     selectedServer?.registryId === server.registryId
                       ? "border-cyan-500/50 bg-cyan-500/10"
                       : "border-sidebar-border hover:border-cyan-500/30 hover:bg-background/50"
@@ -230,47 +263,412 @@ function ConnectorPicker({
                   <div className="flex items-center gap-2">
                     <Plug className="w-3 h-3 text-cyan-400" />
                     <span className="font-mono text-xs truncate flex-1">{server.name}</span>
+                    {/* Info button */}
+                    <button 
+                      onClick={(e) => handleShowDetails(server, e)}
+                      className="p-1 hover:bg-cyan-500/20 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="View details"
+                    >
+                      <Info className="w-3 h-3 text-muted-foreground hover:text-cyan-400" />
+                    </button>
                     {getOriginBadge(server.origin)}
                   </div>
                   <p className="text-[10px] text-muted-foreground truncate mt-0.5 ml-5">
                     {server.description}
                   </p>
-                </button>
+                </div>
               ))}
             </div>
           </ScrollArea>
         )}
       </div>
 
-      {/* Tools from selected server */}
-      {selectedServer && selectedServer.tools && selectedServer.tools.length > 0 && (
-        <div>
-          <Label className="text-[10px] font-mono text-muted-foreground mb-1.5 block">
-            SELECT TOOL ({selectedServer.tools.length})
-          </Label>
-          <ScrollArea className="h-32">
-            <div className="space-y-1 pr-2">
-              {selectedServer.tools.map((tool) => (
-                <Button
-                  key={tool.name}
-                  variant="ghost"
-                  className="w-full justify-start h-auto py-2 text-left hover:bg-cyan-500/10"
-                  onClick={() => handleToolSelect(tool)}
-                >
-                  <ChevronRight className="w-3 h-3 mr-2 text-cyan-400" />
-                  <div className="flex-1 overflow-hidden">
-                    <div className="font-mono text-xs truncate">{tool.name}</div>
-                    {tool.description && (
-                      <div className="text-[10px] text-muted-foreground truncate">{tool.description}</div>
-                    )}
-                  </div>
-                </Button>
-              ))}
+      {/* Selected Server Actions */}
+      {selectedServer && (
+        <div className="space-y-2">
+          {/* Action buttons */}
+          <div className="flex gap-2">
+            <Button
+              className="flex-1 bg-cyan-500 hover:bg-cyan-600 text-black font-bold"
+              onClick={handleQuickAdd}
+            >
+              <Plug className="w-4 h-4 mr-2" />
+              Add
+            </Button>
+            {selectedServer.executable && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setDetailServer(selectedServer);
+                  setDetailOpen(true);
+                }}
+                className="border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/10"
+              >
+                <FlaskConical className="w-4 h-4" />
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDetailServer(selectedServer);
+                setDetailOpen(true);
+              }}
+              className="border-cyan-500/30"
+            >
+              <Info className="w-4 h-4" />
+            </Button>
+          </div>
+
+          {/* Tools from selected server */}
+          {hasTools && (
+            <div>
+              <Label className="text-[10px] font-mono text-muted-foreground mb-1.5 block">
+                OR SELECT SPECIFIC TOOL ({selectedServer.tools!.length})
+              </Label>
+              <ScrollArea className="h-24">
+                <div className="space-y-1 pr-2">
+                  {selectedServer.tools!.map((tool) => (
+                    <Button
+                      key={tool.name}
+                      variant="ghost"
+                      className="w-full justify-start h-auto py-2 text-left hover:bg-cyan-500/10"
+                      onClick={() => handleToolSelect(tool)}
+                    >
+                      <ChevronRight className="w-3 h-3 mr-2 text-cyan-400" />
+                      <div className="flex-1 overflow-hidden">
+                        <div className="font-mono text-xs truncate">{tool.name}</div>
+                        {tool.description && (
+                          <div className="text-[10px] text-muted-foreground truncate">{tool.description}</div>
+                        )}
+                      </div>
+                    </Button>
+                  ))}
+                </div>
+              </ScrollArea>
             </div>
-          </ScrollArea>
+          )}
         </div>
       )}
+
+      {/* Detail Dialog */}
+      <ConnectorDetailDialog
+        server={detailServer}
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+        onAdd={onSelect}
+      />
     </div>
+  );
+}
+
+// =============================================================================
+// Connector Detail Dialog
+// =============================================================================
+
+function ConnectorDetailDialog({
+  server,
+  open,
+  onOpenChange,
+  onAdd,
+}: {
+  server: RegistryServer | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onAdd: (connectorId: string, tool: ConnectorTool) => void;
+}) {
+  const { toast } = useToast();
+  const [selectedTool, setSelectedTool] = useState<string>("");
+  const [testArgs, setTestArgs] = useState("{}");
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; content?: unknown; error?: string } | null>(null);
+  const [dynamicTools, setDynamicTools] = useState<Array<{ name: string; description?: string }>>([]);
+  const [loadingTools, setLoadingTools] = useState(false);
+
+  // Fetch tools dynamically for Glama servers that don't have pre-cached tools
+  useEffect(() => {
+    if (!server || !open) return;
+    
+    // Reset state when server changes
+    setSelectedTool("");
+    setTestResult(null);
+    setDynamicTools([]);
+    
+    // Only fetch dynamically for MCP servers without pre-cached tools
+    if (server.origin === "glama" && (!server.tools || server.tools.length === 0)) {
+      setLoadingTools(true);
+      import("@/lib/services").then(({ fetchMcpServerTools }) => {
+        fetchMcpServerTools(server.slug)
+          .then((tools) => {
+            setDynamicTools(tools);
+            if (tools.length > 0) {
+              setSelectedTool(tools[0].name);
+            }
+          })
+          .catch((err) => {
+            toast({
+              title: "Failed to load tools",
+              description: err.message,
+              variant: "destructive",
+            });
+          })
+          .finally(() => setLoadingTools(false));
+      });
+    }
+  }, [server, open, toast]);
+
+  if (!server) return null;
+
+  // Use dynamic tools if available, otherwise use pre-cached tools
+  const tools = dynamicTools.length > 0 ? dynamicTools : (server.tools || []);
+  const hasTools = tools.length > 0;
+
+  const getOriginStyle = () => {
+    switch (server.origin) {
+      case "goat": return { bg: "bg-green-500/10", border: "border-green-500/30", text: "text-green-400" };
+      case "eliza": return { bg: "bg-fuchsia-500/10", border: "border-fuchsia-500/30", text: "text-fuchsia-400" };
+      case "internal": return { bg: "bg-cyan-500/10", border: "border-cyan-500/30", text: "text-cyan-400" };
+      default: return { bg: "bg-purple-500/10", border: "border-purple-500/30", text: "text-purple-400" };
+    }
+  };
+
+  const style = getOriginStyle();
+
+  const handleTest = async () => {
+    if (!selectedTool && !hasTools) return;
+
+    let args: Record<string, unknown>;
+    try {
+      args = JSON.parse(testArgs);
+    } catch {
+      toast({
+        title: "Invalid JSON",
+        description: "Please enter valid JSON for arguments",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setTesting(true);
+    setTestResult(null);
+
+    try {
+      const toolName = selectedTool || tools[0]?.name || "execute";
+      const result = await executeRegistryTool(
+        server.registryId,
+        server.origin,
+        server.slug,
+        toolName,
+        args,
+        server.connectorId
+      );
+      
+      setTestResult({
+        success: result.success,
+        content: result.result || result.content,
+        error: result.error,
+      });
+
+      toast({
+        title: result.success ? "Test Successful" : "Test Failed",
+        description: result.success 
+          ? "The tool executed successfully"
+          : result.error || "Unknown error",
+        variant: result.success ? "default" : "destructive",
+      });
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      setTestResult({ success: false, error: errorMsg });
+      toast({
+        title: "Test Error",
+        description: errorMsg,
+        variant: "destructive",
+      });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const handleAdd = () => {
+    const toolName = selectedTool || (hasTools ? tools[0].name : "execute");
+    const tool: ConnectorTool = {
+      name: toolName,
+      description: tools.find(t => t.name === toolName)?.description || `Execute ${server.name}`,
+      inputSchema: { type: "object", properties: {} },
+    };
+    onAdd(server.registryId, tool);
+    onOpenChange(false);
+  };
+
+  const copyResult = () => {
+    if (testResult) {
+      navigator.clipboard.writeText(JSON.stringify(testResult, null, 2));
+      toast({ title: "Copied to clipboard" });
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl bg-card border-cyan-500/30">
+        <DialogHeader>
+          <div className="flex items-center gap-3">
+            <div className={`w-10 h-10 rounded-sm flex items-center justify-center border ${style.bg} ${style.border}`}>
+              {server.origin === "goat" ? (
+                <Zap className={`w-5 h-5 ${style.text}`} />
+              ) : server.origin === "eliza" || server.origin === "internal" ? (
+                <Plug className={`w-5 h-5 ${style.text}`} />
+              ) : (
+                <Server className={`w-5 h-5 ${style.text}`} />
+              )}
+            </div>
+            <div>
+              <DialogTitle className="font-display text-lg">{server.name}</DialogTitle>
+              <DialogDescription className="font-mono text-xs">
+                {server.namespace}/{server.slug}
+              </DialogDescription>
+            </div>
+          </div>
+        </DialogHeader>
+
+        <div className="space-y-4 mt-4">
+          {/* Description */}
+          <p className="text-sm text-muted-foreground">{server.description}</p>
+
+          {/* Badges */}
+          <div className="flex flex-wrap gap-2">
+            <Badge className={`${style.bg} ${style.text}`}>
+              {server.origin === "goat" ? "GOAT SDK" : 
+               server.origin === "eliza" ? "ElizaOS" : 
+               server.origin === "internal" ? "Compose" : "MCP"}
+            </Badge>
+            {server.category && (
+              <Badge variant="outline">{server.category}</Badge>
+            )}
+            {server.executable && (
+              <Badge variant="outline" className="border-green-500/30 text-green-400">
+                <FlaskConical className="w-3 h-3 mr-1" />
+                Testable
+              </Badge>
+            )}
+            {server.toolCount > 0 && (
+              <Badge variant="outline" className="border-sidebar-border">
+                <Wrench className="w-3 h-3 mr-1" />
+                {server.toolCount} tools
+              </Badge>
+            )}
+          </div>
+
+          {/* Tags */}
+          {server.tags.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {server.tags.slice(0, 8).map((tag) => (
+                <span key={tag} className="text-[10px] text-muted-foreground">
+                  #{tag}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* Tools List */}
+          {hasTools && (
+            <div>
+              <Label className="text-xs font-mono text-muted-foreground mb-2 block">
+                AVAILABLE TOOLS ({tools.length})
+              </Label>
+              <ScrollArea className="h-32">
+                <div className="space-y-1 pr-2">
+                  {tools.map((tool) => (
+                    <button
+                      key={tool.name}
+                      onClick={() => setSelectedTool(tool.name)}
+                      className={`w-full text-left p-2 rounded-sm border transition-all ${
+                        selectedTool === tool.name
+                          ? "border-cyan-500/50 bg-cyan-500/10"
+                          : "border-sidebar-border hover:border-cyan-500/30"
+                      }`}
+                    >
+                      <div className="font-mono text-xs text-cyan-400">{tool.name}</div>
+                      {tool.description && (
+                        <p className="text-[10px] text-muted-foreground mt-0.5">{tool.description}</p>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </ScrollArea>
+            </div>
+          )}
+
+          {/* Test Section */}
+          {server.executable && (
+            <div className="space-y-2 p-3 rounded-sm bg-background/50 border border-sidebar-border">
+              <Label className="text-xs font-mono text-muted-foreground">
+                TEST ARGUMENTS (JSON)
+              </Label>
+              <Textarea
+                value={testArgs}
+                onChange={(e) => setTestArgs(e.target.value)}
+                placeholder='{"key": "value"}'
+                className="font-mono text-xs h-16 bg-background/50 border-sidebar-border"
+              />
+              
+              {/* Test Result */}
+              {testResult && (
+                <div className={`p-2 rounded-sm border ${
+                  testResult.success 
+                    ? "bg-green-500/10 border-green-500/30" 
+                    : "bg-red-500/10 border-red-500/30"
+                }`}>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className={`text-xs font-bold ${testResult.success ? "text-green-400" : "text-red-400"}`}>
+                      {testResult.success ? "Success" : "Failed"}
+                    </span>
+                    <Button variant="ghost" size="sm" onClick={copyResult} className="h-5 px-1">
+                      <Copy className="w-3 h-3" />
+                    </Button>
+                  </div>
+                  <pre className="text-[10px] font-mono overflow-auto max-h-20">
+                    {JSON.stringify(testResult.content || testResult.error, null, 2)}
+                  </pre>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Actions */}
+        <DialogFooter className="gap-2 pt-4 border-t border-sidebar-border">
+          {server.repoUrl && (
+            <Button variant="outline" asChild>
+              <a href={server.repoUrl} target="_blank" rel="noopener noreferrer">
+                <Github className="w-4 h-4 mr-2" />
+                Repository
+              </a>
+            </Button>
+          )}
+          {server.executable && (
+            <Button
+              variant="outline"
+              onClick={handleTest}
+              disabled={testing}
+              className="border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/10"
+            >
+              {testing ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <FlaskConical className="w-4 h-4 mr-2" />
+              )}
+              Test
+            </Button>
+          )}
+          <Button
+            onClick={handleAdd}
+            className="bg-cyan-500 hover:bg-cyan-600 text-black font-bold"
+          >
+            <Plug className="w-4 h-4 mr-2" />
+            Add to Workflow
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -672,7 +1070,7 @@ function ComposeFlow() {
                 className="flex-1 rounded-none border-b-2 border-transparent data-[state=active]:border-cyan-500 data-[state=active]:bg-transparent data-[state=active]:text-cyan-400 py-2.5 font-mono text-xs"
               >
                 <Plug className="w-3 h-3 mr-1.5" />
-                CONNECTORS
+                PLUGINS
               </TabsTrigger>
               <TabsTrigger 
                 value="agents" 

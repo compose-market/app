@@ -8,9 +8,9 @@
  */
 
 // Service URLs from environment or defaults
-const CONNECTOR_URL = import.meta.env.VITE_CONNECTOR_SERVICE_URL || "https://connector.compose.market";
-const SANDBOX_URL = import.meta.env.VITE_SANDBOX_SERVICE_URL || "https://sandbox.compose.market";
-const EXPORTER_URL = import.meta.env.VITE_EXPORTER_SERVICE_URL || "https://exporter.compose.market";
+const CONNECTOR_URL = import.meta.env.VITE_CONNECTOR_URL || "https://connector.compose.market";
+const SANDBOX_URL = import.meta.env.VITE_SANDBOX_URL || "https://sandbox.compose.market";
+const EXPORTER_URL = import.meta.env.VITE_EXPORTER_URL || "https://exporter.compose.market";
 
 // =============================================================================
 // Types
@@ -127,6 +127,188 @@ export async function callConnectorTool(
   }
   
   return res.json();
+}
+
+// =============================================================================
+// Plugin Execution API (GOAT, Eliza, MCP)
+// =============================================================================
+
+export interface PluginExecutionResult {
+  success: boolean;
+  pluginId: string;
+  tool: string;
+  result?: unknown;
+  txHash?: string;
+  error?: string;
+  content?: unknown;
+}
+
+/**
+ * Execute a GOAT plugin tool
+ */
+export async function executeGoatPlugin(
+  pluginId: string,
+  tool: string,
+  args: Record<string, unknown>
+): Promise<PluginExecutionResult> {
+  const res = await fetch(`${CONNECTOR_URL}/plugins/${encodeURIComponent(pluginId)}/execute`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tool, args }),
+  });
+  
+  return res.json();
+}
+
+/**
+ * Execute a spawned MCP server tool
+ */
+export async function executeSpawnedServer(
+  slug: string,
+  tool: string,
+  args: Record<string, unknown>
+): Promise<PluginExecutionResult> {
+  const res = await fetch(`${CONNECTOR_URL}/mcp/servers/${encodeURIComponent(slug)}/call`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tool, args }),
+  });
+  
+  const data = await res.json();
+  return {
+    success: data.success ?? !data.error,
+    pluginId: slug,
+    tool,
+    content: data.content,
+    error: data.error,
+  };
+}
+
+/**
+ * Fetch tools from a spawned MCP server (on-demand)
+ */
+export async function fetchMcpServerTools(
+  serverSlug: string
+): Promise<{ name: string; description?: string; inputSchema?: Record<string, unknown> }[]> {
+  const res = await fetch(`${CONNECTOR_URL}/mcp/servers/${encodeURIComponent(serverSlug)}/tools`);
+  
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ error: "Unknown error" }));
+    throw new Error(data.error || `Failed to fetch tools: ${res.status}`);
+  }
+  
+  const data = await res.json();
+  return data.tools || [];
+}
+
+/**
+ * Execute a spawned MCP server tool
+ */
+export async function executeMcpServer(
+  serverSlug: string,
+  tool: string,
+  args: Record<string, unknown>
+): Promise<PluginExecutionResult> {
+  const res = await fetch(`${CONNECTOR_URL}/mcp/servers/${encodeURIComponent(serverSlug)}/call`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tool, args }),
+  });
+  
+  const data = await res.json();
+  return {
+    success: data.success ?? !data.error,
+    pluginId: serverSlug,
+    tool,
+    content: data.content,
+    error: data.error || data.message,
+  };
+}
+
+/**
+ * Fetch tools from an MCP server (spawns on-demand via MCP spawner)
+ */
+export async function fetchRemoteMcpServerTools(serverSlug: string): Promise<ConnectorTool[]> {
+  try {
+    // Route through connector which proxies to MCP spawner
+    const res = await fetch(`${CONNECTOR_URL}/mcp/servers/${encodeURIComponent(serverSlug)}/tools`);
+    if (!res.ok) {
+      console.warn(`Failed to fetch MCP tools for ${serverSlug}: ${res.status}`);
+      return [];
+    }
+    const data = await res.json();
+    return data.tools || [];
+  } catch (error) {
+    console.warn(`Error fetching MCP tools for ${serverSlug}:`, error);
+    return [];
+  }
+}
+
+// Alias for backwards compatibility
+export const fetchGlamaServerTools = fetchRemoteMcpServerTools;
+
+/**
+ * Execute an MCP server tool (spawns on-demand via MCP spawner)
+ */
+export async function executeRemoteMcpServer(
+  serverSlug: string,
+  tool: string,
+  args: Record<string, unknown>
+): Promise<PluginExecutionResult> {
+  // Route through connector which proxies to MCP spawner
+  const res = await fetch(`${CONNECTOR_URL}/mcp/servers/${encodeURIComponent(serverSlug)}/call`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tool, args }),
+  });
+  
+  const data = await res.json();
+  return {
+    success: data.success ?? !data.error,
+    pluginId: serverSlug,
+    tool,
+    content: data.content,
+    error: data.error || data.message,
+  };
+}
+
+/**
+ * Execute a registry server tool based on origin
+ */
+export async function executeRegistryTool(
+  registryId: string,
+  origin: string,
+  slug: string,
+  tool: string,
+  args: Record<string, unknown>,
+  connectorId?: string
+): Promise<PluginExecutionResult> {
+  // Route to appropriate endpoint based on origin
+  if (origin === "goat") {
+    // Extract plugin ID from registry ID (goat:goat-erc20 -> goat-erc20)
+    const pluginId = registryId.replace("goat:", "");
+    return executeGoatPlugin(pluginId, tool, args);
+  }
+  
+  if (origin === "glama" || origin === "mcp") {
+    // Use remote SSE proxy endpoint for MCP servers
+    return executeRemoteMcpServer(slug, tool, args);
+  }
+  
+  if (origin === "internal") {
+    // Internal connectors use the connector ID from entryPoint if available
+    const actualConnectorId = connectorId || registryId.replace("internal:compose-", "");
+    const result = await callConnectorTool(actualConnectorId, tool, args);
+    return {
+      success: result.success,
+      pluginId: actualConnectorId,
+      tool,
+      content: result.content,
+    };
+  }
+  
+  // Default: try spawned MCP server (verified npm packages only)
+  return executeSpawnedServer(slug, tool, args);
 }
 
 // =============================================================================

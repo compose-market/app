@@ -16,6 +16,9 @@ import { apiUrl } from "./api";
 
 /**
  * Agent registries/ecosystems that can be queried
+ * 
+ * Note: Only registries with type="agent" are shown in the Agents tab.
+ * GOAT and ElizaOS are PLUGINS, not agents - they appear in the Connectors tab.
  */
 export const AGENT_REGISTRIES = {
   agentverse: {
@@ -24,6 +27,7 @@ export const AGENT_REGISTRIES = {
     description: "Fetch.ai autonomous agent marketplace",
     url: "https://agentverse.ai",
     color: "purple",
+    type: "agent" as const, // True AI agents
     enabled: true,
   },
   goat: {
@@ -32,7 +36,8 @@ export const AGENT_REGISTRIES = {
     description: "DeFi & Web3 tool plugins (60+ plugins)",
     url: "https://ohmygoat.dev",
     color: "green",
-    enabled: true,
+    type: "plugin" as const, // Plugins, not agents - shown in Connectors tab
+    enabled: false, // Disabled for agent search - use registry API instead
   },
   eliza: {
     id: "eliza",
@@ -40,7 +45,8 @@ export const AGENT_REGISTRIES = {
     description: "Agent framework plugins (200+ plugins)",
     url: "https://elizaos.ai",
     color: "fuchsia",
-    enabled: true,
+    type: "plugin" as const, // Plugins, not agents - shown in Connectors tab
+    enabled: false, // Disabled for agent search - use registry API instead
   },
   manowar: {
     id: "manowar",
@@ -48,6 +54,7 @@ export const AGENT_REGISTRIES = {
     description: "Compose.Market native agents",
     url: null,
     color: "cyan",
+    type: "agent" as const, // True AI agents
     enabled: false, // Coming soon
   },
 } as const;

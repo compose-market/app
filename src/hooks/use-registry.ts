@@ -40,10 +40,15 @@ const REGISTRY_BASE = getRegistryBaseUrl();
 /** Server origin types */
 export type ServerOrigin = "glama" | "internal" | "goat" | "eliza";
 
+/** Record type: agent (autonomous AI agents) or plugin (tools/connectors) */
+export type RecordType = "agent" | "plugin";
+
 /** Unified server record from the registry */
 export interface RegistryServer {
   registryId: string;
   origin: ServerOrigin;
+  /** Type classification: agent or plugin (for internal filtering) */
+  type: RecordType;
   name: string;
   namespace: string;
   slug: string;
@@ -60,6 +65,9 @@ export interface RegistryServer {
     inputSchema?: Record<string, unknown>;
   }>;
   available: boolean;
+  executable?: boolean;
+  /** Connector ID for internal servers (maps to /connectors/:id) */
+  connectorId?: string;
   missingEnv?: string[];
 }
 
@@ -90,6 +98,8 @@ export interface RegistryMeta {
 
 /** Options for listing servers */
 export interface ListServersOptions {
+  /** Filter by type (agent or plugin) */
+  type?: RecordType;
   /** Filter by origin (supports comma-separated list, e.g. "goat,eliza") */
   origin?: ServerOrigin | string;
   category?: string;
@@ -103,6 +113,7 @@ export interface ListServersOptions {
  */
 async function fetchServers(options: ListServersOptions = {}): Promise<RegistryListResponse> {
   const params = new URLSearchParams();
+  if (options.type) params.set("type", options.type);
   if (options.origin) params.set("origin", options.origin);
   if (options.category) params.set("category", options.category);
   if (options.available !== undefined) params.set("available", String(options.available));
