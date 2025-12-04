@@ -1,8 +1,17 @@
 // Available AI models for the Manowar platform
 // Users can select any of these for their agents/workflows
-// Pricing updated November 2025 with real provider costs
+// Pricing updated December 2025 with real provider costs
 
-export type ModelProvider = "openai" | "anthropic" | "google" | "asi" | "oss";
+/**
+ * Model Provider Types:
+ * - openai: Uses OPENAI_API_KEY (mainstream GPT models)
+ * - anthropic: Uses ANTHROPIC_API_KEY (mainstream Claude models)
+ * - google: Uses GOOGLE_GENERATIVE_AI_API_KEY (mainstream Gemini models)
+ * - asi-one: Uses ASI_ONE_API_KEY (ASI:1 models EXCEPT asi1-mini)
+ * - oss: Uses ASI_INFERENCE_API_KEY via ASI Cloud (open-source models + asi1-mini)
+ * - huggingface: Uses HUGGING_FACE_INFERENCE_TOKEN (HuggingFace inference)
+ */
+export type ModelProvider = "openai" | "anthropic" | "google" | "asi-one" | "oss" | "huggingface";
 
 export interface AIModel {
   id: string;
@@ -14,11 +23,11 @@ export interface AIModel {
   capabilities: string[];
 }
 
-// Available models configuration
-// Prices based on November 2025 provider rates with accurate ASI Cloud pricing
-// Source: https://docs.cudos.org/docs/asi-cloud/inference/pricing
-export const AVAILABLE_MODELS: AIModel[] = [
-  // === MAINSTREAM MODELS ===
+// =============================================================================
+// MAINSTREAM MODELS (require respective API keys)
+// =============================================================================
+
+export const MAINSTREAM_MODELS: AIModel[] = [
   {
     id: "gpt-5.1",
     name: "GPT-5.1",
@@ -73,21 +82,18 @@ export const AVAILABLE_MODELS: AIModel[] = [
     maxTokens: 1000000,
     capabilities: ["reasoning", "code", "multimodal", "fast"],
   },
-  
-  // === ASI:1 MODELS ===
-  {
-    id: "asi1-mini",
-    name: "ASI-1 Mini",
-    provider: "asi",
-    description: "Web3-native AI, balanced performance (85% MMLU)",
-    priceMultiplier: 1.0,
-    maxTokens: 128000,
-    capabilities: ["reasoning", "agents", "web3"],
-  },
+];
+
+// =============================================================================
+// ASI:1 MODELS (native Fetch.ai models - use ASI_ONE_API_KEY)
+// EXCEPT asi1-mini which uses ASI_INFERENCE_API_KEY (ASI Cloud)
+// =============================================================================
+
+export const ASI_ONE_MODELS: AIModel[] = [
   {
     id: "asi1-fast",
     name: "ASI-1 Fast",
-    provider: "asi",
+    provider: "asi-one",
     description: "Ultra-low latency Web3 AI (87% MMLU)",
     priceMultiplier: 1.0,
     maxTokens: 64000,
@@ -96,7 +102,7 @@ export const AVAILABLE_MODELS: AIModel[] = [
   {
     id: "asi1-extended",
     name: "ASI-1 Extended",
-    provider: "asi",
+    provider: "asi-one",
     description: "Advanced reasoning with agent orchestration (89% MMLU)",
     priceMultiplier: 1.0,
     maxTokens: 64000,
@@ -105,7 +111,7 @@ export const AVAILABLE_MODELS: AIModel[] = [
   {
     id: "asi1-agentic",
     name: "ASI-1 Agentic",
-    provider: "asi",
+    provider: "asi-one",
     description: "Agent discovery and orchestration with Agentverse integration",
     priceMultiplier: 1.0,
     maxTokens: 64000,
@@ -114,19 +120,26 @@ export const AVAILABLE_MODELS: AIModel[] = [
   {
     id: "asi1-graph",
     name: "ASI-1 Graph",
-    provider: "asi",
+    provider: "asi-one",
     description: "Optimized for data analytics and graph visualization",
     priceMultiplier: 1.0,
     maxTokens: 64000,
     capabilities: ["reasoning", "analytics", "visualization"],
   },
-  
-  // === ASI CLOUD MODELS ===
+];
+
+// =============================================================================
+// ASI CLOUD MODELS (use ASI_INFERENCE_API_KEY)
+// Includes asi1-mini (default) + open-source models
+// Source: https://docs.cudos.org/docs/asi-cloud/inference/pricing
+// =============================================================================
+
+export const ASI_CLOUD_MODELS: AIModel[] = [
   {
     id: "asi1-mini",
     name: "ASI-1 Mini",
     provider: "oss",
-    description: "Efficient Reasoning for Everyday Agent Workflows",
+    description: "Web3-native AI, balanced performance (85% MMLU) - Default model",
     priceMultiplier: 1.0,
     maxTokens: 128000,
     capabilities: ["reasoning", "agents", "web3"],
@@ -196,6 +209,20 @@ export const AVAILABLE_MODELS: AIModel[] = [
   },
 ];
 
+// =============================================================================
+// Combined Models List
+// =============================================================================
+
+export const AVAILABLE_MODELS: AIModel[] = [
+  ...MAINSTREAM_MODELS,
+  ...ASI_ONE_MODELS,
+  ...ASI_CLOUD_MODELS,
+];
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
 // Get model by ID
 export function getModelById(id: string): AIModel | undefined {
   return AVAILABLE_MODELS.find((m) => m.id === id);
@@ -211,6 +238,35 @@ export function getModelsByCapability(capability: string): AIModel[] {
   return AVAILABLE_MODELS.filter((m) => m.capabilities.includes(capability));
 }
 
-// Default model for new agents (ASI-1 Mini - best balance)
-export const DEFAULT_MODEL_ID = "asi1-mini";
+// Check if a model uses ASI infrastructure
+export function isAsiModel(model: AIModel): boolean {
+  return model.provider === "asi-one" || model.provider === "oss";
+}
 
+// Check if a model is a mainstream model (uses provider-specific API key)
+export function isMainstreamModel(model: AIModel): boolean {
+  return ["openai", "anthropic", "google"].includes(model.provider);
+}
+
+// Get the API key environment variable name for a provider
+export function getApiKeyEnvName(provider: ModelProvider): string {
+  switch (provider) {
+    case "openai":
+      return "OPENAI_API_KEY";
+    case "anthropic":
+      return "ANTHROPIC_API_KEY";
+    case "google":
+      return "GOOGLE_GENERATIVE_AI_API_KEY";
+    case "asi-one":
+      return "ASI_ONE_API_KEY";
+    case "oss":
+      return "ASI_INFERENCE_API_KEY";
+    case "huggingface":
+      return "HUGGING_FACE_INFERENCE_TOKEN";
+    default:
+      return "ASI_INFERENCE_API_KEY";
+  }
+}
+
+// Default model for new agents (ASI-1 Mini - uses ASI_INFERENCE_API_KEY)
+export const DEFAULT_MODEL_ID = "asi1-mini";

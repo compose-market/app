@@ -55,7 +55,7 @@ export const AGENT_REGISTRIES = {
     url: null,
     color: "cyan",
     type: "agent" as const, // True AI agents
-    enabled: false, // Coming soon
+    enabled: true, // On-chain ERC8004 agents
   },
 } as const;
 

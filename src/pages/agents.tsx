@@ -22,9 +22,13 @@ import {
   Star,
   Activity,
   Shield,
-  Globe
+  Globe,
+  ArrowRightLeft,
+  Eye,
 } from "lucide-react";
 import { useAgents } from "@/hooks/use-agents";
+import { useOnchainAgents, type OnchainAgent } from "@/hooks/use-onchain";
+import { getIpfsUrl } from "@/lib/pinata";
 import { 
   type Agent,
   type AgentRegistryId,
@@ -48,15 +52,81 @@ export default function AgentsPage() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  const { data, isLoading, error } = useAgents({
+  // Fetch external registry agents
+  const { data, isLoading: isLoadingExternal, error } = useAgents({
     search: debouncedSearch || undefined,
     tags: selectedTag !== "all" ? [selectedTag] : undefined,
-    registries: selectedRegistries.length > 0 ? selectedRegistries : undefined,
+    registries: selectedRegistries.filter(r => r !== "manowar"),
     status: "active",
     limit: 60,
     sort: "interactions",
     direction: "desc",
   });
+
+  // Fetch on-chain Manowar agents
+  const { data: onchainAgents, isLoading: isLoadingOnchain } = useOnchainAgents();
+  
+  // Convert on-chain agents to unified Agent format
+  const manowarAgents = useMemo((): Agent[] => {
+    if (!onchainAgents || !selectedRegistries.includes("manowar")) return [];
+    
+    return onchainAgents
+      .filter(a => {
+        // Filter by search
+        if (debouncedSearch) {
+          const searchLower = debouncedSearch.toLowerCase();
+          const name = a.metadata?.name || `Agent #${a.id}`;
+          const desc = a.metadata?.description || "";
+          if (!name.toLowerCase().includes(searchLower) && 
+              !desc.toLowerCase().includes(searchLower)) {
+            return false;
+          }
+        }
+        return true;
+      })
+      .map((a): Agent => {
+        const avatarUri = a.metadata?.avatar;
+        let avatarUrl: string | null = null;
+        if (avatarUri && avatarUri !== "none" && avatarUri.startsWith("ipfs://")) {
+          avatarUrl = getIpfsUrl(avatarUri.replace("ipfs://", ""));
+        }
+        
+        return {
+          id: `manowar-${a.id}`,
+          address: a.creator,
+          name: a.metadata?.name || `Agent #${a.id}`,
+          description: a.metadata?.description || "",
+          registry: "manowar" as AgentRegistryId,
+          protocols: a.metadata?.protocols || [{ name: "x402", version: "1.0" }],
+          avatarUrl,
+          totalInteractions: 0, // On-chain agents don't track this yet
+          recentInteractions: 0,
+          rating: 5.0, // Default rating for new agents
+          status: "active" as const,
+          type: a.metadata?.endpoint ? "hosted" as const : "local" as const,
+          featured: false,
+          verified: true, // On-chain = verified
+          category: "ai-agent",
+          tags: a.metadata?.skills || [],
+          owner: a.creator,
+          createdAt: a.metadata?.createdAt || new Date().toISOString(),
+          updatedAt: a.metadata?.createdAt || new Date().toISOString(),
+          // Manowar-specific fields
+          price: a.priceFormatted,
+          units: a.units === 0 ? "∞" : `${a.unitsAvailable}/${a.units}`,
+          cloneable: a.cloneable,
+          isClone: a.isClone,
+        };
+      });
+  }, [onchainAgents, selectedRegistries, debouncedSearch]);
+
+  // Merge agents from all sources
+  const allAgents = useMemo(() => {
+    const external = data?.agents || [];
+    return [...manowarAgents, ...external];
+  }, [data?.agents, manowarAgents]);
+
+  const isLoading = isLoadingExternal || isLoadingOnchain;
 
   const handleSelectAgent = (agent: Agent) => {
     // Store selected agent in sessionStorage and navigate back to compose
@@ -183,20 +253,20 @@ export default function AgentsPage() {
       </div>
 
       {/* Stats Bar */}
-      {data && !isLoading && (
+      {!isLoading && (
         <div className="flex items-center gap-6 mb-6 text-sm font-mono text-muted-foreground">
           <div className="flex items-center gap-2">
             <Layers className="w-4 h-4 text-fuchsia-400" />
-            <span>{data.agents.length} agents found</span>
+            <span>{allAgents.length} agents found</span>
           </div>
           <div className="flex items-center gap-2">
             <Globe className="w-4 h-4 text-cyan-400" />
-            <span>{data.registries.length} {data.registries.length === 1 ? "registry" : "registries"}</span>
+            <span>{selectedRegistries.length} {selectedRegistries.length === 1 ? "registry" : "registries"}</span>
           </div>
-          {data.total > data.agents.length && (
+          {manowarAgents.length > 0 && (
             <div className="flex items-center gap-2">
-              <Activity className="w-4 h-4 text-green-400" />
-              <span>{data.total.toLocaleString()} total available</span>
+              <Sparkles className="w-4 h-4 text-cyan-400" />
+              <span>{manowarAgents.length} on-chain</span>
             </div>
           )}
         </div>
@@ -236,16 +306,16 @@ export default function AgentsPage() {
       )}
 
       {/* Agents Grid */}
-      {data && !isLoading && (
+      {!isLoading && allAgents.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {data.agents.map((agent) => (
+          {allAgents.map((agent) => (
             <AgentCard key={agent.id} agent={agent} onSelect={handleSelectAgent} />
           ))}
         </div>
       )}
 
       {/* Empty State */}
-      {data && data.agents.length === 0 && !isLoading && (
+      {allAgents.length === 0 && !isLoading && (
         <div className="text-center py-16 space-y-4">
           <Bot className="w-16 h-16 mx-auto text-muted-foreground/50" />
           <p className="text-muted-foreground font-mono">No agents found matching your criteria.</p>
@@ -266,7 +336,16 @@ export default function AgentsPage() {
   );
 }
 
-function AgentCard({ agent, onSelect }: { agent: Agent; onSelect: (a: Agent) => void }) {
+// Extended Agent type with Manowar fields
+interface ExtendedAgent extends Agent {
+  price?: string;
+  units?: string;
+  cloneable?: boolean;
+  isClone?: boolean;
+}
+
+function AgentCard({ agent, onSelect }: { agent: ExtendedAgent; onSelect: (a: Agent) => void }) {
+  const [, setLocation] = useLocation();
   const excerpt = agent.description || (agent.readme ? getReadmeExcerpt(agent.readme, 100) : "");
   const initials = agent.name
     .split(" ")
@@ -276,15 +355,31 @@ function AgentCard({ agent, onSelect }: { agent: Agent; onSelect: (a: Agent) => 
     .toUpperCase();
   
   const registryInfo = AGENT_REGISTRIES[agent.registry];
+  const isManowar = agent.registry === "manowar";
+  
+  // Extract numeric ID for manowar agents (e.g., "manowar-5" -> 5)
+  const manowarId = isManowar ? parseInt(agent.id.replace("manowar-", "")) : null;
+  
+  const handleWarp = () => {
+    // Store agent for warp flow
+    sessionStorage.setItem("warpAgent", JSON.stringify(agent));
+    setLocation("/create-agent?warp=true");
+  };
+  
+  const handleViewEndpoint = () => {
+    if (manowarId) {
+      setLocation(`/agent/${manowarId}`);
+    }
+  };
   
   return (
-    <Card className="group bg-background border-sidebar-border hover:border-fuchsia-500/50 transition-all duration-300 corner-decoration overflow-hidden">
+    <Card className={`group bg-background border-sidebar-border hover:border-fuchsia-500/50 transition-all duration-300 corner-decoration overflow-hidden ${isManowar ? "ring-1 ring-cyan-500/20" : ""}`}>
       <CardContent className="p-5 space-y-4">
         {/* Header with Avatar */}
         <div className="flex items-start gap-3">
-          <Avatar className="w-12 h-12 border-2 border-sidebar-border group-hover:border-fuchsia-500/50 transition-colors">
+          <Avatar className={`w-12 h-12 border-2 ${isManowar ? "border-cyan-500/50" : "border-sidebar-border"} group-hover:border-fuchsia-500/50 transition-colors`}>
             <AvatarImage src={agent.avatarUrl || undefined} alt={agent.name} />
-            <AvatarFallback className="bg-fuchsia-500/10 text-fuchsia-400 font-mono text-sm">
+            <AvatarFallback className={`${isManowar ? "bg-cyan-500/10 text-cyan-400" : "bg-fuchsia-500/10 text-fuchsia-400"} font-mono text-sm`}>
               {initials}
             </AvatarFallback>
           </Avatar>
@@ -320,6 +415,12 @@ function AgentCard({ agent, onSelect }: { agent: Agent; onSelect: (a: Agent) => 
 
         {/* Badges */}
         <div className="flex flex-wrap gap-1.5">
+          {isManowar && (
+            <Badge variant="outline" className="text-[10px] font-mono border-cyan-500/30 text-cyan-400 bg-cyan-500/10 px-1.5 py-0">
+              <Sparkles className="w-2.5 h-2.5 mr-1" />
+              on-chain
+            </Badge>
+          )}
           {agent.verified && (
             <Badge variant="outline" className="text-[10px] font-mono border-green-500/30 text-green-400 bg-green-500/10 px-1.5 py-0">
               <Shield className="w-2.5 h-2.5 mr-1" />
@@ -330,6 +431,16 @@ function AgentCard({ agent, onSelect }: { agent: Agent; onSelect: (a: Agent) => 
             <Badge variant="outline" className="text-[10px] font-mono border-yellow-500/30 text-yellow-400 bg-yellow-500/10 px-1.5 py-0">
               <Star className="w-2.5 h-2.5 mr-1" />
               featured
+            </Badge>
+          )}
+          {agent.cloneable && (
+            <Badge variant="outline" className="text-[10px] font-mono border-purple-500/30 text-purple-400 bg-purple-500/10 px-1.5 py-0">
+              cloneable
+            </Badge>
+          )}
+          {agent.isClone && (
+            <Badge variant="outline" className="text-[10px] font-mono border-orange-500/30 text-orange-400 bg-orange-500/10 px-1.5 py-0">
+              clone
             </Badge>
           )}
           <Badge variant="outline" className="text-[10px] font-mono border-fuchsia-500/30 text-fuchsia-400 bg-fuchsia-500/10 px-1.5 py-0">
@@ -344,24 +455,65 @@ function AgentCard({ agent, onSelect }: { agent: Agent; onSelect: (a: Agent) => 
 
         {/* Stats */}
         <div className="grid grid-cols-2 gap-3 text-xs font-mono">
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <Zap className="w-3.5 h-3.5 text-green-400" />
-            <span>{formatInteractions(agent.totalInteractions)} uses</span>
-          </div>
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <Star className="w-3.5 h-3.5 text-yellow-400" />
-            <span>{agent.rating.toFixed(1)} rating</span>
-          </div>
+          {isManowar && agent.price ? (
+            <>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Zap className="w-3.5 h-3.5 text-green-400" />
+                <span>{agent.price}</span>
+              </div>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Layers className="w-3.5 h-3.5 text-cyan-400" />
+                <span>{agent.units} units</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Zap className="w-3.5 h-3.5 text-green-400" />
+                <span>{formatInteractions(agent.totalInteractions)} uses</span>
+              </div>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Star className="w-3.5 h-3.5 text-yellow-400" />
+                <span>{agent.rating.toFixed(1)} rating</span>
+              </div>
+            </>
+          )}
         </div>
 
-        {/* Select Button */}
-        <Button
-          onClick={() => onSelect(agent)}
-          className="w-full bg-sidebar-accent border border-sidebar-border text-foreground hover:border-fuchsia-500 hover:text-fuchsia-400 font-mono text-sm transition-colors group-hover:bg-fuchsia-500/10"
-        >
-          <Check className="w-4 h-4 mr-2" />
-          SELECT AGENT
-        </Button>
+        {/* Action Buttons */}
+        <div className="flex gap-2">
+          <Button
+            onClick={() => onSelect(agent)}
+            className={`flex-1 bg-sidebar-accent border border-sidebar-border text-foreground hover:border-fuchsia-500 hover:text-fuchsia-400 font-mono text-xs transition-colors group-hover:bg-fuchsia-500/10 ${isManowar ? "hover:border-cyan-500 hover:text-cyan-400 group-hover:bg-cyan-500/10" : ""}`}
+          >
+            <Check className="w-3.5 h-3.5 mr-1.5" />
+            SELECT
+          </Button>
+          
+          {/* WARP button for non-manowar agents */}
+          {!isManowar && (
+            <Button
+              onClick={handleWarp}
+              variant="outline"
+              className="border-fuchsia-500/50 text-fuchsia-400 hover:bg-fuchsia-500/20 font-mono text-xs"
+            >
+              <ArrowRightLeft className="w-3.5 h-3.5 mr-1" />
+              WARP
+            </Button>
+          )}
+          
+          {/* VIEW ENDPOINT button for manowar agents */}
+          {isManowar && (
+            <Button
+              onClick={handleViewEndpoint}
+              variant="outline"
+              className="border-cyan-500/50 text-cyan-400 hover:bg-cyan-500/20 font-mono text-xs"
+            >
+              <Eye className="w-3.5 h-3.5 mr-1" />
+              VIEW
+            </Button>
+          )}
+        </div>
       </CardContent>
     </Card>
   );

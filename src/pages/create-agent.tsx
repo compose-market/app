@@ -18,6 +18,16 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
@@ -68,7 +78,7 @@ const formSchema = z.object({
   description: z.string().min(10),
   model: z.string(),
   pricePerUse: z.string(),
-  endpoint: z.string().url(),
+  endpoint: z.string().url().optional().or(z.literal("")),
   isCloneable: z.boolean(),
   units: z.string().optional(),
 });
@@ -154,11 +164,15 @@ export default function CreateAgent() {
       description: "",
       model: "asi1-mini",
       pricePerUse: "0.01",
-      endpoint: "https://",
+      endpoint: "",
       isCloneable: false,
       units: "",
     },
   });
+  
+  // Confirmation dialog state
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [pendingValues, setPendingValues] = useState<FormValues | null>(null);
   
   // Update form when HF model is selected
   useEffect(() => {
@@ -244,7 +258,7 @@ export default function CreateAgent() {
         price: usdcToWei(parseFloat(values.pricePerUse)).toString(),
         units: values.units ? parseInt(values.units) : 0,
         cloneable: values.isCloneable,
-        endpoint: values.endpoint,
+        endpoint: values.endpoint || undefined, // Optional - x402 handles routing
         protocols: [{ name: "x402", version: "1.0" }],
         plugins: selectedPlugins.map(p => ({
           registryId: p.id,
@@ -325,9 +339,17 @@ export default function CreateAgent() {
     });
   };
 
-  // Legacy submit for form validation only
+  // Show confirmation before minting
   const onSubmit: SubmitHandler<FormValues> = async (values) => {
-    await prepareForMint(values);
+    setPendingValues(values);
+    setShowConfirmDialog(true);
+  };
+
+  // Handle confirmed mint
+  const handleConfirmedMint = async () => {
+    if (!pendingValues) return;
+    setShowConfirmDialog(false);
+    await prepareForMint(pendingValues);
   };
 
   const isProcessing = mintStep !== "idle" && mintStep !== "done";
@@ -461,10 +483,15 @@ export default function CreateAgent() {
                       name="endpoint"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel className="font-mono text-foreground">Service Endpoint</FormLabel>
+                          <FormLabel className="font-mono text-foreground">
+                            API Endpoint <span className="text-muted-foreground text-xs">(optional)</span>
+                          </FormLabel>
                           <FormControl>
                             <Input placeholder="https://api.myagent.com/v1" {...field} className="bg-background/50 font-mono border-sidebar-border focus:border-cyan-500" />
                           </FormControl>
+                          <FormDescription className="text-xs">
+                            Custom endpoint for self-hosted agents. Leave empty to use Compose.Market's hosted infrastructure.
+                          </FormDescription>
                           <FormMessage />
                         </FormItem>
                       )}
@@ -824,6 +851,71 @@ export default function CreateAgent() {
           </div>
         </div>
       </div>
+
+      {/* Confirmation Dialog */}
+      <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
+        <AlertDialogContent className="bg-background border-sidebar-border max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-display text-xl">
+              <Sparkles className="w-5 h-5 inline mr-2 text-cyan-400" />
+              Confirm Agent Minting
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-muted-foreground">
+              Review your agent details before minting to the blockchain.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          
+          {pendingValues && (
+            <div className="space-y-3 py-4 border-y border-sidebar-border">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Name</span>
+                <span className="font-mono text-foreground">{pendingValues.name}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Model</span>
+                <span className="font-mono text-cyan-400">{selectedHFModel?.name || pendingValues.model}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Price per use</span>
+                <span className="font-mono text-green-400">${pendingValues.pricePerUse} USDC</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Supply</span>
+                <span className="font-mono">{pendingValues.units || "∞ Unlimited"}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Cloneable</span>
+                <span className="font-mono">{pendingValues.isCloneable ? "Yes" : "No"}</span>
+              </div>
+              {selectedPlugins.length > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Plugins</span>
+                  <span className="font-mono text-fuchsia-400">{selectedPlugins.length} selected</span>
+                </div>
+              )}
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Network</span>
+                <span className="font-mono text-cyan-400">Avalanche Fuji</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Gas</span>
+                <span className="font-mono text-green-400">Sponsored (Free)</span>
+              </div>
+            </div>
+          )}
+
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-sidebar-border">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmedMint}
+              className="bg-cyan-500 text-black hover:bg-cyan-400 font-bold"
+            >
+              <CheckCircle2 className="w-4 h-4 mr-2" />
+              Confirm & Mint
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

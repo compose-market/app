@@ -47,7 +47,7 @@ export function SessionBudgetDialog() {
           className="border-cyan-500/30 bg-cyan-500/5 text-cyan-400 hover:bg-cyan-500/10 font-mono"
         >
           <Zap className="w-4 h-4 mr-2" />
-          {session.isActive ? "Session Active" : "Enable Fast Mode"}
+          {session.isActive ? "Session Active" : "Enable Agent Mode"}
         </Button>
       </DialogTrigger>
       <DialogContent className="bg-card border-sidebar-border max-w-md">

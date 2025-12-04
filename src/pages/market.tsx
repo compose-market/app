@@ -1,9 +1,10 @@
 /**
- * Live Market Feed
+ * Market - Manowar Workflows & RFA Bounties
  * 
- * Discover agents from Agentverse and MCP servers from the registry.
+ * Browse and purchase ERC7401 workflow NFTs and submit agents for RFA bounties.
  */
 import { useState } from "react";
+import * as React from "react";
 import { Link } from "wouter";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,7 +12,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -19,41 +19,29 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useAgents, type Agent } from "@/hooks/use-agents";
-import { 
-  useRegistryServers, 
-  useRegistryCategories,
-  type RegistryServer,
-  getOriginLabel,
-  isRemoteCapable,
-  formatToolCount,
-} from "@/hooks/use-registry";
+import { useOnchainManowars, useManowarsWithRFA, type OnchainManowar } from "@/hooks/use-onchain";
+import { getIpfsUrl } from "@/lib/pinata";
 import {
-  Activity,
   Box,
-  Cpu,
   Layers,
-  Star,
-  Terminal,
-  User,
-  Zap,
   Search,
-  Loader2,
-  Server,
   Sparkles,
-  Cloud,
-  Wrench,
-  Github,
-  ExternalLink,
-  Filter,
   RefreshCw,
+  DollarSign,
+  Clock,
+  Users,
+  Zap,
+  FileQuestion,
+  Award,
+  Package,
+  Percent,
+  Calendar,
+  Target,
+  ExternalLink,
 } from "lucide-react";
-import { formatInteractions, getRatingColor } from "@/lib/agents";
 
 export default function Market() {
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState<string>("all");
-  const [agentSort, setAgentSort] = useState<"interactions" | "created-at" | "relevancy">("interactions");
 
   return (
     <div className="space-y-8">
@@ -62,12 +50,12 @@ export default function Market() {
         <div className="flex items-center gap-4">
           <h1 className="text-2xl font-display font-bold text-white">
             <span className="text-fuchsia-500 mr-2">//</span>
-            LIVE FEED
+            MARKET
           </h1>
           <div className="hidden md:flex h-px w-32 bg-gradient-to-r from-fuchsia-500 to-transparent"></div>
         </div>
         <p className="text-muted-foreground font-mono text-sm">
-          Discover, connect, and compose with AI Agents & MCP Servers.
+          Discover workflows and RFA bounties on the Manowar protocol.
         </p>
       </div>
 
@@ -75,43 +63,37 @@ export default function Market() {
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
         <Input
-          placeholder="Search agents and servers..."
+          placeholder="Search workflows and bounties..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="pl-10 bg-background/50 border-sidebar-border font-mono"
         />
       </div>
 
-      <Tabs defaultValue="agents" className="w-full">
+      <Tabs defaultValue="manowars" className="w-full">
         <TabsList className="bg-sidebar-accent border border-sidebar-border p-1 mb-8">
           <TabsTrigger 
-            value="agents" 
+            value="manowars" 
             className="data-[state=active]:bg-cyan-500 data-[state=active]:text-black font-bold font-mono tracking-wide px-8"
           >
-            AGENTS
+            <Layers className="w-4 h-4 mr-2" />
+            MANOWARS
           </TabsTrigger>
           <TabsTrigger 
-            value="servers" 
+            value="rfas" 
             className="data-[state=active]:bg-fuchsia-500 data-[state=active]:text-white font-bold font-mono tracking-wide px-8"
           >
-            MCP SERVERS
+            <FileQuestion className="w-4 h-4 mr-2" />
+            RFAs
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="agents" className="mt-0">
-          <AgentsTab 
-            searchQuery={searchQuery} 
-            sort={agentSort}
-            onSortChange={setAgentSort}
-          />
+        <TabsContent value="manowars" className="mt-0">
+          <ManowarsTab searchQuery={searchQuery} />
         </TabsContent>
 
-        <TabsContent value="servers" className="mt-0">
-          <ServersTab 
-            searchQuery={searchQuery}
-            category={selectedCategory}
-            onCategoryChange={setSelectedCategory}
-          />
+        <TabsContent value="rfas" className="mt-0">
+          <RFAsTab searchQuery={searchQuery} />
         </TabsContent>
       </Tabs>
     </div>
@@ -119,45 +101,67 @@ export default function Market() {
 }
 
 // =============================================================================
-// Agents Tab
+// Manowars Tab - Complete ERC7401 Workflows
 // =============================================================================
 
-function AgentsTab({ 
-  searchQuery, 
-  sort,
-  onSortChange,
-}: { 
-  searchQuery: string; 
-  sort: "interactions" | "created-at" | "relevancy";
-  onSortChange: (sort: "interactions" | "created-at" | "relevancy") => void;
-}) {
-  const { data, isLoading, error, refetch } = useAgents({
-    search: searchQuery || undefined,
-    sort,
-    direction: "desc",
-    limit: 50,
+function ManowarsTab({ searchQuery }: { searchQuery: string }) {
+  const [sort, setSort] = useState<"newest" | "price-low" | "price-high">("newest");
+  const { data: manowars, isLoading, error, refetch } = useOnchainManowars({ 
+    onlyComplete: true, 
+    includeRFA: false 
   });
+
+  // Filter and sort
+  const filteredManowars = React.useMemo(() => {
+    if (!manowars) return [];
+    
+    let filtered = manowars;
+    
+    // Search filter
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      filtered = filtered.filter(m => 
+        m.title.toLowerCase().includes(q) || 
+        m.description.toLowerCase().includes(q)
+      );
+    }
+    
+    // Sort
+    filtered = [...filtered].sort((a, b) => {
+      switch (sort) {
+        case "price-low":
+          return parseFloat(a.totalPrice) - parseFloat(b.totalPrice);
+        case "price-high":
+          return parseFloat(b.totalPrice) - parseFloat(a.totalPrice);
+        case "newest":
+        default:
+          return b.id - a.id;
+      }
+    });
+    
+    return filtered;
+  }, [manowars, searchQuery, sort]);
 
   return (
     <div className="space-y-4">
       {/* Filters */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Select value={sort} onValueChange={(v) => onSortChange(v as typeof sort)}>
+          <Select value={sort} onValueChange={(v) => setSort(v as typeof sort)}>
             <SelectTrigger className="w-[160px] bg-background/50 border-sidebar-border">
               <SelectValue placeholder="Sort by" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="interactions">Most Used</SelectItem>
-              <SelectItem value="created-at">Newest</SelectItem>
-              <SelectItem value="relevancy">Relevance</SelectItem>
+              <SelectItem value="newest">Newest</SelectItem>
+              <SelectItem value="price-low">Price: Low to High</SelectItem>
+              <SelectItem value="price-high">Price: High to Low</SelectItem>
             </SelectContent>
           </Select>
         </div>
         <div className="flex items-center gap-2">
-          {data && (
+          {manowars && (
             <Badge variant="outline" className="font-mono text-xs">
-              {data.total} agents
+              {filteredManowars.length} workflows
             </Badge>
           )}
           <Button
@@ -173,15 +177,16 @@ function AgentsTab({
 
       {/* Loading State */}
       {isLoading && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {[...Array(8)].map((_, i) => (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {[...Array(6)].map((_, i) => (
             <Card key={i} className="glass-panel">
               <CardHeader className="pb-2">
-                <Skeleton className="h-4 w-3/4" />
+                <Skeleton className="h-32 w-full rounded" />
+                <Skeleton className="h-4 w-3/4 mt-4" />
                 <Skeleton className="h-3 w-1/2 mt-2" />
               </CardHeader>
               <CardContent>
-                <Skeleton className="h-20 w-full" />
+                <Skeleton className="h-16 w-full" />
               </CardContent>
             </Card>
           ))}
@@ -203,183 +208,186 @@ function AgentsTab({
         </div>
       )}
 
-      {/* Agents Grid */}
-      {data && !isLoading && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {data.agents.map((agent) => (
-            <AgentCard key={agent.address} agent={agent} />
+      {/* Manowars Grid */}
+      {!isLoading && filteredManowars.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filteredManowars.map((manowar) => (
+            <ManowarCard key={manowar.id} manowar={manowar} />
           ))}
         </div>
       )}
 
       {/* Empty State */}
-      {data?.agents.length === 0 && !isLoading && (
+      {filteredManowars.length === 0 && !isLoading && (
         <div className="text-center py-20">
-          <User className="w-12 h-12 mx-auto text-muted-foreground/30 mb-4" />
+          <Layers className="w-12 h-12 mx-auto text-muted-foreground/30 mb-4" />
           <p className="text-muted-foreground">
-            {searchQuery ? "No agents match your search" : "No agents found"}
+            {searchQuery ? "No workflows match your search" : "No workflows available yet"}
           </p>
+          <Link href="/compose">
+            <Button className="mt-4 bg-cyan-500 hover:bg-cyan-600 text-black font-bold">
+              CREATE FIRST WORKFLOW
+            </Button>
+          </Link>
         </div>
       )}
     </div>
   );
 }
 
-function AgentCard({ agent }: { agent: Agent }) {
-  const TypeIcon = agent.category === "finance" ? Activity : 
-                   agent.category === "utility" ? Terminal :
-                   agent.category === "social" ? User : Box;
+function ManowarCard({ manowar }: { manowar: OnchainManowar }) {
+  const bannerUrl = manowar.banner && manowar.banner.startsWith("ipfs://") 
+    ? getIpfsUrl(manowar.banner.replace("ipfs://", ""))
+    : null;
+  
+  const unitsAvailable = manowar.units === 0 ? "∞" : `${manowar.units - manowar.unitsMinted}/${manowar.units}`;
 
   return (
-    <div className="group relative bg-sidebar-accent/50 border border-sidebar-border hover:border-cyan-500/50 transition-all duration-300 backdrop-blur-sm overflow-hidden">
-      {/* Card Header */}
-      <div className="h-32 bg-background relative overflow-hidden border-b border-sidebar-border group-hover:border-cyan-500/30 transition-colors">
-        <div className="absolute inset-0 opacity-30 group-hover:opacity-50 transition-opacity">
-          <div className="w-full h-full bg-[linear-gradient(45deg,transparent_25%,rgba(6,182,212,0.1)_25%,rgba(6,182,212,0.1)_50%,transparent_50%,transparent_75%,rgba(6,182,212,0.1)_75%,rgba(6,182,212,0.1)_100%)] bg-[length:20px_20px]"></div>
-        </div>
-        
-        <div className="absolute inset-0 flex items-center justify-center">
-          {agent.avatarUrl ? (
-            <img 
-              src={agent.avatarUrl} 
-              alt={agent.name}
-              className="w-16 h-16 rounded-full object-cover border-2 border-sidebar-border"
-            />
-          ) : (
-            <TypeIcon className="w-12 h-12 text-sidebar-border group-hover:text-cyan-400 transition-colors" />
-          )}
-        </div>
-
-        <div className="absolute top-2 right-2 flex gap-1">
-          {agent.verified && (
-            <Badge className="bg-green-500/20 text-green-400 border-green-500/30 text-[10px]">
-              ✓ Verified
-            </Badge>
-          )}
-          {agent.featured && (
-            <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30 text-[10px]">
-              ★ Featured
-            </Badge>
-          )}
-        </div>
-      </div>
-
-      {/* Content */}
-      <div className="p-4 space-y-4">
-        <div>
-          <h3 className="text-lg font-bold font-display text-foreground group-hover:text-cyan-400 transition-colors truncate">
-            {agent.name}
-          </h3>
-          <p className="text-xs text-muted-foreground font-mono mt-1 line-clamp-2">
-            {agent.description}
-          </p>
-        </div>
-
-        {/* Protocols */}
-        {agent.protocols.length > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {agent.protocols.slice(0, 2).map((p) => (
-              <Badge 
-                key={p.name} 
-                variant="outline" 
-                className="text-[10px] border-cyan-500/30 text-cyan-400"
-              >
-                {p.name}
-              </Badge>
-            ))}
-            {agent.protocols.length > 2 && (
-              <Badge variant="outline" className="text-[10px]">
-                +{agent.protocols.length - 2}
-              </Badge>
-            )}
+    <Card className="glass-panel border-cyan-500/20 hover:border-cyan-500/60 transition-all duration-300 group overflow-hidden">
+      {/* Banner */}
+      <div className="h-36 bg-gradient-to-br from-cyan-500/10 to-fuchsia-500/10 relative overflow-hidden">
+        {bannerUrl ? (
+          <img 
+            src={bannerUrl} 
+            alt={manowar.title}
+            className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
+          />
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="w-full h-full bg-[linear-gradient(45deg,transparent_25%,rgba(6,182,212,0.1)_25%,rgba(6,182,212,0.1)_50%,transparent_50%,transparent_75%,rgba(6,182,212,0.1)_75%,rgba(6,182,212,0.1)_100%)] bg-[length:20px_20px]"></div>
+            <Layers className="w-12 h-12 text-cyan-500/30 absolute" />
           </div>
         )}
+        
+        {/* Badges */}
+        <div className="absolute top-2 right-2 flex gap-1">
+          <Badge className="bg-cyan-500/20 text-cyan-400 border-cyan-500/30 text-[10px]">
+            <Sparkles className="w-2.5 h-2.5 mr-1" />
+            ERC-7401
+          </Badge>
+        </div>
+        
+        {/* Lease badge */}
+        {manowar.leaseEnabled && (
+          <div className="absolute top-2 left-2">
+            <Badge className="bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/30 text-[10px]">
+              <Percent className="w-2.5 h-2.5 mr-1" />
+              Leaseable
+            </Badge>
+          </div>
+        )}
+      </div>
 
+      <CardHeader className="p-4 pb-2">
+        <CardTitle className="text-lg font-display font-bold text-white group-hover:text-cyan-400 transition-colors truncate">
+          {manowar.title || `Manowar #${manowar.id}`}
+        </CardTitle>
+        <CardDescription className="line-clamp-2 text-xs h-8">
+          {manowar.description || "No description"}
+        </CardDescription>
+      </CardHeader>
+
+      <CardContent className="p-4 pt-0 space-y-3">
         {/* Stats Grid */}
         <div className="grid grid-cols-2 gap-2">
-          <div className="p-2 bg-background border border-sidebar-border/50">
-            <p className="text-[10px] text-muted-foreground uppercase">Rating</p>
+          <div className="p-2 bg-background border border-sidebar-border/50 rounded">
+            <p className="text-[10px] text-muted-foreground uppercase">Total Price</p>
             <div className="flex items-center gap-1">
-              <Star className={`w-3 h-3 ${getRatingColor(agent.rating)} fill-current`} />
-              <span className={`font-mono text-sm ${getRatingColor(agent.rating)}`}>
-                {agent.rating.toFixed(1)}
-              </span>
+              <DollarSign className="w-3 h-3 text-green-400" />
+              <span className="font-mono text-sm text-green-400">{manowar.totalPrice} USDC</span>
             </div>
           </div>
-          <div className="p-2 bg-background border border-sidebar-border/50">
-            <p className="text-[10px] text-muted-foreground uppercase">Usage</p>
-            <span className="font-mono text-sm text-cyan-400">
-              {formatInteractions(agent.totalInteractions)}
-            </span>
+          <div className="p-2 bg-background border border-sidebar-border/50 rounded">
+            <p className="text-[10px] text-muted-foreground uppercase">x402 Fee</p>
+            <div className="flex items-center gap-1">
+              <Zap className="w-3 h-3 text-yellow-400" />
+              <span className="font-mono text-sm text-yellow-400">{manowar.x402Price} USDC</span>
+            </div>
           </div>
         </div>
 
+        <div className="grid grid-cols-2 gap-2">
+          <div className="p-2 bg-background border border-sidebar-border/50 rounded">
+            <p className="text-[10px] text-muted-foreground uppercase">Supply</p>
+            <div className="flex items-center gap-1">
+              <Package className="w-3 h-3 text-cyan-400" />
+              <span className="font-mono text-sm text-cyan-400">{unitsAvailable}</span>
+            </div>
+          </div>
+          {manowar.leaseEnabled && (
+            <div className="p-2 bg-background border border-sidebar-border/50 rounded">
+              <p className="text-[10px] text-muted-foreground uppercase">Lease</p>
+              <div className="flex items-center gap-1">
+                <Calendar className="w-3 h-3 text-fuchsia-400" />
+                <span className="font-mono text-sm text-fuchsia-400">{manowar.leaseDuration}d @ {manowar.leasePercent}%</span>
+              </div>
+            </div>
+          )}
+          {manowar.coordinatorAgentId > 0 && (
+            <div className="p-2 bg-background border border-sidebar-border/50 rounded">
+              <p className="text-[10px] text-muted-foreground uppercase">Coordinator</p>
+              <div className="flex items-center gap-1">
+                <Users className="w-3 h-3 text-amber-400" />
+                <span className="font-mono text-sm text-amber-400">{manowar.coordinatorModel || "Active"}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      </CardContent>
+
+      <CardFooter className="p-4 pt-0 flex gap-2">
         <Button 
-          className="w-full py-2 bg-sidebar-border hover:bg-cyan-600 hover:text-black text-xs font-bold font-mono uppercase tracking-wider transition-all border border-transparent hover:border-cyan-400"
-          onClick={() => window.open(agent.externalUrl, "_blank")}
+          className="flex-1 bg-cyan-500 hover:bg-cyan-600 text-black font-bold font-mono text-xs"
         >
-          VIEW AGENT
+          <DollarSign className="w-3 h-3 mr-1" />
+          PURCHASE
         </Button>
-      </div>
-    </div>
+        <Button 
+          variant="outline"
+          className="border-sidebar-border hover:border-cyan-500/50"
+          onClick={() => window.open(`https://testnet.snowtrace.io/token/${import.meta.env.VITE_MANOWAR_CONTRACT}?a=${manowar.id}`, "_blank")}
+        >
+          <ExternalLink className="w-4 h-4" />
+        </Button>
+      </CardFooter>
+    </Card>
   );
 }
 
 // =============================================================================
-// Servers Tab (MCP)
+// RFAs Tab - Request-For-Agent Bounties
 // =============================================================================
 
-function ServersTab({ 
-  searchQuery,
-  category,
-  onCategoryChange,
-}: { 
-  searchQuery: string;
-  category: string;
-  onCategoryChange: (cat: string) => void;
-}) {
-  const { data: categories } = useRegistryCategories();
-  const { data, isLoading, error, refetch } = useRegistryServers({
-    category: category === "all" ? undefined : category,
-    limit: 50,
-  });
+function RFAsTab({ searchQuery }: { searchQuery: string }) {
+  const { data: rfaManowars, isLoading, error, refetch } = useManowarsWithRFA();
 
-  // Filter by search query client-side
-  const filteredServers = data?.servers.filter((s) => {
-    if (!searchQuery) return true;
+  // Filter
+  const filteredRFAs = React.useMemo(() => {
+    if (!rfaManowars) return [];
+    
+    if (!searchQuery) return rfaManowars;
+    
     const q = searchQuery.toLowerCase();
-    return (
-      s.name.toLowerCase().includes(q) ||
-      s.description.toLowerCase().includes(q) ||
-      s.namespace.toLowerCase().includes(q) ||
-      s.tags.some((t) => t.includes(q))
+    return rfaManowars.filter(m => 
+      m.title.toLowerCase().includes(q) || 
+      m.description.toLowerCase().includes(q)
     );
-  }) || [];
+  }, [rfaManowars, searchQuery]);
 
   return (
     <div className="space-y-4">
-      {/* Filters */}
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Select value={category} onValueChange={onCategoryChange}>
-            <SelectTrigger className="w-[160px] bg-background/50 border-sidebar-border">
-              <Filter className="w-3 h-3 mr-2 text-muted-foreground" />
-              <SelectValue placeholder="Category" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Categories</SelectItem>
-              {categories?.map((cat) => (
-                <SelectItem key={cat} value={cat}>
-                  {cat}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Award className="w-5 h-5 text-fuchsia-400" />
+          <span className="text-sm text-muted-foreground">
+            Submit an agent to claim RFA bounties
+          </span>
         </div>
         <div className="flex items-center gap-2">
-          {data && (
-            <Badge variant="outline" className="font-mono text-xs">
-              {filteredServers.length} / {data.total} servers
+          {rfaManowars && (
+            <Badge variant="outline" className="font-mono text-xs border-fuchsia-500/30 text-fuchsia-400">
+              {filteredRFAs.length} active bounties
             </Badge>
           )}
           <Button
@@ -390,26 +398,20 @@ function ServersTab({
           >
             <RefreshCw className="w-4 h-4" />
           </Button>
-          <Link href="/registry">
-            <Button variant="outline" size="sm" className="border-sidebar-border">
-              <ExternalLink className="w-4 h-4 mr-2" />
-              Full Registry
-            </Button>
-          </Link>
         </div>
       </div>
 
       {/* Loading State */}
       {isLoading && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {[...Array(6)].map((_, i) => (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {[...Array(4)].map((_, i) => (
             <Card key={i} className="glass-panel">
               <CardHeader className="pb-2">
                 <Skeleton className="h-4 w-3/4" />
                 <Skeleton className="h-3 w-1/2 mt-2" />
               </CardHeader>
               <CardContent>
-                <Skeleton className="h-16 w-full" />
+                <Skeleton className="h-20 w-full" />
               </CardContent>
             </Card>
           ))}
@@ -419,7 +421,7 @@ function ServersTab({
       {/* Error State */}
       {error && (
         <div className="text-center py-20">
-          <Server className="w-12 h-12 mx-auto text-red-400/50 mb-4" />
+          <FileQuestion className="w-12 h-12 mx-auto text-red-400/50 mb-4" />
           <p className="text-red-400">{error.message}</p>
           <Button 
             variant="outline" 
@@ -431,21 +433,24 @@ function ServersTab({
         </div>
       )}
 
-      {/* Servers Grid */}
-      {data && !isLoading && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredServers.map((server) => (
-            <McpServerCard key={server.registryId} server={server} />
+      {/* RFAs Grid */}
+      {!isLoading && filteredRFAs.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {filteredRFAs.map((manowar) => (
+            <RFACard key={manowar.id} manowar={manowar} />
           ))}
         </div>
       )}
 
       {/* Empty State */}
-      {filteredServers.length === 0 && !isLoading && (
-        <div className="text-center py-20">
-          <Server className="w-12 h-12 mx-auto text-muted-foreground/30 mb-4" />
+      {filteredRFAs.length === 0 && !isLoading && (
+        <div className="text-center py-20 border border-dashed border-sidebar-border rounded-lg">
+          <FileQuestion className="w-12 h-12 mx-auto text-muted-foreground/30 mb-4" />
           <p className="text-muted-foreground">
-            {searchQuery ? "No servers match your search" : "No servers found"}
+            {searchQuery ? "No RFAs match your search" : "No active bounties right now"}
+          </p>
+          <p className="text-xs text-muted-foreground/60 mt-2">
+            Create a workflow with missing agents to post an RFA
           </p>
         </div>
       )}
@@ -453,98 +458,77 @@ function ServersTab({
   );
 }
 
-function McpServerCard({ server }: { server: RegistryServer }) {
-  const isInternal = server.origin === "internal";
-  const isRemote = isRemoteCapable(server);
-
+function RFACard({ manowar }: { manowar: OnchainManowar }) {
+  // TODO: Fetch actual RFA data from RFA contract using manowar.rfaId
+  // For now, showing manowar info with RFA indicator
+  
   return (
-    <Card className="glass-panel border-fuchsia-500/20 hover:border-fuchsia-500/60 transition-all duration-300 group overflow-hidden">
-      <CardHeader className="p-5 pb-2">
-        <div className="flex justify-between items-start">
-          <div className="flex items-center gap-2">
-            <div className={`w-8 h-8 rounded-sm flex items-center justify-center border ${
-              isInternal 
-                ? "bg-fuchsia-500/10 border-fuchsia-500/30" 
-                : "bg-cyan-500/10 border-cyan-500/30"
-            }`}>
-              {isInternal ? (
-                <Sparkles className="w-4 h-4 text-fuchsia-400" />
-              ) : (
-                <Server className="w-4 h-4 text-cyan-400" />
-              )}
+    <Card className="glass-panel border-fuchsia-500/30 hover:border-fuchsia-500/60 transition-all duration-300 group">
+      <CardHeader className="p-4">
+        <div className="flex items-start justify-between">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-2">
+              <Badge className="bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/30 text-[10px]">
+                <Target className="w-2.5 h-2.5 mr-1" />
+                RFA #{manowar.rfaId}
+              </Badge>
+              <Badge variant="outline" className="text-[10px] border-amber-500/30 text-amber-400">
+                <Clock className="w-2.5 h-2.5 mr-1" />
+                Open
+              </Badge>
             </div>
-            <Badge 
-              variant={isInternal ? "default" : "secondary"}
-              className={`text-[10px] ${
-                isInternal 
-                  ? "bg-fuchsia-500/20 text-fuchsia-400" 
-                  : "bg-cyan-500/20 text-cyan-400"
-              }`}
-            >
-              {getOriginLabel(server.origin)}
-            </Badge>
+            <CardTitle className="text-lg font-display font-bold text-white group-hover:text-fuchsia-400 transition-colors">
+              {manowar.title || `Manowar #${manowar.id}`}
+            </CardTitle>
+            <CardDescription className="mt-1 line-clamp-2 text-xs">
+              {manowar.description || "Agent needed for this workflow"}
+            </CardDescription>
           </div>
-          {isRemote && (
-            <Badge variant="outline" className="text-[10px] border-green-500/30 text-green-400">
-              <Cloud className="w-2.5 h-2.5 mr-1" />
-              Remote
-            </Badge>
-          )}
         </div>
-        <CardTitle className="text-lg font-display font-bold text-white group-hover:text-fuchsia-400 transition-colors mt-3">
-          {server.name}
-        </CardTitle>
       </CardHeader>
-      <CardContent className="p-5 pt-2 space-y-4">
-        <CardDescription className="line-clamp-2 h-10">
-          {server.description}
-        </CardDescription>
-        
-        {/* Tools count and category */}
-        <div className="flex flex-wrap gap-2">
-          {server.category && (
-            <Badge variant="outline" className="text-[10px] border-sidebar-border">
-              {server.category}
-            </Badge>
-          )}
-          {server.toolCount > 0 && (
-            <Badge variant="outline" className="text-[10px] border-sidebar-border">
-              <Wrench className="w-2.5 h-2.5 mr-1" />
-              {formatToolCount(server.toolCount)}
-            </Badge>
-          )}
+
+      <CardContent className="p-4 pt-0 space-y-3">
+        {/* Bounty Info */}
+        <div className="p-3 bg-gradient-to-r from-fuchsia-500/10 to-transparent border border-fuchsia-500/20 rounded">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[10px] text-muted-foreground uppercase mb-1">Bounty Reward</p>
+              <div className="flex items-center gap-2">
+                <Award className="w-4 h-4 text-fuchsia-400" />
+                <span className="font-mono text-lg font-bold text-fuchsia-400">
+                  TBD USDC
+                </span>
+              </div>
+            </div>
+            <div className="text-right">
+              <p className="text-[10px] text-muted-foreground uppercase mb-1">Escrowed</p>
+              <Badge className="bg-green-500/20 text-green-400 border-green-500/30 text-xs">
+                ✓ Funds Secured
+              </Badge>
+            </div>
+          </div>
         </div>
 
-        {/* Tags */}
-        <div className="flex gap-1 overflow-hidden">
-          {server.tags.slice(0, 4).map((tag) => (
-            <span key={tag} className="text-[10px] text-muted-foreground">
-              #{tag}
-            </span>
-          ))}
+        {/* Workflow Context */}
+        <div className="text-xs text-muted-foreground">
+          <span className="text-muted-foreground/60">For workflow: </span>
+          <span className="text-cyan-400 font-mono">Manowar #{manowar.id}</span>
         </div>
       </CardContent>
-      <CardFooter className="p-5 pt-0 flex items-center justify-between border-t border-white/5 mt-2 pt-4">
-        <div className="flex gap-2">
-          {server.repoUrl && (
-            <Button 
-              variant="ghost" 
-              size="sm"
-              className="h-8 px-2"
-              onClick={() => window.open(server.repoUrl, "_blank")}
-            >
-              <Github className="w-4 h-4" />
-            </Button>
-          )}
-        </div>
-        <Link href={`/registry?id=${encodeURIComponent(server.registryId)}`}>
-          <Button 
-            size="sm" 
-            className="bg-fuchsia-500 text-white hover:bg-fuchsia-600 font-bold font-mono"
-          >
-            ADD TO FLOW
-          </Button>
-        </Link>
+
+      <CardFooter className="p-4 pt-0 flex gap-2">
+        <Button 
+          className="flex-1 bg-fuchsia-500 hover:bg-fuchsia-600 text-white font-bold font-mono text-xs"
+        >
+          <Award className="w-3 h-3 mr-1" />
+          SUBMIT AGENT
+        </Button>
+        <Button 
+          variant="outline"
+          className="border-sidebar-border hover:border-fuchsia-500/50"
+        >
+          VIEW DETAILS
+        </Button>
       </CardFooter>
     </Card>
   );

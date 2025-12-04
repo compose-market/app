@@ -66,6 +66,8 @@ import {
   useWorkflowBuilder 
 } from "@/hooks/use-services";
 import { useAgents } from "@/hooks/use-agents";
+import { useOnchainAgents } from "@/hooks/use-onchain";
+import { getIpfsUrl } from "@/lib/pinata";
 import { 
   useRegistryServers,
   useRegistrySearch,
@@ -73,7 +75,7 @@ import {
 } from "@/hooks/use-registry";
 import type { ConnectorInfo, ConnectorTool, WorkflowStep } from "@/lib/services";
 import { executeRegistryTool } from "@/lib/services";
-import { type Agent, type AgentRegistryId, AGENT_REGISTRIES, formatInteractions, getReadmeExcerpt, COMMON_TAGS } from "@/lib/agents";
+import { type Agent, type AgentRegistryId, AGENT_REGISTRIES, formatInteractions, COMMON_TAGS } from "@/lib/agents";
 
 // =============================================================================
 // Node Types
@@ -689,13 +691,57 @@ function AgentsPicker({
   onSelect: (agent: Agent) => void 
 }) {
   const [selectedTag, setSelectedTag] = useState("all");
-  const { data, isLoading, error } = useAgents({
+  const { data, isLoading: isLoadingExternal, error } = useAgents({
     tags: selectedTag !== "all" ? [selectedTag] : undefined,
     status: "active",
     limit: 20,
     sort: "interactions",
     direction: "desc",
   });
+
+  // Fetch on-chain Manowar agents
+  const { data: onchainAgents, isLoading: isLoadingOnchain } = useOnchainAgents();
+
+  // Convert on-chain agents to unified format
+  const manowarAgents = useMemo((): Agent[] => {
+    if (!onchainAgents) return [];
+    return onchainAgents.map((a): Agent => {
+      const avatarUri = a.metadata?.avatar;
+      let avatarUrl: string | null = null;
+      if (avatarUri && avatarUri !== "none" && avatarUri.startsWith("ipfs://")) {
+        avatarUrl = getIpfsUrl(avatarUri.replace("ipfs://", ""));
+      }
+      return {
+        id: `manowar-${a.id}`,
+        address: a.creator,
+        name: a.metadata?.name || `Agent #${a.id}`,
+        description: a.metadata?.description || "",
+        registry: "manowar" as AgentRegistryId,
+        protocols: a.metadata?.protocols || [{ name: "x402", version: "1.0" }],
+        avatarUrl,
+        totalInteractions: 0,
+        recentInteractions: 0,
+        rating: 5.0,
+        status: "active" as const,
+        type: a.metadata?.endpoint ? "hosted" as const : "local" as const,
+        featured: false,
+        verified: true,
+        category: "ai-agent",
+        tags: a.metadata?.skills || [],
+        owner: a.creator,
+        createdAt: a.metadata?.createdAt || new Date().toISOString(),
+        updatedAt: a.metadata?.createdAt || new Date().toISOString(),
+      };
+    });
+  }, [onchainAgents]);
+
+  // Merge all agents
+  const allAgents = useMemo(() => {
+    const external = data?.agents || [];
+    return [...manowarAgents, ...external];
+  }, [data?.agents, manowarAgents]);
+
+  const isLoading = isLoadingExternal || isLoadingOnchain;
 
   const availableTags = useMemo(() => {
     const tagSet = new Set<string>(COMMON_TAGS);
@@ -728,7 +774,9 @@ function AgentsPicker({
 
       {/* Agent List */}
       <div>
-        <Label className="text-xs font-mono text-muted-foreground mb-2 block">SELECT AGENT</Label>
+        <Label className="text-xs font-mono text-muted-foreground mb-2 block">
+          SELECT AGENT {manowarAgents.length > 0 && `(${manowarAgents.length} on-chain)`}
+        </Label>
         {isLoading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="w-4 h-4 animate-spin" />
@@ -738,12 +786,12 @@ function AgentsPicker({
           <div className="text-xs text-red-400 font-mono">
             Failed to load agents
           </div>
-        ) : !data?.agents.length ? (
+        ) : allAgents.length === 0 ? (
           <div className="text-sm text-muted-foreground">No agents found</div>
         ) : (
           <ScrollArea className="h-56">
             <div className="space-y-2 pr-2">
-              {data.agents.map((agent) => (
+              {allAgents.map((agent) => (
                 <AgentPickerCard key={agent.id} agent={agent} onSelect={onSelect} />
               ))}
             </div>
@@ -781,16 +829,18 @@ function AgentPickerCard({
     .join("")
     .slice(0, 2)
     .toUpperCase();
+  
+  const isManowar = agent.registry === "manowar";
 
   return (
     <button
       onClick={() => onSelect(agent)}
-      className="w-full p-2 rounded-sm border border-sidebar-border bg-background/30 hover:border-fuchsia-500/50 hover:bg-fuchsia-500/5 transition-all text-left group"
+      className={`w-full p-2 rounded-sm border bg-background/30 hover:border-fuchsia-500/50 hover:bg-fuchsia-500/5 transition-all text-left group ${isManowar ? "border-cyan-500/30" : "border-sidebar-border"}`}
     >
       <div className="flex items-start gap-2">
-        <Avatar className="w-8 h-8 border border-sidebar-border group-hover:border-fuchsia-500/50">
+        <Avatar className={`w-8 h-8 border group-hover:border-fuchsia-500/50 ${isManowar ? "border-cyan-500/50" : "border-sidebar-border"}`}>
           <AvatarImage src={agent.avatarUrl || undefined} alt={agent.name} />
-          <AvatarFallback className="bg-fuchsia-500/10 text-fuchsia-400 font-mono text-[10px]">
+          <AvatarFallback className={`font-mono text-[10px] ${isManowar ? "bg-cyan-500/10 text-cyan-400" : "bg-fuchsia-500/10 text-fuchsia-400"}`}>
             {initials}
           </AvatarFallback>
         </Avatar>
@@ -799,16 +849,25 @@ function AgentPickerCard({
             <span className="font-mono text-xs font-medium truncate group-hover:text-fuchsia-400 transition-colors">
               {agent.name}
             </span>
-            {agent.verified && (
+            {isManowar && (
+              <Sparkles className="w-3 h-3 text-cyan-400 shrink-0" />
+            )}
+            {agent.verified && !isManowar && (
               <Shield className="w-3 h-3 text-green-400 shrink-0" />
             )}
           </div>
           <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-            <span className="flex items-center gap-0.5">
-              <Star className="w-2.5 h-2.5 text-yellow-400" />
-              {agent.rating.toFixed(1)}
-            </span>
-            <span>{formatInteractions(agent.totalInteractions)} uses</span>
+            {isManowar ? (
+              <span className="text-cyan-400">on-chain</span>
+            ) : (
+              <>
+                <span className="flex items-center gap-0.5">
+                  <Star className="w-2.5 h-2.5 text-yellow-400" />
+                  {agent.rating.toFixed(1)}
+                </span>
+                <span>{formatInteractions(agent.totalInteractions)} uses</span>
+              </>
+            )}
           </div>
         </div>
       </div>
