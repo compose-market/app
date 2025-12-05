@@ -468,24 +468,24 @@ function AgentCard({ agent, onSelect }: { agent: ExtendedAgent; onSelect: (a: Ag
             </>
           ) : (
             <>
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Zap className="w-3.5 h-3.5 text-green-400" />
-                <span>{formatInteractions(agent.totalInteractions)} uses</span>
-              </div>
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Star className="w-3.5 h-3.5 text-yellow-400" />
-                <span>{agent.rating.toFixed(1)} rating</span>
-              </div>
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <Zap className="w-3.5 h-3.5 text-green-400" />
+            <span>{formatInteractions(agent.totalInteractions)} uses</span>
+          </div>
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <Star className="w-3.5 h-3.5 text-yellow-400" />
+            <span>{agent.rating.toFixed(1)} rating</span>
+          </div>
             </>
           )}
         </div>
 
         {/* Action Buttons */}
         <div className="flex gap-2">
-          <Button
-            onClick={() => onSelect(agent)}
+        <Button
+          onClick={() => onSelect(agent)}
             className={`flex-1 bg-sidebar-accent border border-sidebar-border text-foreground hover:border-fuchsia-500 hover:text-fuchsia-400 font-mono text-xs transition-colors group-hover:bg-fuchsia-500/10 ${isManowar ? "hover:border-cyan-500 hover:text-cyan-400 group-hover:bg-cyan-500/10" : ""}`}
-          >
+        >
             <Check className="w-3.5 h-3.5 mr-1.5" />
             SELECT
           </Button>
@@ -511,7 +511,7 @@ function AgentCard({ agent, onSelect }: { agent: ExtendedAgent; onSelect: (a: Ag
             >
               <Eye className="w-3.5 h-3.5 mr-1" />
               VIEW
-            </Button>
+        </Button>
           )}
         </div>
       </CardContent>

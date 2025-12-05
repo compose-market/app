@@ -17,6 +17,7 @@ import Agents from "@/pages/agents";
 import AgentDetail from "@/pages/agent";
 import Registry from "@/pages/registry";
 import MyAssets from "@/pages/my-assets";
+import Playground from "@/pages/playground";
 
 function Router() {
   return (
@@ -31,6 +32,7 @@ function Router() {
         <Route path="/agent/:id" component={AgentDetail} />
         <Route path="/registry" component={Registry} />
         <Route path="/my-assets" component={MyAssets} />
+        <Route path="/playground" component={Playground} />
         <Route component={NotFound} />
       </Switch>
     </Layout>
