@@ -109,6 +109,67 @@ export async function fetchFromIpfs<T = unknown>(cid: string): Promise<T> {
   return response.json();
 }
 
+/**
+ * Delete/unpin a file from Pinata by CID
+ * Used for cleaning up temporary uploads (e.g., conversation attachments)
+ */
+export async function unpinFile(cid: string): Promise<boolean> {
+  if (!PINATA_JWT) {
+    console.warn("[pinata] No JWT configured, cannot unpin");
+    return false;
+  }
+
+  try {
+    const response = await fetch(`${PINATA_API_URL}/pinning/unpin/${cid}`, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${PINATA_JWT}`,
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error(`[pinata] Failed to unpin ${cid}: ${error}`);
+      return false;
+    }
+
+    console.log(`[pinata] Successfully unpinned ${cid}`);
+    return true;
+  } catch (error) {
+    console.error(`[pinata] Error unpinning ${cid}:`, error);
+    return false;
+  }
+}
+
+/**
+ * Upload a temporary file for conversation (will be cleaned up later)
+ * Returns both the CID and the gateway URL
+ */
+export async function uploadConversationFile(
+  file: File,
+  conversationId: string
+): Promise<{ cid: string; url: string }> {
+  const cid = await uploadFile(file, {
+    name: `conversation-${conversationId}-${file.name}`,
+    keyvalues: {
+      type: "conversation-attachment",
+      conversationId,
+      originalName: file.name,
+      mimeType: file.type,
+      uploadedAt: new Date().toISOString(),
+    },
+  });
+  return { cid, url: getIpfsUrl(cid) };
+}
+
+/**
+ * Clean up all files for a conversation
+ */
+export async function cleanupConversationFiles(cids: string[]): Promise<void> {
+  console.log(`[pinata] Cleaning up ${cids.length} conversation files...`);
+  await Promise.all(cids.map(cid => unpinFile(cid)));
+}
+
 // =============================================================================
 // Agent Card Types (A2A Compatible)
 // =============================================================================
