@@ -1,6 +1,6 @@
 import { Link, useLocation } from "wouter";
 import { cn } from "@/lib/utils";
-import { Home, ShoppingCart, PlusCircle, Layers, Box, Activity, Shield, Server } from "lucide-react";
+import { Home, ShoppingCart, PlusCircle, Layers, Box, Activity, Shield, Server, Sparkles } from "lucide-react";
 import { ComposeLogo } from "@/components/brand/Logo";
 
 export function Sidebar() {
@@ -8,6 +8,7 @@ export function Sidebar() {
 
   const moduleLinks = [
     { href: "/", icon: Home, label: "HOME" },
+    { href: "/playground", icon: Sparkles, label: "PLAYGROUND" },
     { href: "/market", icon: Box, label: "MARKET" },
     { href: "/compose", icon: Layers, label: "COMPOSE" },
     { href: "/registry", icon: Server, label: "MCP REGISTRY" },
