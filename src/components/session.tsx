@@ -20,13 +20,29 @@ import { Zap, Clock, Wallet, Shield, X } from "lucide-react";
 /**
  * Session Budget Setup Dialog
  * Allows users to set a spending limit for signature-free AI inference
+ * Supports both controlled (open/onOpenChange) and uncontrolled modes
  */
-export function SessionBudgetDialog() {
+interface SessionBudgetDialogProps {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  showTrigger?: boolean;
+}
+
+export function SessionBudgetDialog({ 
+  open: controlledOpen, 
+  onOpenChange: controlledOnOpenChange,
+  showTrigger = true,
+}: SessionBudgetDialogProps = {}) {
   const { isConnected } = useWalletAccount();
   const { session, isCreating, error, createSession, budgetPresets } = useSession();
   const [selectedBudget, setSelectedBudget] = useState(budgetPresets[1].value); // Default $5
   const [duration, setDuration] = useState(24); // Default 24 hours
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  
+  // Support both controlled and uncontrolled modes
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? controlledOpen : internalOpen;
+  const setOpen = isControlled ? (controlledOnOpenChange || (() => {})) : setInternalOpen;
 
   if (!isConnected) return null;
 
@@ -40,16 +56,18 @@ export function SessionBudgetDialog() {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button 
-          variant="outline" 
-          size="sm"
-          className="border-cyan-500/30 bg-cyan-500/5 text-cyan-400 hover:bg-cyan-500/10 font-mono"
-        >
-          <Zap className="w-4 h-4 mr-2" />
-          {session.isActive ? "Session Active" : "Enable Agent Mode"}
-        </Button>
-      </DialogTrigger>
+      {showTrigger && (
+        <DialogTrigger asChild>
+          <Button 
+            variant="outline" 
+            size="sm"
+            className="border-cyan-500/30 bg-cyan-500/5 text-cyan-400 hover:bg-cyan-500/10 font-mono"
+          >
+            <Zap className="w-4 h-4 mr-2" />
+            {session.isActive ? "Session Active" : "Enable Agent Mode"}
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="bg-card border-sidebar-border max-w-md">
         <DialogHeader>
           <DialogTitle className="font-display text-cyan-400 flex items-center gap-2">

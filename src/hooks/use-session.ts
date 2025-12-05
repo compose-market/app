@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { useActiveAccount } from "thirdweb/react";
 import { getContract } from "thirdweb";
 import { addSessionKey, getAllActiveSigners } from "thirdweb/extensions/erc4337";
-import { approve, allowance } from "thirdweb/extensions/erc20";
+import { approve, allowance, balanceOf } from "thirdweb/extensions/erc20";
 import { sendTransaction } from "thirdweb";
 import { 
   thirdwebClient, 
@@ -114,6 +114,19 @@ export function useSession() {
           chain: paymentChain,
           client: thirdwebClient,
         });
+
+        // Check actual USDC balance before creating session
+        const balance = await balanceOf({
+          contract: usdcContract,
+          address: account.address,
+        });
+
+        if (balance < BigInt(budgetWei)) {
+          const balanceUSDC = Number(balance) / 1_000_000;
+          throw new Error(
+            `Insufficient USDC balance. You have $${balanceUSDC.toFixed(2)} but want to budget $${budgetUSDC.toFixed(2)}`
+          );
+        }
 
         // Step 1: Approve USDC spending for the treasury (one-time per session)
         const currentAllowance = await allowance({
@@ -246,6 +259,13 @@ export function useSession() {
     [session]
   );
 
+  /**
+   * Format budget display ($X.XX)
+   */
+  const formatBudget = useCallback((weiAmount: number) => {
+    return `$${(weiAmount / 1_000_000).toFixed(2)}`;
+  }, []);
+
   return {
     session,
     isCreating,
@@ -254,7 +274,12 @@ export function useSession() {
     recordUsage,
     endSession,
     hasBudget,
+    formatBudget,
     budgetPresets: SESSION_BUDGET_PRESETS,
+    // Convenience aliases for direct access
+    sessionActive: session.isActive,
+    budgetRemaining: session.budgetRemaining,
+    budgetLimit: session.budgetLimit,
   };
 }
 
