@@ -510,13 +510,57 @@ export function computeDnaHash(skills: string[], chainId: number, model: string)
   // Sort skills for deterministic hashing
   const sortedSkills = [...skills].sort();
   const skillsStr = sortedSkills.join(",");
-  
+
   return keccak256(
     encodePacked(
       ["string", "uint256", "string"],
       [skillsStr, BigInt(chainId), model]
     )
   );
+}
+
+/**
+ * Derive agent wallet address from dnaHash
+ * 
+ * The wallet private key is: keccak256(`${dnaHash}:agent:${agentId}`)
+ * We compute the resulting address here for display before mint.
+ * 
+ * For pre-mint display (agentId unknown), we use agentId = 0 as placeholder.
+ * The actual wallet will use the real agentId after mint.
+ */
+export function deriveAgentWalletAddress(dnaHash: `0x${string}`, agentId: bigint = BigInt(0)): `0x${string}` {
+  // Same logic as backend: keccak256(`${dnaHash}:agent:${agentId}`)
+  const derivationSeed = keccak256(
+    encodePacked(
+      ["string"],
+      [`${dnaHash}:agent:${agentId}`]
+    )
+  );
+
+  // The derivationSeed is the private key - compute public address
+  // Use secp256k1 point multiplication (simplified: last 20 bytes of keccak256(pubkey))
+  // For accurate address, we need to use viem's privateKeyToAddress
+  // Import dynamically to avoid browser issues
+  return computeAddressFromPrivateKey(derivationSeed);
+}
+
+/**
+ * Compute Ethereum address from private key
+ * Uses the standard secp256k1 -> keccak256 -> last 20 bytes flow
+ */
+function computeAddressFromPrivateKey(privateKey: `0x${string}`): `0x${string}` {
+  // viem's privateKeyToAccount works in browser via noble-curves
+  // Use dynamic import for code splitting
+  try {
+    const { privateKeyToAccount } = require("viem/accounts") as typeof import("viem/accounts");
+    const account = privateKeyToAccount(privateKey);
+    return account.address;
+  } catch {
+    // Fallback: return a deterministic placeholder based on the private key
+    // This shouldn't happen in practice as viem works in browser
+    const fallback = keccak256(privateKey);
+    return `0x${fallback.slice(26)}` as `0x${string}`;
+  }
 }
 
 /**

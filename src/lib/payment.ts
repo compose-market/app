@@ -6,16 +6,20 @@
 
 const AVALANCHE_FUJI_CHAIN_ID = 43113;
 
+// Set to false to disable signature normalization
+const ENABLE_SIGNATURE_NORMALIZATION = false;
+
 /**
  * Normalizes ECDSA signature v value to legacy format (27/28)
- * 
- * Wallets may produce signatures with different v value formats:
- * - yParity: 0 or 1
- * - Legacy: 27 or 28  
- * - EIP-155: chainId * 2 + 35 + yParity
  */
 function normalizeSignatureV(signature: string, chainId: number): string {
-  const vHex = signature.slice(130);
+  const cleanSig = signature.startsWith('0x') ? signature.slice(2) : signature;
+
+  if (cleanSig.length !== 130) {
+    return signature;
+  }
+
+  const vHex = cleanSig.slice(128);
   const vValue = parseInt(vHex, 16);
 
   let normalizedV: number;
@@ -28,11 +32,11 @@ function normalizeSignatureV(signature: string, chainId: number): string {
     const yParity = (vValue - 35 - chainId * 2) % 2;
     normalizedV = yParity + 27;
   } else {
-    console.warn('Unexpected v value:', vValue);
     normalizedV = vValue;
   }
 
-  return signature.slice(0, 130) + normalizedV.toString(16).padStart(2, '0');
+  const prefix = signature.startsWith('0x') ? '0x' : '';
+  return prefix + cleanSig.slice(0, 128) + normalizedV.toString(16).padStart(2, '0');
 }
 
 /**
@@ -40,39 +44,40 @@ function normalizeSignatureV(signature: string, chainId: number): string {
  */
 export function createNormalizedFetch(chainId: number = AVALANCHE_FUJI_CHAIN_ID): typeof fetch {
   return async (input, init) => {
-    let paymentHeader: string | null = null;
-    
-    if (init?.headers instanceof Headers) {
-      paymentHeader = init.headers.get('x-payment') || init.headers.get('X-PAYMENT');
-    } else if (typeof init?.headers === 'object' && init.headers !== null) {
-      const headers = init.headers as Record<string, string>;
-      paymentHeader = headers['x-payment'] || headers['X-PAYMENT'];
-    }
+    if (ENABLE_SIGNATURE_NORMALIZATION) {
+      let paymentHeader: string | null = null;
 
-    if (paymentHeader) {
-      try {
-        const decoded = JSON.parse(atob(paymentHeader));
+      if (init?.headers instanceof Headers) {
+        paymentHeader = init.headers.get('x-payment') || init.headers.get('X-PAYMENT');
+      } else if (typeof init?.headers === 'object' && init.headers !== null) {
+        const headers = init.headers as Record<string, string>;
+        paymentHeader = headers['x-payment'] || headers['X-PAYMENT'];
+      }
 
-        if (decoded.payload?.signature) {
-          const normalizedSig = normalizeSignatureV(decoded.payload.signature, chainId);
-          decoded.payload.signature = normalizedSig;
-          const normalizedPaymentHeader = btoa(JSON.stringify(decoded));
+      if (paymentHeader) {
+        try {
+          const decoded = JSON.parse(atob(paymentHeader));
 
-          if (init?.headers instanceof Headers) {
-            init.headers.set('X-PAYMENT', normalizedPaymentHeader);
-          } else if (typeof init?.headers === 'object' && init.headers !== null) {
-            const headers = init.headers as Record<string, string>;
-            delete headers['x-payment'];
-            delete headers['X-PAYMENT'];
-            headers['X-PAYMENT'] = normalizedPaymentHeader;
+          if (decoded.payload?.signature) {
+            const normalizedSig = normalizeSignatureV(decoded.payload.signature, chainId);
+            decoded.payload.signature = normalizedSig;
+            const normalizedPaymentHeader = btoa(JSON.stringify(decoded));
+
+            if (init?.headers instanceof Headers) {
+              init.headers.set('X-PAYMENT', normalizedPaymentHeader);
+            } else if (typeof init?.headers === 'object' && init.headers !== null) {
+              const headers = init.headers as Record<string, string>;
+              delete headers['x-payment'];
+              delete headers['X-PAYMENT'];
+              headers['X-PAYMENT'] = normalizedPaymentHeader;
+            }
           }
+        } catch {
+          // Ignore normalization errors
         }
-      } catch (e) {
-        console.error('Failed to normalize payment:', e);
       }
     }
 
     return fetch(input, init);
   };
 }
-

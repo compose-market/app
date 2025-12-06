@@ -1,22 +1,41 @@
 /**
- * Agent Detail Page
+ * Agent Detail Page with Chat Interface
  * 
- * Public endpoint for Manowar agents - A2A compatible.
- * Accessible at /agent/:id
+ * Shows agent info and provides interactive chat with x402 payments.
+ * Includes knowledge upload and file attachments.
  */
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useParams } from "wouter";
 import { Link } from "wouter";
+import { useActiveWallet } from "thirdweb/react";
+import { wrapFetchWithPayment } from "thirdweb/x402";
+import { thirdwebClient, INFERENCE_PRICE_WEI } from "@/lib/thirdweb";
+import { createNormalizedFetch } from "@/lib/payment";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
+import { useSession } from "@/hooks/use-session";
+import { SessionBudgetDialog } from "@/components/session";
 import { useOnchainAgent } from "@/hooks/use-onchain";
 import { getIpfsUrl } from "@/lib/pinata";
-import { 
-  ArrowLeft, 
-  Copy, 
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  ArrowLeft,
+  Copy,
   ExternalLink,
   Sparkles,
   DollarSign,
@@ -27,23 +46,65 @@ import {
   Code,
   Link as LinkIcon,
   CheckCircle,
+  Send,
+  Bot,
+  User,
+  Loader2,
+  BookOpen,
+  Upload,
+  Paperclip,
+  X,
+  MessageSquare,
 } from "lucide-react";
+
+const MCP_URL = (import.meta.env.VITE_MCP_URL || "https://mcp.compose.market").replace(/\/+$/, "");
+
+interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: number;
+}
 
 export default function AgentDetailPage() {
   const params = useParams<{ id: string }>();
   const agentId = params.id ? parseInt(params.id) : null;
   const { data: agent, isLoading, error } = useOnchainAgent(agentId);
   const { toast } = useToast();
+  const wallet = useActiveWallet();
+  const { sessionActive, budgetRemaining } = useSession();
+
+  // Chat state
+  const [showChat, setShowChat] = useState(false);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [inputValue, setInputValue] = useState("");
+  const [sending, setSending] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Knowledge upload state
+  const [showKnowledgeDialog, setShowKnowledgeDialog] = useState(false);
+  const [knowledgeKey, setKnowledgeKey] = useState("");
+  const [knowledgeContent, setKnowledgeContent] = useState("");
+  const [uploadingKnowledge, setUploadingKnowledge] = useState(false);
+
+  // Session dialog
+  const [showSessionDialog, setShowSessionDialog] = useState(false);
 
   // Build the A2A-compatible endpoint URL
-  const apiEndpoint = agentId 
+  const apiEndpoint = agentId
     ? `https://api.compose.market/api/agent/${agentId}`
     : null;
-  
+
   // Invoke endpoint for x402 calls
   const invokeEndpoint = agentId
     ? `https://api.compose.market/api/agent/${agentId}/invoke`
     : null;
+
+  // Auto-scroll messages
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   const copyEndpoint = () => {
     if (apiEndpoint) {
@@ -54,6 +115,161 @@ export default function AgentDetailPage() {
       });
     }
   };
+
+  // Send chat message with x402 payment
+  const handleSendMessage = useCallback(async () => {
+    if (!inputValue.trim() || sending || !agentId) return;
+
+    if (!wallet) {
+      toast({ title: "Connect wallet", description: "Please connect your wallet to chat", variant: "destructive" });
+      return;
+    }
+
+    // x402 wrapFetchWithPayment handles payment automatically when 402 is received
+    // No session check needed - wallet signs payment header on-demand
+
+    const userMessage: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: inputValue.trim(),
+      timestamp: Date.now(),
+    };
+
+    setMessages(prev => [...prev, userMessage]);
+    setInputValue("");
+    setSending(true);
+    setChatError(null);
+
+    // Create assistant placeholder
+    const assistantId = crypto.randomUUID();
+    setMessages(prev => [...prev, { id: assistantId, role: "assistant", content: "", timestamp: Date.now() }]);
+
+    try {
+      if (!agent) {
+        throw new Error("Agent not loaded");
+      }
+
+      const normalizedFetch = createNormalizedFetch();
+      const fetchWithPayment = wrapFetchWithPayment(
+        normalizedFetch,
+        thirdwebClient,
+        wallet,
+        { maxValue: BigInt(INFERENCE_PRICE_WEI) } // $0.005
+      );
+
+      // Use Lambda inference API with agent's model
+      const metadata = agent.metadata;
+      const modelId = metadata?.model || "asi1-mini";
+      const apiUrl = import.meta.env.VITE_API_URL || "https://api.compose.market";
+
+      // Build system prompt from agent's info
+      const agentName = metadata?.name || "an AI agent";
+      const agentDescription = metadata?.description || "";
+      const agentSkills = metadata?.skills?.join(", ") || "general assistance";
+      const systemPrompt = `You are ${agentName}. ${agentDescription}\n\nSkills: ${agentSkills}`;
+
+      // Build messages for inference
+      const allMessages = messages.concat(userMessage).map(m => ({
+        role: m.role,
+        content: m.content,
+      }));
+
+      const response = await fetchWithPayment(`${apiUrl}/api/inference/${encodeURIComponent(modelId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: allMessages,
+          systemPrompt,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Chat failed: ${response.status}`);
+      }
+
+      // Handle streaming response - same approach as playground.tsx
+      const contentType = response.headers.get("content-type") || "";
+
+      if (contentType.includes("text/event-stream") || contentType.includes("text/plain")) {
+        // Streaming text response
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error("No response body");
+
+        const decoder = new TextDecoder();
+        let fullResponse = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          fullResponse += chunk;
+          setMessages(prev =>
+            prev.map(m => m.id === assistantId ? { ...m, content: fullResponse } : m)
+          );
+        }
+
+        if (!fullResponse) {
+          setMessages(prev =>
+            prev.map(m => m.id === assistantId ? { ...m, content: "No response received" } : m)
+          );
+        }
+      } else {
+        // JSON response
+        const data = await response.json();
+        const content = data.output || data.message || data.content || JSON.stringify(data);
+        setMessages(prev =>
+          prev.map(m => m.id === assistantId ? { ...m, content } : m)
+        );
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : "Unknown error";
+      setChatError(errorMsg);
+      setMessages(prev =>
+        prev.map(m => m.id === assistantId ? { ...m, content: `Error: ${errorMsg}` } : m)
+      );
+    } finally {
+      setSending(false);
+    }
+  }, [inputValue, sending, agentId, wallet, toast, agent, messages]);
+
+  // Upload knowledge
+  const handleUploadKnowledge = useCallback(async () => {
+    if (!agentId || !knowledgeKey.trim() || !knowledgeContent.trim()) return;
+
+    setUploadingKnowledge(true);
+    try {
+      const response = await fetch(`${MCP_URL}/agent/${agentId}/knowledge`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          key: knowledgeKey.trim(),
+          content: knowledgeContent.trim(),
+          metadata: { source: "manual-upload", type: "document" }
+        }),
+      });
+
+      if (!response.ok) throw new Error("Upload failed");
+
+      const result = await response.json();
+      toast({
+        title: "Knowledge Uploaded!",
+        description: `Added "${knowledgeKey}" (${result.contentLength} chars) to agent's knowledge base.`,
+      });
+      setShowKnowledgeDialog(false);
+      setKnowledgeKey("");
+      setKnowledgeContent("");
+    } catch (err) {
+      toast({
+        title: "Upload Failed",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setUploadingKnowledge(false);
+    }
+  }, [agentId, knowledgeKey, knowledgeContent, toast]);
 
   if (isLoading) {
     return (
@@ -85,7 +301,7 @@ export default function AgentDetailPage() {
             Back to Agents
           </Button>
         </Link>
-        
+
         <div className="text-center py-20 border border-dashed border-red-500/30 rounded-lg">
           <Shield className="w-12 h-12 mx-auto text-red-400/50 mb-4" />
           <p className="text-red-400 font-mono">Agent not found</p>
@@ -120,10 +336,10 @@ export default function AgentDetailPage() {
             Back to Agents
           </Button>
         </Link>
-        
+
         <Badge className="bg-cyan-500/20 text-cyan-400 border-cyan-500/30">
           <Sparkles className="w-3 h-3 mr-1" />
-          Manowar Agent #{agent.id}
+          Agent #{agent.id}
         </Badge>
       </div>
 
@@ -151,7 +367,7 @@ export default function AgentDetailPage() {
           <p className="text-muted-foreground font-mono text-sm mt-2">
             {agent.metadata?.description || "No description available"}
           </p>
-          
+
           {/* Badges */}
           <div className="flex flex-wrap justify-center gap-2 mt-4">
             <Badge className="bg-green-500/20 text-green-400 border-green-500/30">
@@ -161,11 +377,6 @@ export default function AgentDetailPage() {
             {agent.cloneable && (
               <Badge className="bg-purple-500/20 text-purple-400 border-purple-500/30">
                 Cloneable
-              </Badge>
-            )}
-            {agent.isClone && (
-              <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30">
-                Clone of #{agent.parentAgentId}
               </Badge>
             )}
           </div>
@@ -196,16 +407,112 @@ export default function AgentDetailPage() {
             </div>
           </div>
 
-          {/* Skills/Tags */}
-          {agent.metadata?.skills && agent.metadata.skills.length > 0 && (
-            <div>
-              <h3 className="text-sm font-mono text-muted-foreground uppercase mb-3">Skills</h3>
-              <div className="flex flex-wrap gap-2">
-                {agent.metadata.skills.map((skill: string) => (
-                  <Badge key={skill} variant="outline" className="border-sidebar-border">
-                    {skill}
-                  </Badge>
-                ))}
+          {/* Actions */}
+          <div className="flex flex-wrap gap-3 pt-4">
+            <Button
+              className="flex-1 bg-cyan-500 hover:bg-cyan-600 text-black font-bold font-mono"
+              onClick={() => setShowChat(!showChat)}
+            >
+              <MessageSquare className="w-4 h-4 mr-2" />
+              {showChat ? "HIDE CHAT" : "CHAT WITH AGENT"}
+            </Button>
+            <Button
+              variant="outline"
+              className="border-fuchsia-500/30 hover:bg-fuchsia-500/10"
+              onClick={() => setShowKnowledgeDialog(true)}
+            >
+              <BookOpen className="w-4 h-4 mr-2" />
+              Upload Knowledge
+            </Button>
+            <Button
+              variant="outline"
+              className="border-sidebar-border"
+              onClick={() => window.open(`https://testnet.snowtrace.io/token/${import.meta.env.VITE_AGENT_FACTORY_CONTRACT}?a=${agent.id}`, "_blank")}
+            >
+              <ExternalLink className="w-4 h-4 mr-2" />
+              Explorer
+            </Button>
+          </div>
+
+          {/* Chat Interface */}
+          {showChat && (
+            <div className="border border-cyan-500/30 rounded-lg bg-background/50 overflow-hidden">
+              {/* Chat Header */}
+              <div className="p-3 border-b border-sidebar-border bg-cyan-500/5 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Bot className="w-4 h-4 text-cyan-400" />
+                  <span className="text-sm font-mono text-cyan-400">Chat with {agent.metadata?.name || `Agent #${agent.id}`}</span>
+                </div>
+                {!sessionActive && (
+                  <Button size="sm" variant="outline" onClick={() => setShowSessionDialog(true)} className="text-xs">
+                    <Zap className="w-3 h-3 mr-1" />
+                    Start Session
+                  </Button>
+                )}
+              </div>
+
+              {/* Messages */}
+              <ScrollArea className="h-64 p-4">
+                {messages.length === 0 ? (
+                  <div className="text-center text-muted-foreground text-sm py-8">
+                    <Bot className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                    <p>Start a conversation with this agent.</p>
+                    <p className="text-xs mt-1">Requires x402 payment session.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {messages.map((msg) => (
+                      <div key={msg.id} className={`flex gap-3 ${msg.role === "user" ? "justify-end" : ""}`}>
+                        {msg.role === "assistant" && (
+                          <Avatar className="w-8 h-8 shrink-0">
+                            <AvatarFallback className="bg-cyan-500/20 text-cyan-400 text-xs">
+                              <Bot className="w-4 h-4" />
+                            </AvatarFallback>
+                          </Avatar>
+                        )}
+                        <div className={`max-w-[80%] p-3 rounded-lg ${msg.role === "user"
+                          ? "bg-fuchsia-500/20 text-fuchsia-100"
+                          : "bg-sidebar-accent text-foreground"
+                          }`}>
+                          <p className="text-sm whitespace-pre-wrap">{msg.content || <Loader2 className="w-4 h-4 animate-spin" />}</p>
+                        </div>
+                        {msg.role === "user" && (
+                          <Avatar className="w-8 h-8 shrink-0">
+                            <AvatarFallback className="bg-fuchsia-500/20 text-fuchsia-400 text-xs">
+                              <User className="w-4 h-4" />
+                            </AvatarFallback>
+                          </Avatar>
+                        )}
+                      </div>
+                    ))}
+                    <div ref={messagesEndRef} />
+                  </div>
+                )}
+              </ScrollArea>
+
+              {/* Input */}
+              <div className="p-3 border-t border-sidebar-border">
+                {chatError && (
+                  <div className="text-xs text-red-400 mb-2 p-2 bg-red-500/10 rounded">{chatError}</div>
+                )}
+                <div className="flex gap-2">
+                  <Textarea
+                    placeholder="Type your message..."
+                    value={inputValue}
+                    onChange={(e) => setInputValue(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), handleSendMessage())}
+                    rows={1}
+                    className="resize-none flex-1"
+                    disabled={sending}
+                  />
+                  <Button
+                    onClick={handleSendMessage}
+                    disabled={sending || !inputValue.trim()}
+                    className="bg-cyan-500 hover:bg-cyan-600 text-black"
+                  >
+                    {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  </Button>
+                </div>
               </div>
             </div>
           )}
@@ -214,70 +521,24 @@ export default function AgentDetailPage() {
           <div className="border-t border-sidebar-border pt-6 space-y-4">
             <h3 className="text-sm font-mono text-muted-foreground uppercase flex items-center gap-2">
               <Globe className="w-4 h-4 text-cyan-400" />
-              A2A Endpoints (Global Access)
+              A2A Endpoints
             </h3>
-            
-            {/* Agent Card Endpoint */}
-            <div>
-              <p className="text-xs text-muted-foreground mb-2">Agent Card (GET):</p>
-              <div className="flex items-center gap-2 p-3 bg-background border border-sidebar-border rounded-lg font-mono text-sm">
-                <Code className="w-4 h-4 text-muted-foreground shrink-0" />
-                <code className="flex-1 truncate text-cyan-400">{apiEndpoint}</code>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={copyEndpoint}
-                  className="shrink-0 hover:text-cyan-400"
-                >
-                  <Copy className="w-4 h-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => window.open(apiEndpoint!, "_blank")}
-                  className="shrink-0 hover:text-cyan-400"
-                >
-                  <ExternalLink className="w-4 h-4" />
-                </Button>
-              </div>
+
+            <div className="flex items-center gap-2 p-3 bg-background border border-sidebar-border rounded-lg font-mono text-sm">
+              <Code className="w-4 h-4 text-muted-foreground shrink-0" />
+              <code className="flex-1 truncate text-cyan-400">{apiEndpoint}</code>
+              <Button variant="ghost" size="sm" onClick={copyEndpoint} className="shrink-0 hover:text-cyan-400">
+                <Copy className="w-4 h-4" />
+              </Button>
             </div>
-            
-            {/* Invoke Endpoint */}
-            <div>
-              <p className="text-xs text-muted-foreground mb-2">Invoke (POST with x402 payment):</p>
-              <div className="flex items-center gap-2 p-3 bg-background border border-fuchsia-500/30 rounded-lg font-mono text-sm">
-                <Zap className="w-4 h-4 text-fuchsia-400 shrink-0" />
-                <code className="flex-1 truncate text-fuchsia-400">{invokeEndpoint}</code>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    if (invokeEndpoint) {
-                      navigator.clipboard.writeText(invokeEndpoint);
-                      toast({
-                        title: "Copied!",
-                        description: "Invoke endpoint copied to clipboard",
-                      });
-                    }
-                  }}
-                  className="shrink-0 hover:text-fuchsia-400"
-                >
-                  <Copy className="w-4 h-4" />
-                </Button>
-              </div>
-            </div>
-            
-            <p className="text-xs text-muted-foreground">
-              Use these endpoints to integrate this agent into any A2A-compatible system.
-            </p>
           </div>
 
-          {/* Creator Info */}
+          {/* Creator */}
           <div className="border-t border-sidebar-border pt-6">
             <h3 className="text-sm font-mono text-muted-foreground uppercase mb-3">Creator</h3>
             <div className="flex items-center gap-2 font-mono text-sm">
               <LinkIcon className="w-4 h-4 text-muted-foreground" />
-              <a 
+              <a
                 href={`https://testnet.snowtrace.io/address/${agent.creator}`}
                 target="_blank"
                 rel="noopener noreferrer"
@@ -287,60 +548,63 @@ export default function AgentDetailPage() {
               </a>
             </div>
           </div>
+        </CardContent>
+      </Card>
 
-          {/* Actions */}
-          <div className="flex gap-4 pt-4">
-            <Button className="flex-1 bg-cyan-500 hover:bg-cyan-600 text-black font-bold font-mono">
-              <DollarSign className="w-4 h-4 mr-2" />
-              USE AGENT
+      {/* Knowledge Upload Dialog */}
+      <Dialog open={showKnowledgeDialog} onOpenChange={setShowKnowledgeDialog}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <BookOpen className="w-5 h-5 text-fuchsia-400" />
+              Upload Knowledge Document
+            </DialogTitle>
+            <DialogDescription>
+              Add documents to this agent's RAG knowledge base.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="key">Document Key</Label>
+              <Input
+                id="key"
+                placeholder="e.g., project-readme, api-docs"
+                value={knowledgeKey}
+                onChange={(e) => setKnowledgeKey(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="content">Document Content</Label>
+              <Textarea
+                id="content"
+                placeholder="Paste your document content here..."
+                value={knowledgeContent}
+                onChange={(e) => setKnowledgeContent(e.target.value)}
+                rows={10}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowKnowledgeDialog(false)}>
+              Cancel
             </Button>
             <Button
-              variant="outline"
-              className="border-sidebar-border"
-              onClick={() => window.open(`https://testnet.snowtrace.io/token/${import.meta.env.VITE_AGENT_FACTORY_CONTRACT}?a=${agent.id}`, "_blank")}
+              onClick={handleUploadKnowledge}
+              disabled={!knowledgeKey.trim() || !knowledgeContent.trim() || uploadingKnowledge}
+              className="bg-fuchsia-500 hover:bg-fuchsia-600"
             >
-              <ExternalLink className="w-4 h-4 mr-2" />
-              View on Explorer
+              {uploadingKnowledge ? (
+                <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Uploading...</>
+              ) : (
+                <><Upload className="w-4 h-4 mr-2" /> Upload</>
+              )}
             </Button>
-          </div>
-        </CardContent>
-      </Card>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      {/* JSON Preview */}
-      <Card className="glass-panel mt-6">
-        <CardHeader>
-          <CardTitle className="text-sm font-mono flex items-center gap-2">
-            <Code className="w-4 h-4 text-cyan-400" />
-            Agent Card (A2A Format)
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <pre className="p-4 bg-background border border-sidebar-border rounded-lg overflow-x-auto text-xs font-mono text-muted-foreground">
-            {JSON.stringify({
-              schemaVersion: "1.0.0",
-              agentId: agent.id,
-              name: agent.metadata?.name || `Agent #${agent.id}`,
-              description: agent.metadata?.description || "",
-              skills: agent.metadata?.skills || [],
-              avatar: agent.metadata?.avatar || "none",
-              dnaHash: agent.dnaHash,
-              chain: 43113,
-              model: agent.metadata?.model || "unknown",
-              price: agent.price,
-              units: agent.units,
-              cloneable: agent.cloneable,
-              endpoint: apiEndpoint,
-              invokeEndpoint: invokeEndpoint,
-              protocols: [
-                { name: "x402", version: "1.0" },
-                { name: "a2a", version: "1.0" },
-              ],
-              registry: "manowar",
-            }, null, 2)}
-          </pre>
-        </CardContent>
-      </Card>
+      {/* Session Budget Dialog */}
+      <SessionBudgetDialog open={showSessionDialog} onOpenChange={setShowSessionDialog} />
     </div>
   );
 }
-

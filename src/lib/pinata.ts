@@ -183,6 +183,7 @@ export interface AgentCard {
   dnaHash: string;
   chain: number;
   model: string;
+  framework?: "eliza" | "langchain"; // Agent runtime framework
   price: string; // USDC in smallest unit (6 decimals)
   units: number; // 0 = infinite
   cloneable: boolean;

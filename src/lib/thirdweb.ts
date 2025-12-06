@@ -65,7 +65,11 @@ export const CHAIN_CONFIG: Record<number, {
 // Pricing Configuration
 // =============================================================================
 
-export const PRICE_PER_TOKEN_WEI = 1; // 0.000001 USDC per inference token
+// Fixed price per inference call (in USDC wei - 6 decimals)
+// $0.005 USDC = 5000 wei (USDC has 6 decimals)
+export const INFERENCE_PRICE_WEI = 5_000;
+
+export const PRICE_PER_TOKEN_WEI = 1; // 0.000001 USDC per inference token (legacy)
 export const MAX_TOKENS_PER_CALL = 100000; // 100k tokens max per call
 
 // Session budget presets (in USDC wei - 6 decimals)
@@ -100,8 +104,8 @@ export function getUsdcAddress(chainId: number): `0x${string}` | undefined {
  * Get the active chain ID based on environment
  */
 export function getActiveChainId(): number {
-  return import.meta.env.VITE_USE_MAINNET === "true" 
-    ? CHAIN_IDS.avalanche 
+  return import.meta.env.VITE_USE_MAINNET === "true"
+    ? CHAIN_IDS.avalanche
     : CHAIN_IDS.avalancheFuji;
 }
 
@@ -141,7 +145,7 @@ export const thirdwebClient = createThirdwebClient({
 const activeChainId = getActiveChainId();
 
 // Payment chain - uses centralized chain config
-export const paymentChain = CHAIN_OBJECTS[activeChainId] || avalancheFuji;
+export const paymentChain = CHAIN_OBJECTS[activeChainId as keyof typeof CHAIN_OBJECTS] || avalancheFuji;
 
 // Payment token configuration
 export const paymentToken = {
@@ -168,11 +172,11 @@ export function getPaymentTokenContract() {
 export function getUsdcContractForChain(chainId: number) {
   const chain = CHAIN_OBJECTS[chainId as keyof typeof CHAIN_OBJECTS];
   const address = USDC_ADDRESSES[chainId];
-  
+
   if (!chain || !address) {
     throw new Error(`Unsupported chain ID: ${chainId}`);
   }
-  
+
   return getContract({
     address,
     chain,

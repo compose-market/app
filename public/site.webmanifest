@@ -1,7 +1,7 @@
 {
   "name": "Compose.Market",
-  "short_name": "Compose",
-  "description": "Web3 Native AI Agent Marketplace & Workflow Composer on Avalanche",
+  "short_name": "Compose Market",
+  "description": "Drag&drop builder to compose complex Agentic Workflows as nested, autonomous NFTs.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#020617",
@@ -36,19 +36,3 @@
     }
   ]
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

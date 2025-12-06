@@ -31,23 +31,24 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
-import { Cpu, DollarSign, ShieldCheck, Upload, ExternalLink, Sparkles, Plug, Search, X, ChevronRight, Loader2, Play, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Cpu, DollarSign, ShieldCheck, Upload, ExternalLink, Sparkles, Plug, Search, X, ChevronRight, Loader2, Play, AlertCircle, CheckCircle2, Boxes, Brain } from "lucide-react";
 import { AVAILABLE_MODELS, type AIModel } from "@/lib/models";
 import { useRegistryServers, useRegistrySearch, type RegistryServer, type ServerOrigin } from "@/hooks/use-registry";
-import { 
-  uploadAgentAvatar, 
-  uploadAgentCard, 
-  getIpfsUri, 
+import {
+  uploadAgentAvatar,
+  uploadAgentCard,
+  getIpfsUri,
   getIpfsUrl,
   fileToDataUrl,
   isPinataConfigured,
-  type AgentCard 
+  type AgentCard
 } from "@/lib/pinata";
-import { 
-  getAgentFactoryContract, 
-  computeDnaHash, 
+import {
+  getAgentFactoryContract,
+  computeDnaHash,
+  deriveAgentWalletAddress,
   usdcToWei,
-  getContractAddress 
+  getContractAddress
 } from "@/lib/contracts";
 import { CHAIN_IDS, CHAIN_CONFIG } from "@/lib/thirdweb";
 import { useActiveAccount } from "thirdweb/react";
@@ -70,12 +71,37 @@ interface SelectedPlugin {
   origin: ServerOrigin;
 }
 
-// Plugins that can be tested via the runtime
-const EXECUTABLE_PLUGINS = ["goat-erc20", "goat-coingecko"];
+type FrameworkType = "eliza" | "langchain";
+
+interface Framework {
+  id: FrameworkType;
+  name: string;
+  description: string;
+  color: string;
+  features: string[];
+}
+
+const FRAMEWORKS: Framework[] = [
+  {
+    id: "eliza",
+    name: "ElizaOS",
+    description: "Agent framework with 200+ plugins for blockchain, social, AI",
+    color: "fuchsia",
+    features: ["Memory", "RAG", "Natural Language Actions", "200+ Plugins"],
+  },
+  {
+    id: "langchain",
+    name: "LangChain",
+    description: "LLM framework with LangGraph for stateful agents",
+    color: "orange",
+    features: ["Memory", "RAG", "Tool Calling", "State Graphs"],
+  },
+];
 
 const formSchema = z.object({
   name: z.string().min(2).max(50),
   description: z.string().min(10),
+  framework: z.enum(["eliza", "langchain"]),
   model: z.string(),
   pricePerUse: z.string(),
   endpoint: z.string().url().optional().or(z.literal("")),
@@ -89,19 +115,19 @@ export default function CreateAgent() {
   const { toast } = useToast();
   const account = useActiveAccount();
   const { mutateAsync: sendTransaction, isPending: isSending } = useSendTransaction();
-  
+
   const [selectedHFModel, setSelectedHFModel] = useState<SelectedHFModel | null>(null);
   const [selectedPlugins, setSelectedPlugins] = useState<SelectedPlugin[]>([]);
   const [pluginSearch, setPluginSearch] = useState("");
   const [showPluginPicker, setShowPluginPicker] = useState(false);
-  
+
   // Avatar upload state
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [mintStep, setMintStep] = useState<"idle" | "uploading" | "minting" | "done">("idle");
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
+
   // Check for selected HF model from models page
   useEffect(() => {
     const stored = sessionStorage.getItem("selectedHFModel");
@@ -115,24 +141,20 @@ export default function CreateAgent() {
       }
     }
   }, []);
-  
+
   // Fetch plugins/MCPs
   const { data: searchData, isLoading: isSearching } = useRegistrySearch(
     pluginSearch,
     20
   );
-  
+
   const { data: defaultPlugins, isLoading: isLoadingDefault } = useRegistryServers({
-    origin: "goat,eliza",
-    limit: 20,
+    origin: "goat,eliza,glama",
+    limit: 30,
   });
-  
-  const availablePlugins = pluginSearch.trim()
-    ? searchData?.servers.filter(s => s.origin === "goat" || s.origin === "eliza") || []
-    : defaultPlugins?.servers || [];
-  
+
   const isLoadingPlugins = pluginSearch.trim() ? isSearching : isLoadingDefault;
-  
+
   const addPlugin = (server: RegistryServer) => {
     if (selectedPlugins.some(p => p.id === server.registryId)) return;
     setSelectedPlugins(prev => [...prev, {
@@ -144,24 +166,36 @@ export default function CreateAgent() {
     setPluginSearch("");
     setShowPluginPicker(false);
   };
-  
+
   const removePlugin = (id: string) => {
     setSelectedPlugins(prev => prev.filter(p => p.id !== id));
   };
-  
+
   const getOriginColor = (origin: ServerOrigin) => {
     switch (origin) {
       case "goat": return "border-green-500/50 text-green-400 bg-green-500/10";
       case "eliza": return "border-fuchsia-500/50 text-fuchsia-400 bg-fuchsia-500/10";
-      default: return "border-cyan-500/50 text-cyan-400 bg-cyan-500/10";
+      case "glama": return "border-cyan-500/50 text-cyan-400 bg-cyan-500/10";
+      default: return "border-slate-500/50 text-slate-400 bg-slate-500/10";
     }
   };
-  
+
+  const getOriginLabel = (origin: ServerOrigin) => {
+    switch (origin) {
+      case "goat": return "GOAT";
+      case "eliza": return "Eliza";
+      case "glama": return "MCP";
+      case "internal": return "Internal";
+      default: return origin;
+    }
+  };
+
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       name: "",
       description: "",
+      framework: "eliza",
       model: "asi1-mini",
       pricePerUse: "0.01",
       endpoint: "",
@@ -169,11 +203,26 @@ export default function CreateAgent() {
       units: "",
     },
   });
-  
+
+  const selectedFramework = form.watch("framework");
+
+  // Filter plugins based on selected framework
+  const availablePlugins = useMemo(() => {
+    const servers = pluginSearch.trim() ? searchData?.servers : defaultPlugins?.servers;
+    if (!servers) return [];
+
+    // ElizaOS framework: show Eliza + GOAT plugins
+    // LangChain framework: show GOAT + Glama plugins (MCP compatible)
+    if (selectedFramework === "eliza") {
+      return servers.filter(s => s.origin === "goat" || s.origin === "eliza");
+    }
+    return servers.filter(s => s.origin === "goat" || s.origin === "glama");
+  }, [pluginSearch, searchData?.servers, defaultPlugins?.servers, selectedFramework]);
+
   // Confirmation dialog state
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [pendingValues, setPendingValues] = useState<FormValues | null>(null);
-  
+
   // Update form when HF model is selected
   useEffect(() => {
     if (selectedHFModel) {
@@ -185,7 +234,7 @@ export default function CreateAgent() {
   const handleAvatarSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    
+
     // Validate file type
     if (!file.type.startsWith("image/")) {
       toast({
@@ -195,7 +244,7 @@ export default function CreateAgent() {
       });
       return;
     }
-    
+
     // Validate file size (max 5MB)
     if (file.size > 5 * 1024 * 1024) {
       toast({
@@ -205,7 +254,7 @@ export default function CreateAgent() {
       });
       return;
     }
-    
+
     setAvatarFile(file);
     const dataUrl = await fileToDataUrl(file);
     setAvatarPreview(dataUrl);
@@ -214,6 +263,7 @@ export default function CreateAgent() {
   // Prepare transaction data for minting
   const [preparedTx, setPreparedTx] = useState<{
     dnaHash: `0x${string}`;
+    walletAddress: `0x${string}`;
     units: bigint;
     price: bigint;
     cloneable: boolean;
@@ -233,19 +283,19 @@ export default function CreateAgent() {
 
     try {
       setMintStep("uploading");
-      
+
       // 1. Upload avatar to IPFS (if provided)
       let avatarUri = "none";
       if (avatarFile) {
         const avatarCid = await uploadAgentAvatar(avatarFile, values.name);
         avatarUri = getIpfsUri(avatarCid);
       }
-      
+
       // 2. Build and upload Agent Card to IPFS
       const chainId = CHAIN_IDS.avalancheFuji;
       const modelId = selectedHFModel?.id || values.model;
       const skills = selectedPlugins.map(p => p.id);
-      
+
       const agentCard: AgentCard = {
         schemaVersion: "1.0.0",
         name: values.name,
@@ -255,6 +305,7 @@ export default function CreateAgent() {
         dnaHash: "", // Will be computed on-chain
         chain: chainId,
         model: modelId,
+        framework: values.framework, // ElizaOS or LangChain
         price: usdcToWei(parseFloat(values.pricePerUse)).toString(),
         units: values.units ? parseInt(values.units) : 0,
         cloneable: values.isCloneable,
@@ -268,23 +319,26 @@ export default function CreateAgent() {
         createdAt: new Date().toISOString(),
         creator: account?.address || "",
       };
-      
+
       const cardCid = await uploadAgentCard(agentCard);
       const agentCardUri = getIpfsUri(cardCid);
-      
-      // 3. Compute DNA hash
+
+      // 3. Compute DNA hash and derive wallet address
       const dnaHash = computeDnaHash(skills, chainId, modelId);
+      // Note: Using agentId = 0 for pre-mint preview. Real wallet uses actual agentId after mint.
+      const walletAddress = deriveAgentWalletAddress(dnaHash, BigInt(0));
       const priceWei = usdcToWei(parseFloat(values.pricePerUse));
       const units = values.units ? BigInt(values.units) : BigInt(0);
-      
+
       setPreparedTx({
         dnaHash,
+        walletAddress,
         units,
         price: priceWei,
         cloneable: values.isCloneable,
         agentCardUri,
       });
-      
+
       setMintStep("minting");
       return true;
     } catch (error) {
@@ -299,14 +353,17 @@ export default function CreateAgent() {
     }
   };
 
-  const handleMintSuccess = (result: { transactionHash: string }) => {
+  const handleMintSuccess = async (result: { transactionHash: string }) => {
     const chainId = CHAIN_IDS.avalancheFuji;
+    const values = form.getValues();
+
+    // Show initial success
     toast({
       title: "Agent Minted Successfully!",
       description: (
         <div className="space-y-1">
-          <p>{form.getValues("name")} deployed to Avalanche Fuji.</p>
-          <a 
+          <p>{values.name} deployed to Avalanche Fuji.</p>
+          <a
             href={`${CHAIN_CONFIG[chainId].explorer}/tx/${result.transactionHash}`}
             target="_blank"
             rel="noopener noreferrer"
@@ -317,7 +374,60 @@ export default function CreateAgent() {
         </div>
       ),
     });
-    
+
+    // Register with backend if we have preparedTx
+    if (preparedTx && account?.address) {
+      try {
+        // Get the latest agent ID (the one we just minted)
+        // In production, parse from transaction receipt events
+        const contract = getAgentFactoryContract();
+        const totalAgents = await import("thirdweb").then(({ readContract }) =>
+          readContract({
+            contract,
+            method: "function totalAgents() view returns (uint256)",
+          })
+        );
+        const agentId = totalAgents - BigInt(1); // Most recent agent
+
+        // Compute the real wallet address with actual agentId
+        const walletAddress = deriveAgentWalletAddress(preparedTx.dnaHash, agentId);
+
+        // Register with backend to spin up agent runtime
+        const response = await fetch("/api/mcp/agent/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            agentId: agentId.toString(),
+            dnaHash: preparedTx.dnaHash,
+            name: values.name,
+            description: values.description,
+            agentCardUri: preparedTx.agentCardUri,
+            creator: account.address,
+            model: selectedHFModel?.id || values.model,
+            plugins: selectedPlugins.map(p => p.id),
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          toast({
+            title: "Agent Runtime Activated",
+            description: (
+              <div className="space-y-1 text-xs">
+                <p>Wallet: <code className="text-cyan-400">{walletAddress.slice(0, 10)}...{walletAddress.slice(-8)}</code></p>
+                <p>Chat: <code className="text-cyan-400">/api/mcp/agent/{agentId.toString()}/chat</code></p>
+              </div>
+            ),
+          });
+        } else {
+          console.warn("Backend registration failed:", await response.text());
+        }
+      } catch (err) {
+        console.error("Failed to register agent:", err);
+        // Non-fatal - agent is minted, just not registered with backend yet
+      }
+    }
+
     // Reset form
     form.reset();
     setSelectedPlugins([]);
@@ -400,10 +510,10 @@ export default function CreateAgent() {
                       <FormItem>
                         <FormLabel className="font-mono text-foreground">Purpose & Capabilities</FormLabel>
                         <FormControl>
-                          <Textarea 
-                            placeholder="Describe what this agent does..." 
-                            className="resize-none bg-background/50 min-h-[100px] border-sidebar-border focus:border-cyan-500" 
-                            {...field} 
+                          <Textarea
+                            placeholder="Describe what this agent does..."
+                            className="resize-none bg-background/50 min-h-[100px] border-sidebar-border focus:border-cyan-500"
+                            {...field}
                           />
                         </FormControl>
                         <FormMessage />
@@ -451,7 +561,7 @@ export default function CreateAgent() {
                                   </SelectTrigger>
                                 </FormControl>
                                 <SelectContent>
-                                  {AVAILABLE_MODELS.filter((m, i, arr) => 
+                                  {AVAILABLE_MODELS.filter((m, i, arr) =>
                                     // Remove duplicate asi1-mini entries
                                     arr.findIndex(x => x.id === m.id) === i
                                   ).map((model) => (
@@ -500,12 +610,91 @@ export default function CreateAgent() {
                 </CardContent>
               </Card>
 
+              {/* Framework Selection */}
+              <Card className="glass-panel border-orange-500/20">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-lg font-bold font-display text-orange-400">
+                    <Boxes className="w-5 h-5" />
+                    AGENT FRAMEWORK
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <FormField
+                    control={form.control}
+                    name="framework"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormDescription className="text-xs mb-3">
+                          Choose the runtime framework for your agent. Each includes built-in memory & RAG.
+                          <Link href="/playground?tab=plugins">
+                            <span className="text-orange-400 hover:text-orange-300 ml-1">Test plugins first →</span>
+                          </Link>
+                        </FormDescription>
+                        <div className="grid grid-cols-2 gap-3">
+                          {FRAMEWORKS.map((fw) => {
+                            const isSelected = field.value === fw.id;
+                            const colorClass = fw.color === "fuchsia"
+                              ? "border-fuchsia-500 bg-fuchsia-500/10 text-fuchsia-400"
+                              : "border-orange-500 bg-orange-500/10 text-orange-400";
+                            return (
+                              <button
+                                key={fw.id}
+                                type="button"
+                                onClick={() => {
+                                  field.onChange(fw.id);
+                                  // Clear incompatible plugins when switching frameworks
+                                  // GOAT works with both, Eliza plugins only with Eliza, Glama (MCP) only with LangChain
+                                  if (fw.id !== selectedFramework) {
+                                    setSelectedPlugins(prev =>
+                                      prev.filter(p => p.origin === "goat" ||
+                                        (fw.id === "eliza" && p.origin === "eliza") ||
+                                        (fw.id === "langchain" && p.origin === "glama")
+                                      )
+                                    );
+                                  }
+                                }}
+                                className={`p-3 rounded-sm border text-left transition-all ${isSelected
+                                  ? colorClass
+                                  : "border-sidebar-border bg-background/30 hover:border-sidebar-border/80"
+                                  }`}
+                              >
+                                <div className="flex items-center gap-2 mb-1">
+                                  {fw.id === "eliza" ? (
+                                    <Brain className="w-4 h-4" />
+                                  ) : (
+                                    <Boxes className="w-4 h-4" />
+                                  )}
+                                  <span className="font-mono font-bold text-sm">{fw.name}</span>
+                                  {isSelected && <CheckCircle2 className="w-3 h-3 ml-auto" />}
+                                </div>
+                                <p className="text-[10px] text-muted-foreground line-clamp-2">{fw.description}</p>
+                                <div className="flex flex-wrap gap-1 mt-2">
+                                  {fw.features.slice(0, 2).map((f) => (
+                                    <span key={f} className="text-[8px] px-1 py-0.5 rounded bg-white/5 text-muted-foreground">
+                                      {f}
+                                    </span>
+                                  ))}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </CardContent>
+              </Card>
+
               {/* Plugin/Capability Picker */}
-              <Card className="glass-panel border-green-500/20">
+              <Card className="glass-panel border-green-500/20 relative z-10">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2 text-lg font-bold font-display text-green-400">
                     <Plug className="w-5 h-5" />
                     PLUGINS & CAPABILITIES
+                    <Badge variant="outline" className="ml-2 text-[10px] border-sidebar-border">
+                      {selectedFramework === "eliza" ? "ElizaOS + GOAT" : "MCP (Glama) + GOAT"}
+                    </Badge>
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -530,13 +719,13 @@ export default function CreateAgent() {
                       ))}
                     </div>
                   )}
-                  
+
                   {/* Plugin Search */}
                   <div className="relative">
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                       <Input
-                        placeholder="Search GOAT, ElizaOS plugins..."
+                        placeholder={`Search ${selectedFramework === "eliza" ? "ElizaOS, GOAT" : "MCP (Glama), GOAT"} plugins...`}
                         value={pluginSearch}
                         onChange={(e) => {
                           setPluginSearch(e.target.value);
@@ -546,7 +735,7 @@ export default function CreateAgent() {
                         className="pl-10 bg-background/50 font-mono border-sidebar-border focus:border-green-500"
                       />
                     </div>
-                    
+
                     {/* Dropdown Results */}
                     {showPluginPicker && (
                       <div className="absolute z-50 w-full mt-1 bg-sidebar border border-sidebar-border rounded-sm shadow-lg">
@@ -578,30 +767,29 @@ export default function CreateAgent() {
                             <div className="p-1">
                               {availablePlugins.map(server => {
                                 const isSelected = selectedPlugins.some(p => p.id === server.registryId);
-                                const isExecutable = EXECUTABLE_PLUGINS.includes(server.registryId);
+                                const isTestable = server.origin === "goat" || server.origin === "eliza";
                                 return (
                                   <button
                                     key={server.registryId}
                                     type="button"
                                     onClick={() => addPlugin(server)}
                                     disabled={isSelected}
-                                    className={`w-full text-left p-2 rounded-sm text-xs transition-all ${
-                                      isSelected
-                                        ? "opacity-50 cursor-not-allowed"
-                                        : "hover:bg-green-500/10"
-                                    }`}
+                                    className={`w-full text-left p-2 rounded-sm text-xs transition-all ${isSelected
+                                      ? "opacity-50 cursor-not-allowed"
+                                      : "hover:bg-green-500/10"
+                                      }`}
                                   >
                                     <div className="flex items-center gap-2">
                                       <Badge
                                         variant="outline"
                                         className={`${getOriginColor(server.origin)} text-[9px] px-1 py-0`}
                                       >
-                                        {server.origin === "goat" ? "GOAT" : "Eliza"}
+                                        {getOriginLabel(server.origin)}
                                       </Badge>
                                       <span className="font-mono text-foreground truncate flex-1">
                                         {server.name}
                                       </span>
-                                      {isExecutable && (
+                                      {isTestable && (
                                         <Badge variant="outline" className="text-[8px] px-1 py-0 border-cyan-500/30 text-cyan-400">
                                           <Play className="w-2 h-2 mr-0.5" />
                                           Testable
@@ -630,7 +818,7 @@ export default function CreateAgent() {
                       </div>
                     )}
                   </div>
-                  
+
                   <p className="text-[10px] text-muted-foreground">
                     Add DeFi tools (GOAT) or AI capabilities (ElizaOS) to your agent.
                   </p>
@@ -679,7 +867,7 @@ export default function CreateAgent() {
                       )}
                     />
                   </div>
-                  
+
                   <FormField
                     control={form.control}
                     name="isCloneable"
@@ -720,9 +908,9 @@ export default function CreateAgent() {
 
               {/* Two-step process: First upload, then mint */}
               {!preparedTx ? (
-                <Button 
-                  type="submit" 
-                  size="lg" 
+                <Button
+                  type="submit"
+                  size="lg"
                   disabled={!account || mintStep === "uploading"}
                   className="w-full bg-cyan-500 text-black font-bold font-mono hover:bg-cyan-400 h-14 text-lg shadow-[0_0_20px_-5px_hsl(var(--primary))] tracking-wider disabled:opacity-50"
                 >
@@ -821,11 +1009,10 @@ export default function CreateAgent() {
           </div>
 
           {/* Account Status */}
-          <div className={`p-4 rounded-sm border text-sm ${
-            account 
-              ? "bg-green-500/10 border-green-500/20 text-green-200"
-              : "bg-yellow-500/10 border-yellow-500/20 text-yellow-200"
-          }`}>
+          <div className={`p-4 rounded-sm border text-sm ${account
+            ? "bg-green-500/10 border-green-500/20 text-green-200"
+            : "bg-yellow-500/10 border-yellow-500/20 text-yellow-200"
+            }`}>
             {account ? (
               <>
                 <CheckCircle2 className="w-5 h-5 mb-2 text-green-400" />
@@ -845,7 +1032,7 @@ export default function CreateAgent() {
           <div className="p-4 rounded-sm bg-cyan-500/10 border border-cyan-500/20 text-sm text-cyan-200">
             <ShieldCheck className="w-5 h-5 mb-2 text-cyan-400" />
             <p>
-              Your agent will be verified by the <strong>Manowar Curator Protocol</strong>. 
+              Your agent will be verified by the <strong>Manowar Curator Protocol</strong>.
               Initial reputation score will be assigned based on metadata quality.
             </p>
           </div>
@@ -864,12 +1051,18 @@ export default function CreateAgent() {
               Review your agent details before minting to the blockchain.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          
+
           {pendingValues && (
             <div className="space-y-3 py-4 border-y border-sidebar-border">
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Name</span>
                 <span className="font-mono text-foreground">{pendingValues.name}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Framework</span>
+                <span className={`font-mono ${pendingValues.framework === "eliza" ? "text-fuchsia-400" : "text-orange-400"}`}>
+                  {pendingValues.framework === "eliza" ? "ElizaOS" : "LangChain"}
+                </span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Model</span>
