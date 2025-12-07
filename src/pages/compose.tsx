@@ -1,16 +1,16 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from "react";
-import { Link } from "wouter";
-import { 
-  ReactFlow, 
-  Background, 
-  Controls, 
+import { Link, useLocation } from "wouter";
+import {
+  ReactFlow,
+  Background,
+  Controls,
   MiniMap,
-  useNodesState, 
-  useEdgesState, 
-  addEdge, 
-  Connection, 
-  Edge, 
-  Node, 
+  useNodesState,
+  useEdgesState,
+  addEdge,
+  Connection,
+  Edge,
+  Node,
   ReactFlowProvider,
   Handle,
   Position,
@@ -24,18 +24,24 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
-import { 
-  Play, Save, Download, Info, Loader2, CheckCircle2, XCircle, 
+import {
+  Play, Save, Download, Info, Loader2, CheckCircle2, XCircle,
   Plug, Trash2, Settings, ChevronRight, Bot, ExternalLink, Filter, Star, Shield,
-  Wrench, Github, Zap, Server, Copy, FlaskConical, Sparkles, Upload, DollarSign, Clock, AlertCircle
+  Wrench, Github, Zap, Server, Copy, FlaskConical, Sparkles, Upload, DollarSign, Clock, AlertCircle,
+  ArrowRightLeft, Globe, Maximize2, Minimize2
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { useActiveAccount, TransactionButton } from "thirdweb/react";
+import { useActiveAccount, useActiveWallet, TransactionButton } from "thirdweb/react";
+import { wrapFetchWithPayment } from "thirdweb/x402";
 import { prepareContractCall } from "thirdweb";
-import { getManowarContract, usdcToWei } from "@/lib/contracts";
+import { getManowarContract, usdcToWei, computeExternalAgentHash, getWarpContract } from "@/lib/contracts";
+import { readContract } from "thirdweb";
 import { uploadManowarBanner, uploadManowarMetadata, getIpfsUri, fileToDataUrl, isPinataConfigured, type ManowarMetadata } from "@/lib/pinata";
-import { CHAIN_IDS, CHAIN_CONFIG } from "@/lib/thirdweb";
+import { CHAIN_IDS, CHAIN_CONFIG, thirdwebClient, INFERENCE_PRICE_WEI } from "@/lib/thirdweb";
+import { createNormalizedFetch } from "@/lib/payment";
 import { AVAILABLE_MODELS } from "@/lib/models";
+import { useSession } from "@/hooks/use-session";
+import { SessionBudgetDialog } from "@/components/session";
 import {
   Dialog,
   DialogContent,
@@ -45,6 +51,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Sheet,
   SheetContent,
@@ -57,18 +73,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { ServicesStatus } from "@/components/services-status";
-import { 
-  useConnectors, 
-  useConnectorTools, 
+import { ServicesStatus } from "@/components/status";
+import {
+  useConnectors,
+  useConnectorTools,
   useWorkflowExecution,
-  useWorkflowExport,
-  useWorkflowBuilder 
+  useWorkflowBuilder
 } from "@/hooks/use-services";
 import { useAgents } from "@/hooks/use-agents";
 import { useOnchainAgents } from "@/hooks/use-onchain";
 import { getIpfsUrl } from "@/lib/pinata";
-import { 
+import {
   useRegistryServers,
   useRegistrySearch,
   type RegistryServer,
@@ -78,7 +93,7 @@ import { executeRegistryTool } from "@/lib/services";
 import { type Agent, type AgentRegistryId, AGENT_REGISTRIES, formatInteractions, COMMON_TAGS } from "@/lib/agents";
 
 // =============================================================================
-// Node Types
+// Node Types - n8n-inspired design with protruding connectors
 // =============================================================================
 
 interface StepNodeData extends Record<string, unknown> {
@@ -89,100 +104,217 @@ interface StepNodeData extends Record<string, unknown> {
   error?: string;
 }
 
+interface AgentNodeData extends Record<string, unknown> {
+  agent: Agent;
+  status?: "pending" | "running" | "success" | "error";
+  error?: string;
+}
+
+// Shared handle styles for n8n-like protruding connectors
+const handleBaseStyle = "!w-4 !h-4 !rounded-full !border-2 transition-all";
+const inputHandleStyle = `${handleBaseStyle} !-left-2 !bg-cyan-500 !border-cyan-300 !shadow-[0_0_10px_hsl(188_95%_43%/0.6)] hover:!shadow-[0_0_15px_hsl(188_95%_43%/0.8)]`;
+const outputHandleStyle = `${handleBaseStyle} !-right-2 !bg-fuchsia-500 !border-fuchsia-300 !shadow-[0_0_10px_hsl(292_85%_55%/0.6)] hover:!shadow-[0_0_15px_hsl(292_85%_55%/0.8)]`;
+
 function StepNode({ data }: { data: StepNodeData }) {
-  const statusColors = {
-    pending: "border-sidebar-border",
-    running: "border-cyan-500 shadow-[0_0_20px_-5px_hsl(188_95%_43%/0.5)]",
-    success: "border-green-500",
-    error: "border-red-500",
+  const statusStyles = {
+    pending: "border-sidebar-border bg-card/80",
+    running: "border-cyan-500 bg-cyan-500/5 shadow-[0_0_25px_-5px_hsl(188_95%_43%/0.4)]",
+    success: "border-green-500 bg-green-500/5",
+    error: "border-red-500 bg-red-500/5",
+  };
+
+  const statusIndicator = {
+    pending: "bg-sidebar-border",
+    running: "bg-cyan-500 animate-pulse",
+    success: "bg-green-500",
+    error: "bg-red-500",
   };
 
   return (
-    <div className={`w-72 rounded-sm border-2 bg-card/90 backdrop-blur-md overflow-hidden group transition-all ${statusColors[data.status || "pending"]}`}>
-      <Handle type="target" position={Position.Top} className="!w-3 !h-3 !bg-cyan-400 !border-2 !border-black" />
-      
-      <div className={`h-1.5 w-full ${data.status === "running" ? "bg-cyan-500 animate-pulse" : data.status === "success" ? "bg-green-500" : data.status === "error" ? "bg-red-500" : "bg-sidebar-border"}`} />
-      
+    <div className={`relative w-64 rounded-lg border-2 backdrop-blur-md overflow-visible group transition-all duration-200 hover:scale-[1.02] ${statusStyles[data.status || "pending"]}`}>
+      {/* Left handle - Input */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        className={inputHandleStyle}
+      />
+
+      {/* Status bar */}
+      <div className={`h-1 w-full ${statusIndicator[data.status || "pending"]}`} />
+
+      {/* Content */}
       <div className="p-3">
-        <div className="flex items-center gap-2 mb-2">
-          <div className="w-8 h-8 rounded-sm bg-cyan-500/10 flex items-center justify-center border border-cyan-500/30">
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-lg bg-cyan-500/10 flex items-center justify-center border border-cyan-500/30 shrink-0">
             <Plug className="w-4 h-4 text-cyan-400" />
           </div>
-          <div className="overflow-hidden flex-1">
-            <h3 className="font-bold font-display text-sm truncate text-foreground">{data.step.name}</h3>
+          <div className="overflow-hidden flex-1 min-w-0">
+            <h3 className="font-bold font-display text-sm truncate text-foreground leading-tight">
+              {data.step.name}
+            </h3>
             <p className="text-[10px] text-muted-foreground truncate font-mono">
-              {data.step.connectorId}/{data.step.toolName}
+              {data.step.connectorId}
             </p>
           </div>
-          {data.status === "running" && <Loader2 className="w-4 h-4 text-cyan-400 animate-spin" />}
-          {data.status === "success" && <CheckCircle2 className="w-4 h-4 text-green-400" />}
-          {data.status === "error" && <XCircle className="w-4 h-4 text-red-400" />}
+          {data.status === "running" && <Loader2 className="w-4 h-4 text-cyan-400 animate-spin shrink-0" />}
+          {data.status === "success" && <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />}
+          {data.status === "error" && <XCircle className="w-4 h-4 text-red-400 shrink-0" />}
         </div>
-        
+
         {data.error && (
           <div className="text-[10px] text-red-400 font-mono bg-red-500/10 p-1.5 rounded mt-2 truncate">
             {data.error}
           </div>
         )}
-        
-        <div className="flex justify-between items-center mt-2 pt-2 border-t border-sidebar-border">
-          <Badge variant="outline" className="text-[10px] h-5 border-cyan-500/30 text-cyan-400 font-mono">
-            {data.step.saveAs}
+
+        <div className="flex justify-between items-center mt-2 pt-2 border-t border-sidebar-border/50">
+          <Badge variant="outline" className="text-[9px] h-4 px-1.5 border-cyan-500/30 text-cyan-400 font-mono">
+            {data.step.toolName}
           </Badge>
-          <Info className="w-3 h-3 text-muted-foreground cursor-help" />
+          <Wrench className="w-3 h-3 text-muted-foreground/50" />
         </div>
       </div>
 
-      <Handle type="source" position={Position.Bottom} className="!w-3 !h-3 !bg-fuchsia-500 !border-2 !border-black" />
+      {/* Right handle - Output */}
+      <Handle
+        type="source"
+        position={Position.Right}
+        className={outputHandleStyle}
+      />
+    </div>
+  );
+}
+
+function AgentNode({ data }: { data: AgentNodeData }) {
+  const { agent, status = "pending", error } = data;
+
+  const initials = agent.name
+    .split(" ")
+    .map(w => w[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  const isManowar = agent.registry === "manowar";
+
+  const statusStyles = {
+    pending: isManowar ? "border-cyan-500/40 bg-cyan-500/5" : "border-fuchsia-500/40 bg-fuchsia-500/5",
+    running: "border-cyan-500 bg-cyan-500/10 shadow-[0_0_25px_-5px_hsl(188_95%_43%/0.5)]",
+    success: "border-green-500 bg-green-500/5",
+    error: "border-red-500 bg-red-500/5",
+  };
+
+  return (
+    <div className={`relative w-64 rounded-lg border-2 backdrop-blur-md overflow-visible group transition-all duration-200 hover:scale-[1.02] ${statusStyles[status]}`}>
+      {/* Left handle - Input */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        className={inputHandleStyle}
+      />
+
+      {/* Colored header bar */}
+      <div className={`h-1.5 w-full ${isManowar ? "bg-gradient-to-r from-cyan-500 to-cyan-400" : "bg-gradient-to-r from-fuchsia-500 to-fuchsia-400"}`} />
+
+      {/* Content */}
+      <div className="p-3">
+        <div className="flex items-center gap-2.5">
+          <Avatar className={`w-10 h-10 border-2 shrink-0 ${isManowar ? "border-cyan-500/50" : "border-fuchsia-500/50"}`}>
+            <AvatarImage src={agent.avatarUrl || undefined} alt={agent.name} />
+            <AvatarFallback className={`font-mono text-xs ${isManowar ? "bg-cyan-500/20 text-cyan-400" : "bg-fuchsia-500/20 text-fuchsia-400"}`}>
+              {initials}
+            </AvatarFallback>
+          </Avatar>
+          <div className="overflow-hidden flex-1 min-w-0">
+            <div className="flex items-center gap-1">
+              <h3 className="font-bold font-display text-sm truncate text-foreground leading-tight">
+                {agent.name}
+              </h3>
+              {isManowar && <Sparkles className="w-3.5 h-3.5 text-cyan-400 shrink-0" />}
+              {agent.verified && !isManowar && <Shield className="w-3.5 h-3.5 text-green-400 shrink-0" />}
+            </div>
+            <p className="text-[10px] text-muted-foreground truncate font-mono">
+              {agent.protocols?.[0]?.name || "default"}
+            </p>
+          </div>
+          {status === "running" && <Loader2 className="w-4 h-4 text-cyan-400 animate-spin shrink-0" />}
+          {status === "success" && <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />}
+          {status === "error" && <XCircle className="w-4 h-4 text-red-400 shrink-0" />}
+        </div>
+
+        {error && (
+          <div className="text-[10px] text-red-400 font-mono bg-red-500/10 p-1.5 rounded mt-2 truncate">
+            {error}
+          </div>
+        )}
+
+        <div className="flex justify-between items-center mt-2 pt-2 border-t border-sidebar-border/50">
+          <Badge
+            variant="outline"
+            className={`text-[9px] h-4 px-1.5 font-mono ${isManowar ? "border-cyan-500/30 text-cyan-400" : "border-fuchsia-500/30 text-fuchsia-400"}`}
+          >
+            {isManowar ? "on-chain" : agent.registry}
+          </Badge>
+          <Bot className={`w-3.5 h-3.5 ${isManowar ? "text-cyan-400/50" : "text-fuchsia-400/50"}`} />
+        </div>
+      </div>
+
+      {/* Right handle - Output */}
+      <Handle
+        type="source"
+        position={Position.Right}
+        className={outputHandleStyle}
+      />
     </div>
   );
 }
 
 const nodeTypes = {
   stepNode: StepNode,
+  agentNode: AgentNode,
 };
 
 // =============================================================================
 // Connector Picker (Unified search across all sources)
 // =============================================================================
 
-function ConnectorPicker({ 
-  onSelect 
-}: { 
-  onSelect: (connectorId: string, tool: ConnectorTool) => void 
+function ConnectorPicker({
+  onSelect
+}: {
+  onSelect: (connectorId: string, tool: ConnectorTool) => void
 }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedServer, setSelectedServer] = useState<RegistryServer | null>(null);
   const [detailServer, setDetailServer] = useState<RegistryServer | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
-  
+
   // Fetch all servers with search (only plugins, not agents)
   const { data: searchData, isLoading: isSearching } = useRegistrySearch(
-    searchQuery, 
+    searchQuery,
     30
   );
-  
+
   // Fetch all servers when no search (only plugins)
   const { data: allData, isLoading: isLoadingAll } = useRegistryServers({
     type: "plugin",
     limit: 50,
   });
-  
-  const servers = searchQuery.trim() 
-    ? searchData?.servers || [] 
+
+  const servers = searchQuery.trim()
+    ? searchData?.servers || []
     : allData?.servers || [];
   const isLoading = searchQuery.trim() ? isSearching : isLoadingAll;
 
   // Add a connector with a specific tool
   const handleToolSelect = (tool: { name: string; description?: string }) => {
     if (!selectedServer) return;
-    
+
     const connectorTool: ConnectorTool = {
       name: tool.name,
       description: tool.description || "",
       inputSchema: { type: "object", properties: {} },
     };
-    
+
     onSelect(selectedServer.registryId, connectorTool);
     setSelectedServer(null);
   };
@@ -190,14 +322,14 @@ function ConnectorPicker({
   // Quick add a connector with a default "execute" action
   const handleQuickAdd = () => {
     if (!selectedServer) return;
-    
+
     // Create a default tool based on the server type
     const defaultTool: ConnectorTool = {
       name: "execute",
       description: `Execute ${selectedServer.name}`,
       inputSchema: { type: "object", properties: {} },
     };
-    
+
     onSelect(selectedServer.registryId, defaultTool);
     setSelectedServer(null);
   };
@@ -261,19 +393,23 @@ function ConnectorPicker({
                   key={server.registryId}
                   role="button"
                   tabIndex={0}
+                  draggable="true"
                   onClick={() => setSelectedServer(server)}
                   onKeyDown={(e) => e.key === "Enter" && setSelectedServer(server)}
-                  className={`w-full text-left p-2 rounded-sm border transition-all group cursor-pointer ${
-                    selectedServer?.registryId === server.registryId
-                      ? "border-cyan-500/50 bg-cyan-500/10"
-                      : "border-sidebar-border hover:border-cyan-500/30 hover:bg-background/50"
-                  }`}
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData("application/compose-plugin", JSON.stringify(server));
+                    e.dataTransfer.effectAllowed = "copy";
+                  }}
+                  className={`w-full text-left p-2 rounded-sm border transition-all group cursor-grab active:cursor-grabbing ${selectedServer?.registryId === server.registryId
+                    ? "border-cyan-500/50 bg-cyan-500/10"
+                    : "border-sidebar-border hover:border-cyan-500/30 hover:bg-background/50"
+                    }`}
                 >
                   <div className="flex items-center gap-2">
                     <Plug className="w-3 h-3 text-cyan-400" />
                     <span className="font-mono text-xs truncate flex-1">{server.name}</span>
                     {/* Info button */}
-                    <button 
+                    <button
                       onClick={(e) => handleShowDetails(server, e)}
                       className="p-1 hover:bg-cyan-500/20 rounded opacity-0 group-hover:opacity-100 transition-opacity"
                       title="View details"
@@ -396,12 +532,12 @@ function ConnectorDetailDialog({
   // Fetch tools dynamically for Glama servers that don't have pre-cached tools
   useEffect(() => {
     if (!server || !open) return;
-    
+
     // Reset state when server changes
     setSelectedTool("");
     setTestResult(null);
     setDynamicTools([]);
-    
+
     // Only fetch dynamically for MCP servers without pre-cached tools
     if (server.origin === "glama" && (!server.tools || server.tools.length === 0)) {
       setLoadingTools(true);
@@ -470,7 +606,7 @@ function ConnectorDetailDialog({
         args,
         server.connectorId
       );
-      
+
       setTestResult({
         success: result.success,
         content: result.result || result.content,
@@ -479,7 +615,7 @@ function ConnectorDetailDialog({
 
       toast({
         title: result.success ? "Test Successful" : "Test Failed",
-        description: result.success 
+        description: result.success
           ? "The tool executed successfully"
           : result.error || "Unknown error",
         variant: result.success ? "default" : "destructive",
@@ -545,9 +681,9 @@ function ConnectorDetailDialog({
           {/* Badges */}
           <div className="flex flex-wrap gap-2">
             <Badge className={`${style.bg} ${style.text}`}>
-              {server.origin === "goat" ? "GOAT SDK" : 
-               server.origin === "eliza" ? "ElizaOS" : 
-               server.origin === "internal" ? "Compose" : "MCP"}
+              {server.origin === "goat" ? "GOAT SDK" :
+                server.origin === "eliza" ? "ElizaOS" :
+                  server.origin === "internal" ? "Compose" : "MCP"}
             </Badge>
             {server.category && (
               <Badge variant="outline">{server.category}</Badge>
@@ -589,11 +725,10 @@ function ConnectorDetailDialog({
                     <button
                       key={tool.name}
                       onClick={() => setSelectedTool(tool.name)}
-                      className={`w-full text-left p-2 rounded-sm border transition-all ${
-                        selectedTool === tool.name
-                          ? "border-cyan-500/50 bg-cyan-500/10"
-                          : "border-sidebar-border hover:border-cyan-500/30"
-                      }`}
+                      className={`w-full text-left p-2 rounded-sm border transition-all ${selectedTool === tool.name
+                        ? "border-cyan-500/50 bg-cyan-500/10"
+                        : "border-sidebar-border hover:border-cyan-500/30"
+                        }`}
                     >
                       <div className="font-mono text-xs text-cyan-400">{tool.name}</div>
                       {tool.description && (
@@ -618,14 +753,13 @@ function ConnectorDetailDialog({
                 placeholder='{"key": "value"}'
                 className="font-mono text-xs h-16 bg-background/50 border-sidebar-border"
               />
-              
+
               {/* Test Result */}
               {testResult && (
-                <div className={`p-2 rounded-sm border ${
-                  testResult.success 
-                    ? "bg-green-500/10 border-green-500/30" 
-                    : "bg-red-500/10 border-red-500/30"
-                }`}>
+                <div className={`p-2 rounded-sm border ${testResult.success
+                  ? "bg-green-500/10 border-green-500/30"
+                  : "bg-red-500/10 border-red-500/30"
+                  }`}>
                   <div className="flex items-center justify-between mb-1">
                     <span className={`text-xs font-bold ${testResult.success ? "text-green-400" : "text-red-400"}`}>
                       {testResult.success ? "Success" : "Failed"}
@@ -685,10 +819,10 @@ function ConnectorDetailDialog({
 // Agents Picker
 // =============================================================================
 
-function AgentsPicker({ 
-  onSelect 
-}: { 
-  onSelect: (agent: Agent) => void 
+function AgentsPicker({
+  onSelect
+}: {
+  onSelect: (agent: Agent) => void
 }) {
   const [selectedTag, setSelectedTag] = useState("all");
   const { data, isLoading: isLoadingExternal, error } = useAgents({
@@ -816,12 +950,12 @@ function AgentsPicker({
   );
 }
 
-function AgentPickerCard({ 
-  agent, 
-  onSelect 
-}: { 
-  agent: Agent; 
-  onSelect: (a: Agent) => void 
+function AgentPickerCard({
+  agent,
+  onSelect
+}: {
+  agent: Agent;
+  onSelect: (a: Agent) => void
 }) {
   const initials = agent.name
     .split(" ")
@@ -829,13 +963,21 @@ function AgentPickerCard({
     .join("")
     .slice(0, 2)
     .toUpperCase();
-  
+
   const isManowar = agent.registry === "manowar";
 
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
+      draggable="true"
       onClick={() => onSelect(agent)}
-      className={`w-full p-2 rounded-sm border bg-background/30 hover:border-fuchsia-500/50 hover:bg-fuchsia-500/5 transition-all text-left group ${isManowar ? "border-cyan-500/30" : "border-sidebar-border"}`}
+      onKeyDown={(e) => e.key === "Enter" && onSelect(agent)}
+      onDragStart={(e) => {
+        e.dataTransfer.setData("application/compose-agent", JSON.stringify(agent));
+        e.dataTransfer.effectAllowed = "copy";
+      }}
+      className={`w-full p-2 rounded-sm border bg-background/30 hover:border-fuchsia-500/50 hover:bg-fuchsia-500/5 transition-all text-left group cursor-grab active:cursor-grabbing ${isManowar ? "border-cyan-500/30" : "border-sidebar-border"}`}
     >
       <div className="flex items-start gap-2">
         <Avatar className={`w-8 h-8 border group-hover:border-fuchsia-500/50 ${isManowar ? "border-cyan-500/50" : "border-sidebar-border"}`}>
@@ -871,7 +1013,7 @@ function AgentPickerCard({
           </div>
         </div>
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -887,16 +1029,16 @@ interface MintManowarDialogProps {
   agentIds: number[];
 }
 
-function MintManowarDialog({ 
-  open, 
-  onOpenChange, 
-  workflowName, 
+function MintManowarDialog({
+  open,
+  onOpenChange,
+  workflowName,
   workflowDescription,
-  agentIds 
+  agentIds
 }: MintManowarDialogProps) {
   const { toast } = useToast();
   const account = useActiveAccount();
-  
+
   const [title, setTitle] = useState(workflowName);
   const [description, setDescription] = useState(workflowDescription);
   const [x402Price, setX402Price] = useState("0.01");
@@ -958,7 +1100,7 @@ function MintManowarDialog({
 
     try {
       setMintStep("uploading");
-      
+
       // Upload banner if provided
       let bannerUri = "";
       if (bannerFile) {
@@ -1005,7 +1147,7 @@ function MintManowarDialog({
           coordinatorModel: coordinatorModel || "",
         },
       });
-      
+
       setMintStep("ready");
     } catch (error) {
       console.error("Prepare error:", error);
@@ -1024,7 +1166,7 @@ function MintManowarDialog({
       description: (
         <div className="space-y-1">
           <p>{title} deployed to Avalanche Fuji.</p>
-          <a 
+          <a
             href={`${CHAIN_CONFIG[CHAIN_IDS.avalancheFuji].explorer}/tx/${result.transactionHash}`}
             target="_blank"
             rel="noopener noreferrer"
@@ -1261,11 +1403,73 @@ function MintManowarDialog({
 }
 
 // =============================================================================
+// Fullscreen Canvas Overlay
+// =============================================================================
+
+interface FullscreenOverlayProps {
+  isOpen: boolean;
+  onClose: () => void;
+  children: React.ReactNode;
+}
+
+function FullscreenOverlay({ isOpen, onClose, children }: FullscreenOverlayProps) {
+  // Handle ESC key to close
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && isOpen) {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleEsc);
+    return () => window.removeEventListener("keydown", handleEsc);
+  }, [isOpen, onClose]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50">
+      {/* Blurred backdrop */}
+      <div
+        className="absolute inset-0 bg-background/85 backdrop-blur-xl transition-opacity duration-300"
+        onClick={onClose}
+        style={{
+          background: "linear-gradient(145deg, hsl(222 47% 3% / 0.92), hsl(270 60% 10% / 0.88))"
+        }}
+      />
+
+      {/* Content container */}
+      <div className="relative w-full h-full p-6 animate-in zoom-in-95 fade-in duration-300">
+        {/* Header with close button */}
+        <div className="absolute top-4 right-4 z-10 flex items-center gap-3">
+          <Badge variant="outline" className="font-mono border-cyan-500/30 text-cyan-400">
+            FULLSCREEN MODE
+          </Badge>
+          <Button
+            onClick={onClose}
+            variant="outline"
+            size="icon"
+            className="border-sidebar-border hover:border-cyan-500 hover:bg-cyan-500/10 transition-all"
+          >
+            <Minimize2 className="w-4 h-4" />
+          </Button>
+        </div>
+
+        {/* Fullscreen canvas container */}
+        <div className="w-full h-full rounded-sm border border-cyan-500/30 overflow-hidden bg-black/60 shadow-2xl neon-border">
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
 // Main Component
 // =============================================================================
 
 let nodeId = 0;
 const getNodeId = () => `step_${nodeId++}`;
+
 
 function ComposeFlow() {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
@@ -1273,19 +1477,31 @@ function ComposeFlow() {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [reactFlowInstance, setReactFlowInstance] = useState<any>(null);
   const { toast } = useToast();
-  
+  const [, setLocation] = useLocation();
+
   // Workflow state
   const { workflow, addStep, setMetadata } = useWorkflowBuilder();
   const [workflowName, setWorkflowName] = useState("");
   const [workflowDescription, setWorkflowDescription] = useState("");
   const [inputJson, setInputJson] = useState("{}");
-  
+
   // Manowar minting
   const [showMintDialog, setShowMintDialog] = useState(false);
-  
+
+  // Warp dialog state
+  const [showWarpDialog, setShowWarpDialog] = useState(false);
+  const [pendingWarpAgent, setPendingWarpAgent] = useState<Agent | null>(null);
+
+  // Fullscreen canvas state
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // x402 Payment state
+  const wallet = useActiveWallet();
+  const { sessionActive, budgetRemaining } = useSession();
+  const [showSessionDialog, setShowSessionDialog] = useState(false);
+
   // Execution state
   const { execute, isRunning, logs, result, error: execError, reset: resetExecution } = useWorkflowExecution();
-  const { exportAsZip, isExporting } = useWorkflowExport();
 
   // Build workflow from nodes
   const currentWorkflow = useMemo(() => {
@@ -1293,7 +1509,7 @@ function ComposeFlow() {
       ...(node.data as StepNodeData).step,
       id: node.id,
     }));
-    
+
     return {
       id: workflow.id,
       name: workflowName || "Untitled Workflow",
@@ -1303,11 +1519,11 @@ function ComposeFlow() {
   }, [nodes, workflow.id, workflowName, workflowDescription]);
 
   const onConnect = useCallback(
-    (params: Connection) => setEdges((eds) => addEdge({ 
-      ...params, 
-      animated: true, 
+    (params: Connection) => setEdges((eds) => addEdge({
+      ...params,
+      animated: true,
       style: { stroke: 'hsl(188 95% 43%)', strokeWidth: 2 },
-      markerEnd: { type: MarkerType.ArrowClosed, color: 'hsl(188 95% 43%)' } 
+      markerEnd: { type: MarkerType.ArrowClosed, color: 'hsl(188 95% 43%)' }
     }, eds)),
     [setEdges],
   );
@@ -1325,23 +1541,55 @@ function ComposeFlow() {
       saveAs: `steps.${tool.name}`,
     };
 
+    // Horizontal flow: position nodes left-to-right
     const newNode: Node = {
       id,
       type: "stepNode",
-      position: { x: 250, y: nodes.length * 150 + 50 },
+      position: { x: nodes.length * 320 + 100, y: 150 },
       data: { step, status: "pending" } as StepNodeData,
     };
 
     setNodes((nds) => [...nds, newNode]);
-    
+
     toast({
       title: "Step Added",
       description: `Added "${step.name}" to workflow`,
     });
   }, [nodes.length, setNodes, toast]);
 
-  // Add step from agent registry
-  const handleAddAgentStep = useCallback((agent: Agent) => {
+  // Check if external agent has been warped
+  const checkExternalWarpStatus = useCallback(async (registry: string, address: string): Promise<boolean> => {
+    try {
+      const externalHash = computeExternalAgentHash(registry, address);
+      const warpContract = getWarpContract();
+      const warpedId = await readContract({
+        contract: warpContract,
+        method: "function getWarpedAgentId(bytes32 externalHash) view returns (uint256)",
+        params: [externalHash],
+      });
+      return Number(warpedId) > 0;
+    } catch (error) {
+      console.error("Failed to check warp status:", error);
+      return false;
+    }
+  }, []);
+
+  // Add step from agent registry (with warp check)
+  const handleAddAgentStep = useCallback(async (agent: Agent) => {
+    const isManowar = agent.registry === "manowar";
+
+    // External agents need to be warped first
+    if (!isManowar) {
+      const isWarped = await checkExternalWarpStatus(agent.registry, agent.address);
+      if (!isWarped) {
+        // Show warp dialog instead of adding
+        setPendingWarpAgent(agent);
+        setShowWarpDialog(true);
+        return;
+      }
+    }
+
+    // Agent is native (manowar) or already warped - add to workflow
     const id = getNodeId();
     const protocolName = agent.protocols?.[0]?.name || "default";
     const step: WorkflowStep = {
@@ -1354,22 +1602,33 @@ function ComposeFlow() {
       saveAs: `steps.${agent.name.toLowerCase().replace(/\s+/g, "_")}`,
     };
 
+    // Use new agentNode type for agents
     const newNode: Node = {
       id,
-      type: "stepNode",
-      position: { x: 250, y: nodes.length * 150 + 50 },
-      data: { step, status: "pending" } as StepNodeData,
+      type: "agentNode",
+      position: { x: nodes.length * 320 + 100, y: 150 },
+      data: { agent, step, status: "pending" } as AgentNodeData & { step: WorkflowStep },
     };
 
     setNodes((nds) => [...nds, newNode]);
-    
+
     const registryName = AGENT_REGISTRIES[agent.registry]?.name || agent.registry;
     toast({
       title: "Agent Added",
       description: `Added "${agent.name}" from ${registryName}`,
     });
-  }, [nodes.length, setNodes, toast]);
-  
+  }, [nodes.length, setNodes, toast, checkExternalWarpStatus]);
+
+  // Handle warp navigation
+  const handleWarpAgent = useCallback(() => {
+    if (pendingWarpAgent) {
+      sessionStorage.setItem("warpAgent", JSON.stringify(pendingWarpAgent));
+      setLocation("/create-agent?warp=true");
+    }
+    setShowWarpDialog(false);
+    setPendingWarpAgent(null);
+  }, [pendingWarpAgent, setLocation]);
+
   // Check for agent selection from Agents page on mount
   useEffect(() => {
     const stored = sessionStorage.getItem("selectedAgent");
@@ -1405,7 +1664,7 @@ function ComposeFlow() {
     }
   }, [handleAddAgentStep]);
 
-  // Run workflow
+  // Run workflow with x402 payment via Manowar backend
   const handleRun = useCallback(async () => {
     if (currentWorkflow.steps.length === 0) {
       toast({
@@ -1416,7 +1675,17 @@ function ComposeFlow() {
       return;
     }
 
-    let input = {};
+    // Require wallet connection for x402 payment
+    if (!wallet) {
+      toast({
+        title: "Connect Wallet",
+        description: "Please connect your wallet to run workflows (x402 payment required)",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    let input: Record<string, unknown> = {};
     try {
       input = JSON.parse(inputJson);
     } catch {
@@ -1444,26 +1713,94 @@ function ComposeFlow() {
         return updated;
       });
 
-      const result = await execute(currentWorkflow, input);
-      
-      // Update node statuses based on logs
+      // x402 payment wrapper - wraps fetch to add payment headers
+      const normalizedFetch = createNormalizedFetch();
+      const fetchWithPayment = wrapFetchWithPayment(
+        normalizedFetch,
+        thirdwebClient,
+        wallet,
+        { maxValue: BigInt(10000 + (5000 * currentWorkflow.steps.length)) } // $0.01 + $0.005 per step
+      );
+
+      // Build workflow payload for manowar backend
+      // Build from nodes which have full data (including agent info)
+      const workflowPayload = {
+        workflow: {
+          id: currentWorkflow.id,
+          name: currentWorkflow.name || "Untitled",
+          description: currentWorkflow.description || "",
+          steps: nodes.map((node) => {
+            const nodeData = node.data as StepNodeData | (AgentNodeData & { step: WorkflowStep });
+            const step = nodeData.step;
+            const agent = "agent" in nodeData ? nodeData.agent : undefined;
+
+            // Determine step type from node type and data
+            const isAgent = node.type === "agentNode" && agent;
+            const stepType = isAgent ? "agent" : "mcpTool";
+
+            return {
+              id: step.id,
+              name: step.name || step.connectorId || "Step",
+              type: stepType,
+              connectorId: step.connectorId,
+              toolName: step.toolName,
+              // For agents, pass agentAddress from inputTemplate
+              agentId: isAgent ? (step.inputTemplate?.agentAddress as string) : undefined,
+              inputTemplate: step.inputTemplate || {},
+              saveAs: step.saveAs || `step_${step.id}`,
+            };
+          }),
+        },
+        input,
+      };
+
+      // Add session headers if session is active
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (sessionActive && budgetRemaining > 0) {
+        headers["x-session-active"] = "true";
+        headers["x-session-budget-remaining"] = budgetRemaining.toString();
+      }
+
+      // Execute workflow via Manowar backend with x402 payment
+      const response = await fetchWithPayment("https://mcp.compose.market/manowar/execute", {
+        method: "POST",
+        headers,
+        body: JSON.stringify(workflowPayload),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Workflow execution failed: ${errorText}`);
+      }
+
+      const result = await response.json() as {
+        success: boolean;
+        workflowId: string;
+        status: string;
+        steps: Array<{ stepId: string; stepName: string; status: string; error?: string }>;
+        output: Record<string, unknown>;
+        totalCostWei: string;
+        error?: string;
+      };
+
+      // Update node statuses based on response
       setNodes((nds) => nds.map((n) => {
-        const log = result.logs.find((l) => l.stepId === n.id);
+        const stepResult = result.steps.find((s) => s.stepId === n.id);
         return {
           ...n,
           data: {
             ...(n.data as StepNodeData),
-            status: log?.status || "pending",
-            error: log?.error,
+            status: stepResult?.status || "pending",
+            error: stepResult?.error,
           } as StepNodeData,
         };
       }));
 
       toast({
         title: result.success ? "Workflow Complete" : "Workflow Failed",
-        description: result.success 
-          ? `Executed ${result.logs.length} steps successfully`
-          : `Failed at step: ${result.logs.find(l => l.status === "error")?.name}`,
+        description: result.success
+          ? `Executed ${result.steps.length} steps. Cost: $${(parseInt(result.totalCostWei) / 1_000_000).toFixed(4)}`
+          : `Failed: ${result.error || "Unknown error"}`,
         variant: result.success ? "default" : "destructive",
       });
     } catch (err) {
@@ -1473,38 +1810,7 @@ function ComposeFlow() {
         variant: "destructive",
       });
     }
-  }, [currentWorkflow, inputJson, execute, setNodes, toast]);
-
-  // Export workflow
-  const handleExport = useCallback(async () => {
-    if (currentWorkflow.steps.length === 0) {
-      toast({
-        title: "No Steps",
-        description: "Add at least one step to export the workflow",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    try {
-      await exportAsZip({
-        workflow: currentWorkflow,
-        projectName: workflowName,
-        description: workflowDescription,
-      });
-      
-      toast({
-        title: "Export Complete",
-        description: "Your workflow project has been downloaded",
-      });
-    } catch (err) {
-      toast({
-        title: "Export Failed",
-        description: err instanceof Error ? err.message : "Unknown error",
-        variant: "destructive",
-      });
-    }
-  }, [currentWorkflow, workflowName, workflowDescription, exportAsZip, toast]);
+  }, [currentWorkflow, inputJson, nodes, setNodes, toast, wallet, sessionActive, budgetRemaining]);
 
   return (
     <div className="h-[calc(100vh-100px)] flex flex-col md:flex-row gap-4 pb-4">
@@ -1519,15 +1825,15 @@ function ComposeFlow() {
         <CardContent className="flex-1 overflow-hidden p-0">
           <Tabs defaultValue="connectors" className="h-full flex flex-col">
             <TabsList className="w-full rounded-none border-b border-sidebar-border bg-transparent p-0 h-auto">
-              <TabsTrigger 
-                value="connectors" 
+              <TabsTrigger
+                value="connectors"
                 className="flex-1 rounded-none border-b-2 border-transparent data-[state=active]:border-cyan-500 data-[state=active]:bg-transparent data-[state=active]:text-cyan-400 py-2.5 font-mono text-xs"
               >
                 <Plug className="w-3 h-3 mr-1.5" />
                 PLUGINS
               </TabsTrigger>
-              <TabsTrigger 
-                value="agents" 
+              <TabsTrigger
+                value="agents"
                 className="flex-1 rounded-none border-b-2 border-transparent data-[state=active]:border-fuchsia-500 data-[state=active]:bg-transparent data-[state=active]:text-fuchsia-400 py-2.5 font-mono text-xs"
               >
                 <Bot className="w-3 h-3 mr-1.5" />
@@ -1544,143 +1850,249 @@ function ComposeFlow() {
         </CardContent>
       </Card>
 
-      {/* Canvas Area */}
-      <div className="flex-1 h-full relative rounded-sm border border-cyan-500/20 overflow-hidden shadow-2xl bg-black/40">
-        {/* Toolbar */}
-        <div className="absolute top-4 right-4 z-10 flex gap-2">
-          {/* Run Button */}
-          <Button 
-            onClick={handleRun}
-            disabled={isRunning || nodes.length === 0}
-            className="bg-green-500 text-white hover:bg-green-600 font-bold font-mono shadow-lg"
-          >
-            {isRunning ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <Play className="w-4 h-4 mr-2" />
-            )}
-            {isRunning ? "RUNNING..." : "RUN"}
-          </Button>
+      {/* Canvas Area with Bottom Action Bar */}
+      <div className="flex-1 h-full flex flex-col">
+        {/* Main Canvas */}
+        <div className="flex-1 relative rounded-t-sm border border-cyan-500/20 overflow-hidden shadow-2xl bg-black/40">
+          {/* Toolbar */}
+          <div className="absolute top-4 right-4 z-10 flex gap-2">
+            {/* Run Button */}
+            <Button
+              onClick={handleRun}
+              disabled={isRunning || nodes.length === 0}
+              className="bg-green-500 text-white hover:bg-green-600 font-bold font-mono shadow-lg"
+            >
+              {isRunning ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Play className="w-4 h-4 mr-2" />
+              )}
+              {isRunning ? "RUNNING..." : "RUN"}
+            </Button>
 
-          {/* Export Button */}
-          <Button
-            onClick={handleExport}
-            disabled={isExporting || nodes.length === 0}
-            className="bg-fuchsia-500 text-white hover:bg-fuchsia-600 font-bold font-mono shadow-lg"
-          >
-            {isExporting ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <Download className="w-4 h-4 mr-2" />
-            )}
-            EXPORT
-          </Button>
+            {/* Expand Fullscreen Button */}
+            <Button
+              onClick={() => setIsFullscreen(true)}
+              variant="outline"
+              className="border-sidebar-border hover:border-cyan-500 hover:bg-cyan-500/10"
+              title="Expand to fullscreen"
+            >
+              <Maximize2 className="w-4 h-4" />
+            </Button>
 
-          {/* Mint as Manowar Button */}
-          <Button
-            onClick={() => setShowMintDialog(true)}
-            disabled={nodes.length === 0}
-            className="bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white hover:from-cyan-400 hover:to-fuchsia-400 font-bold font-mono shadow-lg"
-          >
-            <Sparkles className="w-4 h-4 mr-2" />
-            MINT NFT
-          </Button>
-
-          {/* Settings Dialog */}
-          <Sheet>
-            <SheetTrigger asChild>
-              <Button variant="outline" className="border-sidebar-border">
-                <Settings className="w-4 h-4" />
-              </Button>
-            </SheetTrigger>
-            <SheetContent className="bg-card border-sidebar-border">
-              <SheetHeader>
-                <SheetTitle className="font-display text-cyan-400">Workflow Settings</SheetTitle>
-                <SheetDescription>Configure workflow metadata and input</SheetDescription>
-              </SheetHeader>
-              <div className="space-y-4 mt-6">
-                <div className="space-y-2">
-                  <Label className="font-mono text-xs">WORKFLOW NAME</Label>
-                  <Input
-                    value={workflowName}
-                    onChange={(e) => setWorkflowName(e.target.value)}
-                    placeholder="My Workflow"
-                    className="bg-background/50 font-mono border-sidebar-border"
-                  />
+            {/* Settings Dialog */}
+            <Sheet>
+              <SheetTrigger asChild>
+                <Button variant="outline" className="border-sidebar-border">
+                  <Settings className="w-4 h-4" />
+                </Button>
+              </SheetTrigger>
+              <SheetContent className="bg-card border-sidebar-border">
+                <SheetHeader>
+                  <SheetTitle className="font-display text-cyan-400">Workflow Settings</SheetTitle>
+                  <SheetDescription>Configure workflow metadata and input</SheetDescription>
+                </SheetHeader>
+                <div className="space-y-4 mt-6">
+                  <div className="space-y-2">
+                    <Label className="font-mono text-xs">WORKFLOW NAME</Label>
+                    <Input
+                      value={workflowName}
+                      onChange={(e) => setWorkflowName(e.target.value)}
+                      placeholder="My Workflow"
+                      className="bg-background/50 font-mono border-sidebar-border"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="font-mono text-xs">DESCRIPTION</Label>
+                    <Textarea
+                      value={workflowDescription}
+                      onChange={(e) => setWorkflowDescription(e.target.value)}
+                      placeholder="What does this workflow do?"
+                      className="bg-background/50 font-mono border-sidebar-border resize-none"
+                      rows={3}
+                    />
+                  </div>
+                  <Separator />
+                  <div className="space-y-2">
+                    <Label className="font-mono text-xs">INPUT (JSON)</Label>
+                    <Textarea
+                      value={inputJson}
+                      onChange={(e) => setInputJson(e.target.value)}
+                      placeholder='{"key": "value"}'
+                      className="bg-background/50 font-mono border-sidebar-border resize-none text-xs"
+                      rows={5}
+                    />
+                    <p className="text-[10px] text-muted-foreground">
+                      Access in steps as {"{{input.key}}"}
+                    </p>
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <Label className="font-mono text-xs">DESCRIPTION</Label>
-                  <Textarea
-                    value={workflowDescription}
-                    onChange={(e) => setWorkflowDescription(e.target.value)}
-                    placeholder="What does this workflow do?"
-                    className="bg-background/50 font-mono border-sidebar-border resize-none"
-                    rows={3}
-                  />
+              </SheetContent>
+            </Sheet>
+          </div>
+
+          {/* Step Count Badge */}
+          <div className="absolute top-4 left-4 z-10">
+            <Badge variant="outline" className="font-mono border-cyan-500/30 text-cyan-400">
+              {nodes.length} step{nodes.length !== 1 ? "s" : ""}
+            </Badge>
+          </div>
+
+          <ReactFlowProvider>
+            <div className="h-full w-full" ref={reactFlowWrapper}>
+              <ReactFlow
+                nodes={nodes}
+                edges={edges}
+                onNodesChange={onNodesChange}
+                onEdgesChange={onEdgesChange}
+                onConnect={onConnect}
+                onInit={setReactFlowInstance}
+                nodeTypes={nodeTypes}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (!reactFlowInstance) return;
+
+                  const pluginData = e.dataTransfer.getData("application/compose-plugin");
+                  const agentData = e.dataTransfer.getData("application/compose-agent");
+                  const position = reactFlowInstance.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+
+                  if (pluginData) {
+                    const server = JSON.parse(pluginData);
+                    const id = getNodeId();
+                    const step: WorkflowStep = {
+                      id,
+                      name: server.name,
+                      type: "connectorTool",
+                      connectorId: server.registryId,
+                      toolName: "execute",
+                      inputTemplate: {},
+                      saveAs: `steps.${server.slug || server.name.toLowerCase().replace(/\s+/g, "_")}`,
+                    };
+                    const newNode: Node = {
+                      id,
+                      type: "stepNode",
+                      position,
+                      data: { step, status: "pending" } as StepNodeData,
+                    };
+                    setNodes((nds) => [...nds, newNode]);
+                    toast({ title: "Plugin Added", description: `Added "${server.name}" to canvas` });
+                  } else if (agentData) {
+                    const agent = JSON.parse(agentData);
+                    const id = getNodeId();
+                    const step: WorkflowStep = {
+                      id,
+                      name: agent.name,
+                      type: "connectorTool",
+                      connectorId: agent.registry,
+                      toolName: agent.protocols?.[0]?.name || "default",
+                      inputTemplate: { agentAddress: agent.address },
+                      saveAs: `steps.${agent.name.toLowerCase().replace(/\s+/g, "_")}`,
+                    };
+                    const newNode: Node = {
+                      id,
+                      type: "agentNode",
+                      position,
+                      data: { agent, step, status: "pending" } as AgentNodeData & { step: WorkflowStep },
+                    };
+                    setNodes((nds) => [...nds, newNode]);
+                    toast({ title: "Agent Added", description: `Added "${agent.name}" to canvas` });
+                  }
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "copy";
+                }}
+                fitView
+                proOptions={{ hideAttribution: true }}
+                className="bg-background"
+              >
+                <Background color="hsl(188 95% 43%)" gap={20} size={1} className="opacity-10" />
+                <Controls className="bg-card border-sidebar-border fill-foreground" />
+                <MiniMap
+                  className="bg-card border-sidebar-border"
+                  maskColor="hsl(222 47% 3% / 0.8)"
+                  nodeColor="hsl(188 95% 43%)"
+                />
+              </ReactFlow>
+            </div>
+          </ReactFlowProvider>
+
+          {/* Empty State */}
+          {nodes.length === 0 && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="text-center space-y-3">
+                <div className="relative">
+                  <Plug className="w-16 h-16 mx-auto text-muted-foreground/20" />
+                  <div className="absolute -top-2 -right-2 animate-pulse">
+                    <Sparkles className="w-6 h-6 text-cyan-500/40" />
+                  </div>
                 </div>
-                <Separator />
-                <div className="space-y-2">
-                  <Label className="font-mono text-xs">INPUT (JSON)</Label>
-                  <Textarea
-                    value={inputJson}
-                    onChange={(e) => setInputJson(e.target.value)}
-                    placeholder='{"key": "value"}'
-                    className="bg-background/50 font-mono border-sidebar-border resize-none text-xs"
-                    rows={5}
-                  />
-                  <p className="text-[10px] text-muted-foreground">
-                    Access in steps as {"{{input.key}}"}
+                <div className="space-y-1">
+                  <p className="text-foreground/80 font-display text-lg">
+                    Start Building
+                  </p>
+                  <p className="text-muted-foreground font-mono text-xs max-w-[200px]">
+                    Select plugins or agents from the sidebar to add workflow steps
                   </p>
                 </div>
               </div>
-            </SheetContent>
-          </Sheet>
-        </div>
-
-        {/* Step Count Badge */}
-        <div className="absolute top-4 left-4 z-10">
-          <Badge variant="outline" className="font-mono border-cyan-500/30 text-cyan-400">
-            {nodes.length} step{nodes.length !== 1 ? "s" : ""}
-          </Badge>
-        </div>
-
-        <ReactFlowProvider>
-          <div className="h-full w-full" ref={reactFlowWrapper}>
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onConnect={onConnect}
-              onInit={setReactFlowInstance}
-              nodeTypes={nodeTypes}
-              fitView
-              proOptions={{ hideAttribution: true }}
-              className="bg-background"
-            >
-              <Background color="hsl(188 95% 43%)" gap={20} size={1} className="opacity-10" />
-              <Controls className="bg-card border-sidebar-border fill-foreground" />
-              <MiniMap 
-                className="bg-card border-sidebar-border" 
-                maskColor="hsl(222 47% 3% / 0.8)"
-                nodeColor="hsl(188 95% 43%)"
-              />
-            </ReactFlow>
-          </div>
-        </ReactFlowProvider>
-
-        {/* Empty State */}
-        {nodes.length === 0 && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="text-center space-y-2">
-              <Plug className="w-12 h-12 mx-auto text-muted-foreground/30" />
-              <p className="text-muted-foreground font-mono text-sm">
-                Select a connector and tool to add steps
-              </p>
             </div>
+          )}
+        </div>
+
+        {/* Bottom Action Bar */}
+        <div className="flex items-center justify-between px-4 py-3 bg-card/60 border border-t-0 border-cyan-500/20 rounded-b-sm backdrop-blur-sm">
+          {/* Left: Workflow info */}
+          <div className="flex items-center gap-3 text-sm font-mono text-muted-foreground min-w-0">
+            <span className="text-foreground/80 truncate max-w-[150px]">
+              {workflowName || "Untitled Workflow"}
+            </span>
+            {workflowDescription && (
+              <>
+                <span className="text-muted-foreground/50">•</span>
+                <span className="text-xs opacity-60 truncate max-w-[200px] hidden md:block">
+                  {workflowDescription}
+                </span>
+              </>
+            )}
           </div>
-        )}
+
+          {/* Right: Primary action - Mint Button */}
+          <Button
+            onClick={() => setShowMintDialog(true)}
+            disabled={nodes.length === 0}
+            className="bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white hover:from-cyan-400 hover:to-fuchsia-400 font-bold font-mono shadow-lg disabled:opacity-50"
+          >
+            <Sparkles className="w-4 h-4 mr-2" />
+            MINT AS NFT
+          </Button>
+        </div>
       </div>
+
+      {/* Fullscreen Canvas Overlay */}
+      <FullscreenOverlay isOpen={isFullscreen} onClose={() => setIsFullscreen(false)}>
+        <ReactFlowProvider>
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            nodeTypes={nodeTypes}
+            fitView
+            proOptions={{ hideAttribution: true }}
+            className="bg-background"
+          >
+            <Background color="hsl(188 95% 43%)" gap={20} size={1} className="opacity-10" />
+            <Controls className="bg-card border-sidebar-border fill-foreground" />
+            <MiniMap
+              className="bg-card border-sidebar-border"
+              maskColor="hsl(222 47% 3% / 0.8)"
+              nodeColor="hsl(188 95% 43%)"
+            />
+          </ReactFlow>
+        </ReactFlowProvider>
+      </FullscreenOverlay>
 
       {/* Mint Manowar Dialog */}
       <MintManowarDialog
@@ -1689,6 +2101,63 @@ function ComposeFlow() {
         workflowName={workflowName}
         workflowDescription={workflowDescription}
         agentIds={[]} // TODO: Extract agent IDs from workflow steps
+      />
+
+      {/* Warp Required Dialog */}
+      <AlertDialog open={showWarpDialog} onOpenChange={setShowWarpDialog}>
+        <AlertDialogContent className="bg-background border-sidebar-border max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-display text-xl flex items-center gap-2">
+              <ArrowRightLeft className="w-5 h-5 text-fuchsia-400" />
+              Warp Required
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-muted-foreground">
+              This agent needs to be warped into the Manowar ecosystem before it can be used in compose workflows.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          {pendingWarpAgent && (
+            <div className="space-y-3 py-4 border-y border-sidebar-border">
+              <div className="flex items-center gap-3 p-3 rounded-sm bg-sidebar-accent border border-sidebar-border">
+                <div className="w-10 h-10 rounded-full bg-fuchsia-500/10 flex items-center justify-center border border-fuchsia-500/30">
+                  <Globe className="w-5 h-5 text-fuchsia-400" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-mono font-bold text-foreground truncate">{pendingWarpAgent.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {AGENT_REGISTRIES[pendingWarpAgent.registry]?.name || pendingWarpAgent.registry}
+                  </p>
+                </div>
+              </div>
+
+              <div className="text-xs text-muted-foreground space-y-2">
+                <p>Warping brings external agents on-chain with:</p>
+                <ul className="list-disc list-inside space-y-1 ml-2">
+                  <li>ERC8004 identity</li>
+                  <li>x402 payment integration</li>
+                  <li>80% royalties to you (the warper)</li>
+                </ul>
+              </div>
+            </div>
+          )}
+
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-sidebar-border">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleWarpAgent}
+              className="bg-gradient-to-r from-fuchsia-500 to-cyan-500 text-white hover:from-fuchsia-400 hover:to-cyan-400 font-bold"
+            >
+              <ArrowRightLeft className="w-4 h-4 mr-2" />
+              Warp This Agent
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Session Budget Dialog */}
+      <SessionBudgetDialog
+        open={showSessionDialog}
+        onOpenChange={setShowSessionDialog}
       />
     </div>
   );

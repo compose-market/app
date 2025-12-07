@@ -42,12 +42,12 @@ export const CHAIN_CONFIG: Record<number, {
   [CHAIN_IDS.avalancheFuji]: {
     name: "Avalanche Fuji",
     isTestnet: true,
-    explorer: "https://testnet.avascan.info",
+    explorer: "https://testnet.snowtrace.io",
   },
   [CHAIN_IDS.avalanche]: {
     name: "Avalanche C-Chain",
     isTestnet: false,
-    explorer: "https://avascan.info",
+    explorer: "https://snowtrace.io",
   },
   [CHAIN_IDS.bscTestnet]: {
     name: "BNB Smart Chain Testnet",

@@ -21,7 +21,6 @@ function getRegistryBaseUrl(): string {
     return `${connectorUrl.replace(/\/$/, "")}/registry`;
   }
   
-  // In production, derive from API URL (connector is on a different subdomain)
   const apiUrl = import.meta.env.VITE_API_URL;
   if (apiUrl) {
     // api.compose.market -> connector.compose.market
