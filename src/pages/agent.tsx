@@ -23,7 +23,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
 import { useSession } from "@/hooks/use-session";
 import { SessionBudgetDialog } from "@/components/session";
-import { useOnchainAgent } from "@/hooks/use-onchain";
+import { useOnchainAgentByIdentifier } from "@/hooks/use-onchain";
 import { getIpfsUrl } from "@/lib/pinata";
 import {
   Dialog,
@@ -68,8 +68,9 @@ interface ChatMessage {
 
 export default function AgentDetailPage() {
   const params = useParams<{ id: string }>();
-  const agentId = params.id ? parseInt(params.id) : null;
-  const { data: agent, isLoading, error } = useOnchainAgent(agentId);
+  // id can be either numeric agent ID (legacy) or wallet address (preferred)
+  const identifier = params.id || null;
+  const { data: agent, isLoading, error } = useOnchainAgentByIdentifier(identifier);
   const { toast } = useToast();
   const wallet = useActiveWallet();
   const { sessionActive, budgetRemaining } = useSession();
@@ -91,14 +92,15 @@ export default function AgentDetailPage() {
   // Session dialog
   const [showSessionDialog, setShowSessionDialog] = useState(false);
 
-  // Build the A2A-compatible endpoint URL
-  const apiEndpoint = agentId
-    ? `https://api.compose.market/api/agent/${agentId}`
+  // Build the A2A-compatible endpoint URL using wallet address (canonical identifier)
+  const agentWallet = agent?.walletAddress;
+  const apiEndpoint = agentWallet
+    ? `https://api.compose.market/api/agent/${agentWallet}`
     : null;
 
   // Invoke endpoint for x402 calls
-  const invokeEndpoint = agentId
-    ? `https://api.compose.market/api/agent/${agentId}/invoke`
+  const invokeEndpoint = agentWallet
+    ? `https://api.compose.market/api/agent/${agentWallet}/invoke`
     : null;
 
   // Auto-scroll messages
@@ -116,17 +118,58 @@ export default function AgentDetailPage() {
     }
   };
 
+  // Auto-register agent with backend if not registered
+  const autoRegisterAgent = useCallback(async (): Promise<boolean> => {
+    if (!agent || !agentWallet) return false;
+    
+    try {
+      const metadata = agent.metadata;
+      
+      // walletTimestamp is optional - agent works for chat without it
+      // Only needed if agent needs to sign transactions
+      const walletTimestamp = metadata?.walletTimestamp;
+      if (!walletTimestamp) {
+        console.log(`[agent] No walletTimestamp in metadata - agent will work without signing capability`);
+      }
+      
+      const response = await fetch(`${MCP_URL}/agent/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          walletAddress: agentWallet,
+          ...(walletTimestamp && { walletTimestamp }), // Optional - for signing capability
+          dnaHash: agent.dnaHash,
+          name: metadata?.name || `Agent #${agent.id}`,
+          description: metadata?.description || "",
+          agentCardUri: agent.agentCardUri,
+          creator: agent.creator,
+          model: metadata?.model || "gpt-4o-mini",
+          plugins: metadata?.plugins?.map(p => p.registryId) || [],
+        }),
+      });
+      
+      if (response.ok || response.status === 409) {
+        // 409 = already registered, which is fine
+        console.log(`[agent] Auto-registered agent ${agentWallet}`);
+        return true;
+      }
+      
+      console.warn(`[agent] Auto-registration failed:`, await response.text());
+      return false;
+    } catch (err) {
+      console.error(`[agent] Auto-registration error:`, err);
+      return false;
+    }
+  }, [agent, agentWallet]);
+
   // Send chat message with x402 payment
   const handleSendMessage = useCallback(async () => {
-    if (!inputValue.trim() || sending || !agentId) return;
+    if (!inputValue.trim() || sending || !agentWallet) return;
 
     if (!wallet) {
       toast({ title: "Connect wallet", description: "Please connect your wallet to chat", variant: "destructive" });
       return;
     }
-
-    // x402 wrapFetchWithPayment handles payment automatically when 402 is received
-    // No session check needed - wallet signs payment header on-demand
 
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
@@ -157,38 +200,37 @@ export default function AgentDetailPage() {
         { maxValue: BigInt(INFERENCE_PRICE_WEI) } // $0.005
       );
 
-      // Use Lambda inference API with agent's model
-      const metadata = agent.metadata;
-      const modelId = metadata?.model || "asi1-mini";
-      const apiUrl = import.meta.env.VITE_API_URL || "https://api.compose.market";
+      // ALL agents use MCP for chat - MCP handles both plugin and non-plugin agents
+      const makeChatRequest = async (): Promise<Response> => {
+        return fetchWithPayment(`${MCP_URL}/agent/${agentWallet}/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: userMessage.content,
+            threadId: `chat-${agentWallet}-${Date.now()}`,
+          }),
+        });
+      };
 
-      // Build system prompt from agent's info
-      const agentName = metadata?.name || "an AI agent";
-      const agentDescription = metadata?.description || "";
-      const agentSkills = metadata?.skills?.join(", ") || "general assistance";
-      const systemPrompt = `You are ${agentName}. ${agentDescription}\n\nSkills: ${agentSkills}`;
+      let response = await makeChatRequest();
 
-      // Build messages for inference
-      const allMessages = messages.concat(userMessage).map(m => ({
-        role: m.role,
-        content: m.content,
-      }));
-
-      const response = await fetchWithPayment(`${apiUrl}/api/inference/${encodeURIComponent(modelId)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: allMessages,
-          systemPrompt,
-        }),
-      });
+      // If agent not found (404), auto-register and retry once
+      if (response.status === 404) {
+        console.log(`[agent] Agent not registered, auto-registering...`);
+        const registered = await autoRegisterAgent();
+        if (registered) {
+          // Wait a moment for backend to spin up the agent
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          response = await makeChatRequest();
+        }
+      }
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error || `Chat failed: ${response.status}`);
       }
 
-      // Handle streaming response - same approach as playground.tsx
+      // Handle streaming response - same pattern of playground.tsx
       const contentType = response.headers.get("content-type") || "";
 
       if (contentType.includes("text/event-stream") || contentType.includes("text/plain")) {
@@ -232,15 +274,15 @@ export default function AgentDetailPage() {
     } finally {
       setSending(false);
     }
-  }, [inputValue, sending, agentId, wallet, toast, agent, messages]);
+  }, [inputValue, sending, agentWallet, wallet, toast, agent, messages, autoRegisterAgent]);
 
   // Upload knowledge
   const handleUploadKnowledge = useCallback(async () => {
-    if (!agentId || !knowledgeKey.trim() || !knowledgeContent.trim()) return;
+    if (!agentWallet || !knowledgeKey.trim() || !knowledgeContent.trim()) return;
 
     setUploadingKnowledge(true);
     try {
-      const response = await fetch(`${MCP_URL}/agent/${agentId}/knowledge`, {
+      const response = await fetch(`${MCP_URL}/agent/${agentWallet}/knowledge`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -269,7 +311,7 @@ export default function AgentDetailPage() {
     } finally {
       setUploadingKnowledge(false);
     }
-  }, [agentId, knowledgeKey, knowledgeContent, toast]);
+  }, [agentWallet, knowledgeKey, knowledgeContent, toast]);
 
   if (isLoading) {
     return (
@@ -313,8 +355,13 @@ export default function AgentDetailPage() {
     );
   }
 
-  const avatarUrl = agent.metadata?.avatar && agent.metadata.avatar !== "none" && agent.metadata.avatar.startsWith("ipfs://")
-    ? getIpfsUrl(agent.metadata.avatar.replace("ipfs://", ""))
+  // Handle both IPFS URIs (ipfs://) and gateway URLs (https://)
+  const avatarUrl = agent.metadata?.avatar && agent.metadata.avatar !== "none"
+    ? agent.metadata.avatar.startsWith("ipfs://")
+      ? getIpfsUrl(agent.metadata.avatar.replace("ipfs://", ""))
+      : agent.metadata.avatar.startsWith("https://")
+        ? agent.metadata.avatar
+        : null
     : null;
 
   const initials = (agent.metadata?.name || `Agent ${agent.id}`)

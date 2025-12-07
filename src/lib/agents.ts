@@ -72,6 +72,14 @@ export interface AgentProtocol {
 }
 
 /**
+ * Warp status for agents
+ * - native: Manowar agent (no warp needed, can be used directly)
+ * - warped: External agent that has been warped into Manowar
+ * - must-warp: External agent that needs to be warped before use
+ */
+export type WarpStatus = "native" | "warped" | "must-warp";
+
+/**
  * Unified agent type across all registries
  */
 export interface Agent {
@@ -109,6 +117,11 @@ export interface Agent {
   createdAt: string;
   updatedAt: string;
   externalUrl?: string;
+  
+  // Warp status (for compose flow validation)
+  warpStatus?: WarpStatus;
+  warpedAgentId?: number; // Manowar agent ID if this external agent has been warped
+  isWarped?: boolean; // True if this is a warped manowar agent
 }
 
 export interface AgentSearchResponse {

@@ -18,7 +18,8 @@ import {
   Activity,
   Users,
   Clock,
-  Shield
+  Shield,
+  ArrowRightLeft,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useActiveAccount } from "thirdweb/react";
@@ -248,18 +249,31 @@ function AgentAssetCard({ agent }: { agent: OnchainAgent }) {
   const description = metadata?.description || "No description available";
   
   let avatarUrl: string | null = null;
-  if (metadata?.avatar && metadata.avatar !== "none" && metadata.avatar.startsWith("ipfs://")) {
-    avatarUrl = getIpfsUrl(metadata.avatar.replace("ipfs://", ""));
+  if (metadata?.avatar && metadata.avatar !== "none") {
+    // Handle both gateway URLs (https://) and IPFS URIs (ipfs://)
+    if (metadata.avatar.startsWith("ipfs://")) {
+      avatarUrl = getIpfsUrl(metadata.avatar.replace("ipfs://", ""));
+    } else if (metadata.avatar.startsWith("https://")) {
+      avatarUrl = metadata.avatar;
+    }
   }
 
   const initials = name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
   const explorerUrl = `${CHAIN_CONFIG[CHAIN_IDS.avalancheFuji].explorer}/token/${getContractAddress("AgentFactory")}?a=${agent.id}`;
+  
+  // Agent page URL using wallet address (primary) or ID (fallback)
+  const agentPageUrl = agent.walletAddress 
+    ? `/agent/${agent.walletAddress}`
+    : `/agent/${agent.id}`;
 
   return (
-    <Card className="bg-background border-sidebar-border hover:border-cyan-500/50 transition-colors">
+    <Card 
+      className="bg-background border-sidebar-border hover:border-cyan-500/50 transition-colors cursor-pointer group"
+      onClick={() => window.location.href = agentPageUrl}
+    >
       <CardContent className="p-5 space-y-4">
         <div className="flex items-start gap-3">
-          <Avatar className="w-12 h-12 border-2 border-cyan-500/30">
+          <Avatar className="w-12 h-12 border-2 border-cyan-500/30 group-hover:border-cyan-500/60 transition-colors">
             <AvatarImage src={avatarUrl || undefined} alt={name} />
             <AvatarFallback className="bg-cyan-500/10 text-cyan-400 font-mono text-sm">
               {initials}
@@ -267,14 +281,16 @@ function AgentAssetCard({ agent }: { agent: OnchainAgent }) {
           </Avatar>
           <div className="min-w-0 flex-1">
             <div className="flex items-start justify-between gap-2">
-              <h3 className="font-display font-bold text-foreground truncate">
+              <h3 className="font-display font-bold text-foreground truncate group-hover:text-cyan-400 transition-colors">
                 {name}
               </h3>
               <a
                 href={explorerUrl}
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
                 className="p-1 text-muted-foreground hover:text-cyan-400 transition-colors shrink-0"
+                title="View on explorer"
               >
                 <ExternalLink className="w-3.5 h-3.5" />
               </a>
@@ -294,6 +310,12 @@ function AgentAssetCard({ agent }: { agent: OnchainAgent }) {
             <Sparkles className="w-2.5 h-2.5 mr-1" />
             on-chain
           </Badge>
+          {agent.isWarped && (
+            <Badge variant="outline" className="text-[10px] font-mono border-fuchsia-500/30 text-fuchsia-400 bg-fuchsia-500/10 px-1.5 py-0">
+              <ArrowRightLeft className="w-2.5 h-2.5 mr-1" />
+              warped
+            </Badge>
+          )}
           {agent.cloneable && (
             <Badge variant="outline" className="text-[10px] font-mono border-purple-500/30 text-purple-400 bg-purple-500/10 px-1.5 py-0">
               cloneable
@@ -325,6 +347,16 @@ function AgentAssetCard({ agent }: { agent: OnchainAgent }) {
             <p className="text-muted-foreground text-[10px]">available</p>
           </div>
         </div>
+
+        {/* Global API Endpoint */}
+        {agent.walletAddress && (
+          <div className="pt-2 border-t border-sidebar-border">
+            <p className="text-[10px] text-muted-foreground mb-1">API Endpoint</p>
+            <code className="text-[10px] font-mono text-cyan-400 break-all block bg-sidebar-accent/50 p-1.5 rounded">
+              api.compose.market/agent/{agent.walletAddress.slice(0, 8)}...
+            </code>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
