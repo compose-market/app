@@ -179,8 +179,11 @@ export interface AgentCard {
   name: string;
   description: string;
   skills: string[];
-  avatar?: string; // IPFS URI or "none"
+  avatar?: string; // Gateway URL for app display
+  image?: string; // Standard NFT metadata field (gateway URL for explorer compatibility)
   dnaHash: string;
+  walletAddress: string; // Agent's derived wallet address - SINGLE SOURCE OF TRUTH
+  walletTimestamp?: number; // Timestamp used in wallet derivation (backend needs this)
   chain: number;
   model: string;
   framework?: "eliza" | "langchain"; // Agent runtime framework

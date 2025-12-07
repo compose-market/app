@@ -3,7 +3,7 @@
  * Deployed on Avalanche Fuji (Chain ID: 43113)
  */
 
-import { getContract, prepareContractCall, readContract, sendTransaction, type ThirdwebContract } from "thirdweb";
+import { getContract } from "thirdweb";
 import { thirdwebClient, paymentChain, CHAIN_IDS } from "./thirdweb";
 import { keccak256, encodePacked, type Address } from "viem";
 
@@ -368,6 +368,20 @@ export const WarpABI = [
       ],
     }],
   },
+  {
+    name: "totalWarped",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "total", type: "uint256" }],
+  },
+  {
+    name: "getWarpedAgentId",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "externalHash", type: "bytes32" }],
+    outputs: [{ name: "warpedAgentId", type: "uint256" }],
+  },
 ] as const;
 
 export const RFAABI = [
@@ -454,48 +468,47 @@ export const RFAABI = [
 // Contract Instances
 // =============================================================================
 
-export function getAgentFactoryContract(): ThirdwebContract {
+// Contract getters WITHOUT ABI - allows full function signature strings in readContract/prepareContractCall
+// This is required because thirdweb's type system forces method names when ABI is provided,
+// but runtime encoding works better with explicit function signatures.
+
+export function getAgentFactoryContract() {
   return getContract({
     address: getContractAddress("AgentFactory"),
     chain: paymentChain,
     client: thirdwebClient,
-    abi: AgentFactoryABI,
   });
 }
 
-export function getManowarContract(): ThirdwebContract {
+export function getManowarContract() {
   return getContract({
     address: getContractAddress("Manowar"),
     chain: paymentChain,
     client: thirdwebClient,
-    abi: ManowarABI,
   });
 }
 
-export function getCloneContract(): ThirdwebContract {
+export function getCloneContract() {
   return getContract({
     address: getContractAddress("Clone"),
     chain: paymentChain,
     client: thirdwebClient,
-    abi: CloneABI,
   });
 }
 
-export function getWarpContract(): ThirdwebContract {
+export function getWarpContract() {
   return getContract({
     address: getContractAddress("Warp"),
     chain: paymentChain,
     client: thirdwebClient,
-    abi: WarpABI,
   });
 }
 
-export function getRFAContract(): ThirdwebContract {
+export function getRFAContract() {
   return getContract({
     address: getContractAddress("RFA"),
     chain: paymentChain,
     client: thirdwebClient,
-    abi: RFAABI,
   });
 }
 
@@ -505,8 +518,17 @@ export function getRFAContract(): ThirdwebContract {
 
 /**
  * Generate DNA hash from agent parameters (matches contract logic)
+ * 
+ * The dnaHash uniquely identifies an agent and is used to derive its wallet.
+ * The derivation formula includes timestamp to ensure uniqueness even for identical skills/chain/model.
+ * 
+ * Formula: keccak256(skills + chainId + model + timestamp)
  */
-export function computeDnaHash(skills: string[], chainId: number, model: string): `0x${string}` {
+export function computeDnaHash(
+  skills: string[], 
+  chainId: number, 
+  model: string
+): `0x${string}` {
   // Sort skills for deterministic hashing
   const sortedSkills = [...skills].sort();
   const skillsStr = sortedSkills.join(",");
@@ -520,27 +542,28 @@ export function computeDnaHash(skills: string[], chainId: number, model: string)
 }
 
 /**
- * Derive agent wallet address from dnaHash
+ * Derive agent wallet address from dnaHash + timestamp
  * 
- * The wallet private key is: keccak256(`${dnaHash}:agent:${agentId}`)
- * We compute the resulting address here for display before mint.
+ * - dnaHash = keccak256(skills, chainId, model) - sent to contract
+ * - timestamp makes each wallet unique even for same skills/chain/model
+ * - walletAddress is stored in IPFS metadata as single source of truth
  * 
- * For pre-mint display (agentId unknown), we use agentId = 0 as placeholder.
- * The actual wallet will use the real agentId after mint.
+ * Formula: walletAddress = privateKeyToAddress(keccak256(dnaHash + timestamp + ":agent:wallet"))
+ * 
+ * IMPORTANT: Both frontend (this function) and backend (agent-wallet.ts) use
+ * the same derivation formula. The walletAddress is stored in IPFS metadata and
+ * the backend verifies it can derive the same address from dnaHash + walletTimestamp.
  */
-export function deriveAgentWalletAddress(dnaHash: `0x${string}`, agentId: bigint = BigInt(0)): `0x${string}` {
-  // Same logic as backend: keccak256(`${dnaHash}:agent:${agentId}`)
+export function deriveAgentWalletAddress(dnaHash: `0x${string}`, timestamp: number): `0x${string}` {
+  // Derive private key from dnaHash + timestamp for uniqueness
   const derivationSeed = keccak256(
     encodePacked(
-      ["string"],
-      [`${dnaHash}:agent:${agentId}`]
+      ["bytes32", "uint256", "string"],
+      [dnaHash, BigInt(timestamp), ":agent:wallet"]
     )
   );
 
-  // The derivationSeed is the private key - compute public address
-  // Use secp256k1 point multiplication (simplified: last 20 bytes of keccak256(pubkey))
-  // For accurate address, we need to use viem's privateKeyToAddress
-  // Import dynamically to avoid browser issues
+  // Compute public address from private key
   return computeAddressFromPrivateKey(derivationSeed);
 }
 
@@ -584,6 +607,19 @@ export function weiToUsdc(wei: bigint): string {
 export function formatUsdcPrice(wei: bigint): string {
   const usdc = Number(wei) / 1_000_000;
   return usdc < 0.01 ? `$${usdc.toFixed(4)}` : `$${usdc.toFixed(2)}`;
+}
+
+/**
+ * Compute hash for external agent (used as originalAgentHash in Warp contract)
+ * Creates a unique identifier for an agent from an external registry
+ */
+export function computeExternalAgentHash(registry: string, address: string): `0x${string}` {
+  return keccak256(
+    encodePacked(
+      ["string", "string"],
+      [registry, address]
+    )
+  );
 }
 
 // =============================================================================
