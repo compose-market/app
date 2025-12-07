@@ -16,6 +16,7 @@ import {
   Layers, 
   Sparkles,
   Check,
+  CheckCircle2,
   ExternalLink,
   Zap,
   Filter,
@@ -28,6 +29,7 @@ import {
 } from "lucide-react";
 import { useAgents } from "@/hooks/use-agents";
 import { useOnchainAgents, type OnchainAgent } from "@/hooks/use-onchain";
+import { useIsExternalWarped } from "@/hooks/use-warp";
 import { getIpfsUrl } from "@/lib/pinata";
 import { 
   type Agent,
@@ -67,7 +69,7 @@ export default function AgentsPage() {
   const { data: onchainAgents, isLoading: isLoadingOnchain } = useOnchainAgents();
   
   // Convert on-chain agents to unified Agent format
-  const manowarAgents = useMemo((): Agent[] => {
+  const manowarAgents = useMemo((): ExtendedAgent[] => {
     if (!onchainAgents || !selectedRegistries.includes("manowar")) return [];
     
     return onchainAgents
@@ -84,7 +86,7 @@ export default function AgentsPage() {
         }
         return true;
       })
-      .map((a): Agent => {
+      .map((a): ExtendedAgent => {
         const avatarUri = a.metadata?.avatar;
         let avatarUrl: string | null = null;
         if (avatarUri && avatarUri !== "none" && avatarUri.startsWith("ipfs://")) {
@@ -116,6 +118,8 @@ export default function AgentsPage() {
           units: a.units === 0 ? "∞" : `${a.unitsAvailable}/${a.units}`,
           cloneable: a.cloneable,
           isClone: a.isClone,
+          isWarped: a.isWarped,
+          walletAddress: a.walletAddress, // Derived wallet address
         };
       });
   }, [onchainAgents, selectedRegistries, debouncedSearch]);
@@ -342,6 +346,8 @@ interface ExtendedAgent extends Agent {
   units?: string;
   cloneable?: boolean;
   isClone?: boolean;
+  isWarped?: boolean; // True if this manowar agent was created via warp
+  walletAddress?: string; // Derived wallet address for manowar agents
 }
 
 function AgentCard({ agent, onSelect }: { agent: ExtendedAgent; onSelect: (a: Agent) => void }) {
@@ -360,6 +366,14 @@ function AgentCard({ agent, onSelect }: { agent: ExtendedAgent; onSelect: (a: Ag
   // Extract numeric ID for manowar agents (e.g., "manowar-5" -> 5)
   const manowarId = isManowar ? parseInt(agent.id.replace("manowar-", "")) : null;
   
+  // Check if external agent has been warped
+  const externalRegistry = !isManowar ? agent.registry : null;
+  const externalAddress = !isManowar ? agent.address : null;
+  const { data: externalWarpData } = useIsExternalWarped(externalRegistry, externalAddress);
+  
+  // Determine if agent is warped (either manowar isWarped or external has been warped)
+  const isAgentWarped = isManowar ? agent.isWarped : externalWarpData?.isWarped;
+  
   const handleWarp = () => {
     // Store agent for warp flow
     sessionStorage.setItem("warpAgent", JSON.stringify(agent));
@@ -367,7 +381,11 @@ function AgentCard({ agent, onSelect }: { agent: ExtendedAgent; onSelect: (a: Ag
   };
   
   const handleViewEndpoint = () => {
-    if (manowarId) {
+    // Use wallet address for navigation (consistent with backend)
+    if (agent.walletAddress) {
+      setLocation(`/agent/${agent.walletAddress}`);
+    } else if (manowarId) {
+      // Fallback for legacy agents without walletAddress
       setLocation(`/agent/${manowarId}`);
     }
   };
@@ -419,6 +437,12 @@ function AgentCard({ agent, onSelect }: { agent: ExtendedAgent; onSelect: (a: Ag
             <Badge variant="outline" className="text-[10px] font-mono border-cyan-500/30 text-cyan-400 bg-cyan-500/10 px-1.5 py-0">
               <Sparkles className="w-2.5 h-2.5 mr-1" />
               on-chain
+            </Badge>
+          )}
+          {isAgentWarped && (
+            <Badge variant="outline" className="text-[10px] font-mono border-fuchsia-500/30 text-fuchsia-400 bg-fuchsia-500/10 px-1.5 py-0">
+              <ArrowRightLeft className="w-2.5 h-2.5 mr-1" />
+              warped
             </Badge>
           )}
           {agent.verified && (
@@ -490,8 +514,8 @@ function AgentCard({ agent, onSelect }: { agent: ExtendedAgent; onSelect: (a: Ag
             SELECT
           </Button>
           
-          {/* WARP button for non-manowar agents */}
-          {!isManowar && (
+          {/* WARP button for non-manowar agents that haven't been warped yet */}
+          {!isManowar && !externalWarpData?.isWarped && (
             <Button
               onClick={handleWarp}
               variant="outline"
@@ -499,6 +523,18 @@ function AgentCard({ agent, onSelect }: { agent: ExtendedAgent; onSelect: (a: Ag
             >
               <ArrowRightLeft className="w-3.5 h-3.5 mr-1" />
               WARP
+            </Button>
+          )}
+          
+          {/* Show WARPED indicator for already warped external agents */}
+          {!isManowar && externalWarpData?.isWarped && (
+            <Button
+              variant="outline"
+              disabled
+              className="border-green-500/50 text-green-400 font-mono text-xs cursor-default"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
+              WARPED
             </Button>
           )}
           

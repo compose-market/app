@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useForm, type SubmitHandler } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Link } from "wouter";
+import { Link, useLocation, useSearch } from "wouter";
 import { Button } from "@/components/ui/button";
 import {
   Form,
@@ -31,7 +31,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
-import { Cpu, DollarSign, ShieldCheck, Upload, ExternalLink, Sparkles, Plug, Search, X, ChevronRight, Loader2, Play, AlertCircle, CheckCircle2, Boxes, Brain } from "lucide-react";
+import { Cpu, DollarSign, ShieldCheck, Upload, ExternalLink, Sparkles, Plug, Search, X, ChevronRight, Loader2, Play, AlertCircle, CheckCircle2, Boxes, Brain, ArrowRightLeft, Plus, Globe } from "lucide-react";
+import { WarpAgentForm, type WarpAgentData } from "@/components/warp-form";
 import { AVAILABLE_MODELS, type AIModel } from "@/lib/models";
 import { useRegistryServers, useRegistrySearch, type RegistryServer, type ServerOrigin } from "@/hooks/use-registry";
 import {
@@ -50,11 +51,13 @@ import {
   usdcToWei,
   getContractAddress
 } from "@/lib/contracts";
-import { CHAIN_IDS, CHAIN_CONFIG } from "@/lib/thirdweb";
+import { CHAIN_IDS, CHAIN_CONFIG, INFERENCE_PRICE_WEI } from "@/lib/thirdweb";
 import { useActiveAccount } from "thirdweb/react";
-import { TransactionButton, useSendTransaction } from "thirdweb/react";
+import { useSendTransaction } from "thirdweb/react";
 import { prepareContractCall } from "thirdweb";
 import { accountAbstraction } from "@/lib/thirdweb";
+
+const MCP_URL = (import.meta.env.VITE_MCP_URL || "https://mcp.compose.market").replace(/\/+$/, "");
 
 interface SelectedHFModel {
   id: string;
@@ -111,10 +114,26 @@ const formSchema = z.object({
 
 type FormValues = z.infer<typeof formSchema>;
 
+// =============================================================================
+// Choice Mode Type
+// =============================================================================
+
+type CreateMode = "choice" | "scratch" | "warp";
+
 export default function CreateAgent() {
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
+  const searchString = useSearch();
   const account = useActiveAccount();
   const { mutateAsync: sendTransaction, isPending: isSending } = useSendTransaction();
+
+  // Parse URL params
+  const urlParams = new URLSearchParams(searchString);
+  const isWarpMode = urlParams.get("warp") === "true";
+
+  // Mode state: choice, scratch (create from scratch), or warp
+  const [mode, setMode] = useState<CreateMode>("choice");
+  const [warpAgent, setWarpAgent] = useState<WarpAgentData | null>(null);
 
   const [selectedHFModel, setSelectedHFModel] = useState<SelectedHFModel | null>(null);
   const [selectedPlugins, setSelectedPlugins] = useState<SelectedPlugin[]>([]);
@@ -127,6 +146,26 @@ export default function CreateAgent() {
   const [isUploading, setIsUploading] = useState(false);
   const [mintStep, setMintStep] = useState<"idle" | "uploading" | "minting" | "done">("idle");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Check for warp mode from URL and sessionStorage
+  useEffect(() => {
+    if (isWarpMode) {
+      const stored = sessionStorage.getItem("warpAgent");
+      if (stored) {
+        try {
+          const agent = JSON.parse(stored) as WarpAgentData;
+          setWarpAgent(agent);
+          setMode("warp");
+        } catch {
+          // Invalid data, go to choice
+          setMode("choice");
+        }
+      } else {
+        // No agent selected, redirect to agents page
+        setLocation("/agents");
+      }
+    }
+  }, [isWarpMode, setLocation]);
 
   // Check for selected HF model from models page
   useEffect(() => {
@@ -264,6 +303,7 @@ export default function CreateAgent() {
   const [preparedTx, setPreparedTx] = useState<{
     dnaHash: `0x${string}`;
     walletAddress: `0x${string}`;
+    walletTimestamp: number;
     units: bigint;
     price: bigint;
     cloneable: boolean;
@@ -271,38 +311,60 @@ export default function CreateAgent() {
   } | null>(null);
 
   // Handle form validation and IPFS upload before minting
-  const prepareForMint = async (values: FormValues): Promise<boolean> => {
+  // Returns prepared transaction data or null if failed
+  const prepareForMint = async (values: FormValues): Promise<{
+    dnaHash: `0x${string}`;
+    walletAddress: `0x${string}`;
+    units: bigint;
+    price: bigint;
+    cloneable: boolean;
+    agentCardUri: string;
+  } | null> => {
     if (!isPinataConfigured()) {
       toast({
         title: "IPFS not configured",
         description: "Pinata JWT is missing. Check environment variables.",
         variant: "destructive",
       });
-      return false;
+      return null;
     }
 
     try {
       setMintStep("uploading");
 
       // 1. Upload avatar to IPFS (if provided)
-      let avatarUri = "none";
+      // Use gateway URL for explorer compatibility (not ipfs:// URI)
+      let avatarUrl = "";
       if (avatarFile) {
         const avatarCid = await uploadAgentAvatar(avatarFile, values.name);
-        avatarUri = getIpfsUri(avatarCid);
+        avatarUrl = getIpfsUrl(avatarCid); // Use https:// gateway URL for NFT metadata
       }
 
-      // 2. Build and upload Agent Card to IPFS
+      // 2. Compute DNA hash (skills, chainId, model) - matches contract expectation
       const chainId = CHAIN_IDS.avalancheFuji;
       const modelId = selectedHFModel?.id || values.model;
       const skills = selectedPlugins.map(p => p.id);
+      const timestamp = Date.now();
+      
+      // dnaHash = hash(skills, chainId, model) - NO timestamp (contract expects this)
+      const dnaHash = computeDnaHash(skills, chainId, modelId);
+      
+      // Derive wallet from dnaHash + timestamp (timestamp makes each wallet unique)
+      const walletAddress = deriveAgentWalletAddress(dnaHash, timestamp);
 
+      // 3. Build and upload Agent Card to IPFS
+      // walletAddress is stored here as the single source of truth
+      // Both frontend and backend rely on this, not derive their own
       const agentCard: AgentCard = {
         schemaVersion: "1.0.0",
         name: values.name,
         description: values.description,
         skills,
-        avatar: avatarUri,
-        dnaHash: "", // Will be computed on-chain
+        avatar: avatarUrl || "none", // Gateway URL for explorer compatibility
+        image: avatarUrl || undefined, // Standard NFT metadata field
+        dnaHash, // Store computed dnaHash (skills, chainId, model)
+        walletAddress, // Derived from dnaHash + timestamp - single source of truth
+        walletTimestamp: timestamp, // Backend needs this to derive the same private key
         chain: chainId,
         model: modelId,
         framework: values.framework, // ElizaOS or LangChain
@@ -316,31 +378,31 @@ export default function CreateAgent() {
           name: p.name,
           origin: p.origin,
         })),
-        createdAt: new Date().toISOString(),
+        createdAt: new Date(timestamp).toISOString(), // Use same timestamp
         creator: account?.address || "",
       };
 
       const cardCid = await uploadAgentCard(agentCard);
       const agentCardUri = getIpfsUri(cardCid);
 
-      // 3. Compute DNA hash and derive wallet address
-      const dnaHash = computeDnaHash(skills, chainId, modelId);
-      // Note: Using agentId = 0 for pre-mint preview. Real wallet uses actual agentId after mint.
-      const walletAddress = deriveAgentWalletAddress(dnaHash, BigInt(0));
       const priceWei = usdcToWei(parseFloat(values.pricePerUse));
       const units = values.units ? BigInt(values.units) : BigInt(0);
 
-      setPreparedTx({
+      const txData = {
         dnaHash,
         walletAddress,
+        walletTimestamp: timestamp,
         units,
         price: priceWei,
         cloneable: values.isCloneable,
         agentCardUri,
-      });
-
+      };
+      
+      setPreparedTx(txData);
       setMintStep("minting");
-      return true;
+      
+      // Return the prepared data so caller can trigger transaction immediately
+      return txData;
     } catch (error) {
       console.error("Prepare error:", error);
       setMintStep("idle");
@@ -349,13 +411,17 @@ export default function CreateAgent() {
         description: error instanceof Error ? error.message : "Failed to upload to IPFS",
         variant: "destructive",
       });
-      return false;
+      return null;
     }
   };
 
   const handleMintSuccess = async (result: { transactionHash: string }) => {
     const chainId = CHAIN_IDS.avalancheFuji;
     const values = form.getValues();
+
+    // Wallet address is already computed in preparedTx from dnaHash (which includes timestamp)
+    // This is the SINGLE SOURCE OF TRUTH - no need to recompute with agentId
+    const walletAddress = preparedTx?.walletAddress || null;
 
     // Show initial success
     toast({
@@ -375,29 +441,17 @@ export default function CreateAgent() {
       ),
     });
 
-    // Register with backend if we have preparedTx
-    if (preparedTx && account?.address) {
+    // Register with backend using wallet address as the primary identifier
+    if (preparedTx && account?.address && walletAddress) {
       try {
-        // Get the latest agent ID (the one we just minted)
-        // In production, parse from transaction receipt events
-        const contract = getAgentFactoryContract();
-        const totalAgents = await import("thirdweb").then(({ readContract }) =>
-          readContract({
-            contract,
-            method: "function totalAgents() view returns (uint256)",
-          })
-        );
-        const agentId = totalAgents - BigInt(1); // Most recent agent
-
-        // Compute the real wallet address with actual agentId
-        const walletAddress = deriveAgentWalletAddress(preparedTx.dnaHash, agentId);
-
         // Register with backend to spin up agent runtime
-        const response = await fetch("/api/mcp/agent/register", {
+        // Backend uses wallet address as the primary identifier
+        const response = await fetch(`${MCP_URL}/agent/register`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            agentId: agentId.toString(),
+            walletAddress, // From IPFS metadata
+            walletTimestamp: preparedTx.walletTimestamp,
             dnaHash: preparedTx.dnaHash,
             name: values.name,
             description: values.description,
@@ -409,13 +463,12 @@ export default function CreateAgent() {
         });
 
         if (response.ok) {
-          const data = await response.json();
           toast({
             title: "Agent Runtime Activated",
             description: (
               <div className="space-y-1 text-xs">
                 <p>Wallet: <code className="text-cyan-400">{walletAddress.slice(0, 10)}...{walletAddress.slice(-8)}</code></p>
-                <p>Chat: <code className="text-cyan-400">/api/mcp/agent/{agentId.toString()}/chat</code></p>
+                <p>Chat: <code className="text-cyan-400">{MCP_URL}/agent/{walletAddress}/chat</code></p>
               </div>
             ),
           });
@@ -455,19 +508,208 @@ export default function CreateAgent() {
     setShowConfirmDialog(true);
   };
 
-  // Handle confirmed mint
+  // Handle confirmed mint - single confirmation triggers both IPFS upload and on-chain mint
   const handleConfirmedMint = async () => {
     if (!pendingValues) return;
     setShowConfirmDialog(false);
-    await prepareForMint(pendingValues);
+    
+    // Step 1: Upload to IPFS and prepare transaction data
+    const txData = await prepareForMint(pendingValues);
+    if (!txData) return; // Upload failed
+    
+    // Step 2: Immediately trigger on-chain transaction (no second click needed)
+    try {
+      const contract = getAgentFactoryContract();
+      const transaction = prepareContractCall({
+        contract,
+        method: "function mintAgent(bytes32 dnaHash, uint256 units, uint256 price, bool cloneable, string agentCardUri) returns (uint256 agentId)",
+        params: [
+          txData.dnaHash,
+          txData.units,
+          txData.price,
+          txData.cloneable,
+          txData.agentCardUri,
+        ],
+      });
+      
+      // Send transaction (gasless sponsorship configured on ThirdWeb)
+      const result = await sendTransaction(transaction);
+      
+      // Handle success
+      await handleMintSuccess({ transactionHash: result.transactionHash });
+    } catch (error) {
+      handleMintError(error instanceof Error ? error : new Error(String(error)));
+    }
   };
 
   const isProcessing = mintStep !== "idle" && mintStep !== "done";
 
+  // Handle back to choice from warp mode
+  const handleBackToChoice = () => {
+    sessionStorage.removeItem("warpAgent");
+    setWarpAgent(null);
+    setMode("choice");
+    // Clear URL params
+    setLocation("/create-agent");
+  };
+
+  // Handle selecting "Create from Scratch"
+  const handleSelectScratch = () => {
+    setMode("scratch");
+  };
+
+  // Handle selecting "Warp Existing"
+  const handleSelectWarp = () => {
+    // Navigate to agents page to select an agent to warp
+    setLocation("/agents");
+  };
+
+  // =============================================================================
+  // Render Choice Screen
+  // =============================================================================
+  if (mode === "choice") {
+    return (
+      <div className="max-w-3xl mx-auto pb-20">
+        {/* Page Header */}
+        <div className="mb-8 space-y-2 border-b border-sidebar-border pb-6">
+          <div className="flex items-center gap-4">
+            <h1 className="text-2xl font-display font-bold text-white">
+              <span className="text-fuchsia-500 mr-2">//</span>
+              CREATE AGENT
+            </h1>
+            <div className="hidden md:flex h-px w-32 bg-gradient-to-r from-fuchsia-500 to-transparent"></div>
+          </div>
+          <p className="text-muted-foreground font-mono text-sm">
+            Choose how you want to create your agent.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Create from Scratch */}
+          <Card
+            className="glass-panel border-cyan-500/20 cursor-pointer hover:border-cyan-500/50 transition-all group"
+            onClick={handleSelectScratch}
+          >
+            <CardContent className="p-8 text-center space-y-4">
+              <div className="w-16 h-16 mx-auto rounded-full bg-cyan-500/10 flex items-center justify-center border-2 border-cyan-500/30 group-hover:border-cyan-500/50 group-hover:bg-cyan-500/20 transition-colors">
+                <Plus className="w-8 h-8 text-cyan-400" />
+              </div>
+              <div>
+                <h2 className="text-xl font-display font-bold text-cyan-400 mb-2">
+                  CREATE FROM SCRATCH
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  Build a new agent with custom plugins, models, and pricing. Full control over
+                  your agent's capabilities.
+                </p>
+              </div>
+              <div className="flex flex-wrap justify-center gap-2">
+                <Badge variant="outline" className="text-[10px] border-cyan-500/30 text-cyan-400">
+                  Custom Model
+                </Badge>
+                <Badge variant="outline" className="text-[10px] border-cyan-500/30 text-cyan-400">
+                  200+ Plugins
+                </Badge>
+                <Badge variant="outline" className="text-[10px] border-cyan-500/30 text-cyan-400">
+                  ERC8004
+                </Badge>
+              </div>
+              <Button className="w-full bg-cyan-500 text-black hover:bg-cyan-400 font-bold font-mono">
+                <Plus className="w-4 h-4 mr-2" />
+                START BUILDING
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Warp Existing */}
+          <Card
+            className="glass-panel border-fuchsia-500/20 cursor-pointer hover:border-fuchsia-500/50 transition-all group"
+            onClick={handleSelectWarp}
+          >
+            <CardContent className="p-8 text-center space-y-4">
+              <div className="w-16 h-16 mx-auto rounded-full bg-fuchsia-500/10 flex items-center justify-center border-2 border-fuchsia-500/30 group-hover:border-fuchsia-500/50 group-hover:bg-fuchsia-500/20 transition-colors">
+                <ArrowRightLeft className="w-8 h-8 text-fuchsia-400" />
+              </div>
+              <div>
+                <h2 className="text-xl font-display font-bold text-fuchsia-400 mb-2">
+                  WARP EXISTING
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  Port an agent from external registries (Agentverse, etc.) into Manowar. Earn 80%
+                  royalties as the warper.
+                </p>
+              </div>
+              <div className="flex flex-wrap justify-center gap-2">
+                <Badge variant="outline" className="text-[10px] border-fuchsia-500/30 text-fuchsia-400">
+                  80% Royalties
+                </Badge>
+                <Badge variant="outline" className="text-[10px] border-fuchsia-500/30 text-fuchsia-400">
+                  On-chain Identity
+                </Badge>
+                <Badge variant="outline" className="text-[10px] border-fuchsia-500/30 text-fuchsia-400">
+                  x402 Payments
+                </Badge>
+              </div>
+              <Button className="w-full bg-fuchsia-500 text-white hover:bg-fuchsia-400 font-bold font-mono">
+                <Globe className="w-4 h-4 mr-2" />
+                BROWSE AGENTS
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Info Box */}
+        <div className="mt-8 p-4 rounded-sm bg-sidebar-accent border border-sidebar-border">
+          <h3 className="font-bold font-display text-foreground mb-2">
+            <Sparkles className="w-4 h-4 inline mr-2 text-cyan-400" />
+            What's the difference?
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-muted-foreground">
+            <div>
+              <p className="font-mono text-cyan-400 mb-1">Create from Scratch:</p>
+              <ul className="list-disc list-inside space-y-1">
+                <li>You are the original creator</li>
+                <li>Full control over plugins & model</li>
+                <li>100% of earnings (minus protocol fee)</li>
+              </ul>
+            </div>
+            <div>
+              <p className="font-mono text-fuchsia-400 mb-1">Warp Existing:</p>
+              <ul className="list-disc list-inside space-y-1">
+                <li>Port agents from other ecosystems</li>
+                <li>Original creator gets 10% royalties</li>
+                <li>You (warper) earn 80% of usage fees</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // =============================================================================
+  // Render Warp Form
+  // =============================================================================
+  if (mode === "warp" && warpAgent) {
+    return <WarpAgentForm agent={warpAgent} onBack={handleBackToChoice} />;
+  }
+
+  // =============================================================================
+  // Render Create from Scratch Form
+  // =============================================================================
   return (
     <div className="max-w-3xl mx-auto pb-20">
       {/* Page Header */}
       <div className="mb-8 space-y-2 border-b border-sidebar-border pb-6">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setMode("choice")}
+          className="text-muted-foreground hover:text-cyan-400 -ml-2 mb-2"
+        >
+          <ChevronRight className="w-4 h-4 mr-2 rotate-180" />
+          Back to Choice
+        </Button>
         <div className="flex items-center gap-4">
           <h1 className="text-2xl font-display font-bold text-white">
             <span className="text-fuchsia-500 mr-2">//</span>
@@ -534,7 +776,7 @@ export default function CreateAgent() {
                                   <div>
                                     <p className="font-mono font-bold text-cyan-400 text-sm">{selectedHFModel.name}</p>
                                     <p className="text-xs text-muted-foreground font-mono">
-                                      via {selectedHFModel.provider} · ${selectedHFModel.priceMultiplier.toFixed(2)}/1M tokens
+                                      via {selectedHFModel.provider} · ${(INFERENCE_PRICE_WEI / 1_000_000).toFixed(3)}/call (x402)
                                     </p>
                                   </div>
                                   <Sparkles className="w-4 h-4 text-cyan-400" />
@@ -566,11 +808,14 @@ export default function CreateAgent() {
                                     arr.findIndex(x => x.id === m.id) === i
                                   ).map((model) => (
                                     <SelectItem key={model.id} value={model.id}>
-                                      {model.name} (${model.priceMultiplier}/1M tokens)
+                                      {model.name}
                                     </SelectItem>
                                   ))}
                                 </SelectContent>
                               </Select>
+                              <p className="text-[10px] text-muted-foreground">
+                                x402 pricing: ${(INFERENCE_PRICE_WEI / 1_000_000).toFixed(3)}/call
+                              </p>
                               <Link href="/models">
                                 <Button
                                   type="button"
@@ -906,48 +1151,29 @@ export default function CreateAgent() {
                 </Card>
               )}
 
-              {/* Two-step process: First upload, then mint */}
-              {!preparedTx ? (
-                <Button
-                  type="submit"
-                  size="lg"
-                  disabled={!account || mintStep === "uploading"}
-                  className="w-full bg-cyan-500 text-black font-bold font-mono hover:bg-cyan-400 h-14 text-lg shadow-[0_0_20px_-5px_hsl(var(--primary))] tracking-wider disabled:opacity-50"
-                >
-                  {mintStep === "uploading" ? (
-                    <>
-                      <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                      UPLOADING...
-                    </>
-                  ) : !account ? (
-                    "SIGN IN TO MINT"
-                  ) : (
-                    "PREPARE & MINT AGENT"
-                  )}
-                </Button>
-              ) : (
-                <TransactionButton
-                  transaction={() => {
-                    const contract = getAgentFactoryContract();
-                    return prepareContractCall({
-                      contract,
-                      method: "function mintAgent(bytes32 dnaHash, uint256 units, uint256 price, bool cloneable, string agentCardUri) returns (uint256 agentId)",
-                      params: [
-                        preparedTx.dnaHash,
-                        preparedTx.units,
-                        preparedTx.price,
-                        preparedTx.cloneable,
-                        preparedTx.agentCardUri,
-                      ],
-                    });
-                  }}
-                  onTransactionConfirmed={handleMintSuccess}
-                  onError={handleMintError}
-                  className="w-full !bg-gradient-to-r !from-cyan-500 !to-fuchsia-500 !text-white !font-bold !font-mono !h-14 !text-lg !shadow-[0_0_20px_-5px_hsl(var(--primary))] !tracking-wider !rounded-sm"
-                >
-                  MINT AGENT ON AVALANCHE
-                </TransactionButton>
-              )}
+              {/* Single mint button - confirmation triggers IPFS upload + on-chain mint */}
+              <Button
+                type="submit"
+                size="lg"
+                disabled={!account || isProcessing}
+                className="w-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white font-bold font-mono hover:from-cyan-400 hover:to-fuchsia-400 h-14 text-lg shadow-[0_0_20px_-5px_hsl(var(--primary))] tracking-wider disabled:opacity-50"
+              >
+                {mintStep === "uploading" ? (
+                  <>
+                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                    UPLOADING TO IPFS...
+                  </>
+                ) : mintStep === "minting" ? (
+                  <>
+                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                    MINTING ON-CHAIN...
+                  </>
+                ) : !account ? (
+                  "SIGN IN TO MINT"
+                ) : (
+                  "MINT AGENT"
+                )}
+              </Button>
             </form>
           </Form>
         </div>
