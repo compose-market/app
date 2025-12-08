@@ -31,7 +31,7 @@ import {
   ArrowRightLeft, Globe, Maximize2, Minimize2
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { useActiveAccount, useActiveWallet, TransactionButton } from "thirdweb/react";
+import { useActiveAccount, useActiveWallet, TransactionButton, useSendTransaction } from "thirdweb/react";
 import { wrapFetchWithPayment } from "thirdweb/x402";
 import { prepareContractCall } from "thirdweb";
 import { getManowarContract, usdcToWei, computeExternalAgentHash, getWarpContract } from "@/lib/contracts";
@@ -41,7 +41,6 @@ import { CHAIN_IDS, CHAIN_CONFIG, thirdwebClient, INFERENCE_PRICE_WEI } from "@/
 import { createNormalizedFetch } from "@/lib/payment";
 import { AVAILABLE_MODELS } from "@/lib/models";
 import { useSession } from "@/hooks/use-session";
-import { SessionBudgetDialog } from "@/components/session";
 import {
   Dialog,
   DialogContent,
@@ -73,7 +72,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { ServicesStatus } from "@/components/status";
 import {
   useConnectors,
   useConnectorTools,
@@ -1037,7 +1035,9 @@ function MintManowarDialog({
   agentIds
 }: MintManowarDialogProps) {
   const { toast } = useToast();
+  const wallet = useActiveWallet();
   const account = useActiveAccount();
+  const { mutateAsync: sendTransaction } = useSendTransaction();
 
   const [title, setTitle] = useState(workflowName);
   const [description, setDescription] = useState(workflowDescription);
@@ -1049,22 +1049,7 @@ function MintManowarDialog({
   const [coordinatorModel, setCoordinatorModel] = useState("");
   const [bannerFile, setBannerFile] = useState<File | null>(null);
   const [bannerPreview, setBannerPreview] = useState<string | null>(null);
-  const [mintStep, setMintStep] = useState<"idle" | "uploading" | "ready">("idle");
-  const [preparedData, setPreparedData] = useState<{
-    bannerUri: string;
-    params: {
-      title: string;
-      description: string;
-      banner: string;
-      x402Price: bigint;
-      units: bigint;
-      leaseEnabled: boolean;
-      leaseDuration: bigint;
-      leasePercent: number;
-      coordinatorAgentId: bigint;
-      coordinatorModel: string;
-    };
-  } | null>(null);
+  const [mintStep, setMintStep] = useState<"idle" | "minting">("idle");
   const bannerInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -1088,9 +1073,14 @@ function MintManowarDialog({
     setBannerPreview(dataUrl);
   };
 
-  const handlePrepare = async () => {
+  // Single-click mint: upload to IPFS and send transaction in one action
+  const handleMint = async () => {
     if (!title.trim()) {
       toast({ title: "Title required", variant: "destructive" });
+      return;
+    }
+    if (!wallet) {
+      toast({ title: "Wallet not connected", variant: "destructive" });
       return;
     }
     if (!isPinataConfigured()) {
@@ -1099,26 +1089,26 @@ function MintManowarDialog({
     }
 
     try {
-      setMintStep("uploading");
+      setMintStep("minting");
 
-      // Upload banner if provided
-      let bannerUri = "";
+      // 1. Upload banner if provided
+      let bannerImageUri = "";
       if (bannerFile) {
         const bannerCid = await uploadManowarBanner(bannerFile, title);
-        bannerUri = getIpfsUri(bannerCid);
+        bannerImageUri = getIpfsUri(bannerCid);
       }
 
-      // Build and upload metadata
+      // 2. Build and upload metadata to IPFS
       const metadata: ManowarMetadata = {
         schemaVersion: "1.0.0",
         title,
         description,
-        banner: bannerUri,
+        banner: bannerImageUri, // Banner image URI
         agents: agentIds.map((id, idx) => ({ agentId: id, name: `Agent ${idx + 1}` })),
         coordinator: coordinatorModel ? { agentId: 0, model: coordinatorModel } : undefined,
         pricing: {
           x402Price: usdcToWei(parseFloat(x402Price)).toString(),
-          totalAgentPrice: "0",
+          totalAgentPrice: "0", // Calculate on-chain
         },
         lease: leaseEnabled ? {
           enabled: true,
@@ -1129,75 +1119,69 @@ function MintManowarDialog({
         createdAt: new Date().toISOString(),
       };
 
-      await uploadManowarMetadata(metadata);
+      const metadataCid = await uploadManowarMetadata(metadata);
+      const metadataUri = getIpfsUri(metadataCid);
 
-      // Prepare params for contract
-      setPreparedData({
-        bannerUri,
-        params: {
-          title,
-          description,
-          banner: bannerUri,
-          x402Price: usdcToWei(parseFloat(x402Price)),
-          units: units ? BigInt(units) : BigInt(0),
-          leaseEnabled,
-          leaseDuration: BigInt(parseInt(leaseDuration) || 0),
-          leasePercent: parseInt(leasePercent) || 0,
-          coordinatorAgentId: BigInt(0),
-          coordinatorModel: coordinatorModel || "",
-        },
+      // 3. Prepare contract call - use metadataUri as banner field for tokenURI
+      const contract = getManowarContract();
+      const transaction = prepareContractCall({
+        contract,
+        method: "function mintManowar((string title, string description, string banner, uint256 x402Price, uint256 units, bool leaseEnabled, uint256 leaseDuration, uint8 leasePercent, uint256 coordinatorAgentId, string coordinatorModel) params, uint256[] agentIds) returns (uint256 manowarId)",
+        params: [
+          {
+            title,
+            description,
+            banner: metadataUri, // Store metadata URI for tokenURI
+            x402Price: usdcToWei(parseFloat(x402Price)),
+            units: units ? BigInt(parseInt(units)) : BigInt(1),
+            leaseEnabled,
+            leaseDuration: BigInt(parseInt(leaseDuration) || 0),
+            leasePercent: parseInt(leasePercent) || 0,
+            coordinatorAgentId: BigInt(0),
+            coordinatorModel: coordinatorModel || "",
+          },
+          agentIds.map(id => BigInt(id)),
+        ],
       });
 
-      setMintStep("ready");
+      // 4. Send transaction (gasless via ThirdWeb)
+      const result = await sendTransaction(transaction);
+
+      // 5. Handle success
+      toast({
+        title: "Manowar Minted!",
+        description: (
+          <div className="space-y-1">
+            <p>{title} deployed to Avalanche Fuji.</p>
+            <a
+              href={`${CHAIN_CONFIG[CHAIN_IDS.avalancheFuji].explorer}/tx/${result.transactionHash}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-cyan-400 hover:underline text-xs flex items-center gap-1"
+            >
+              View transaction <ExternalLink className="w-3 h-3" />
+            </a>
+          </div>
+        ),
+      });
+      onOpenChange(false);
+      setMintStep("idle");
     } catch (error) {
-      console.error("Prepare error:", error);
+      console.error("Mint error:", error);
       setMintStep("idle");
       toast({
-        title: "Upload Failed",
+        title: "Minting Failed",
         description: error instanceof Error ? error.message : "Unknown error",
         variant: "destructive",
       });
     }
   };
 
-  const handleMintSuccess = (result: { transactionHash: string }) => {
-    toast({
-      title: "Manowar Minted!",
-      description: (
-        <div className="space-y-1">
-          <p>{title} deployed to Avalanche Fuji.</p>
-          <a
-            href={`${CHAIN_CONFIG[CHAIN_IDS.avalancheFuji].explorer}/tx/${result.transactionHash}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-cyan-400 hover:underline text-xs flex items-center gap-1"
-          >
-            View transaction <ExternalLink className="w-3 h-3" />
-          </a>
-        </div>
-      ),
-    });
-    onOpenChange(false);
-    setMintStep("idle");
-    setPreparedData(null);
-  };
-
-  const handleMintError = (error: Error) => {
-    console.error("Mint error:", error);
-    setMintStep("idle");
-    setPreparedData(null);
-    toast({
-      title: "Minting Failed",
-      description: error.message || "Unknown error",
-      variant: "destructive",
-    });
-  };
-
-  const isUploading = mintStep === "uploading";
+  const isMinting = mintStep === "minting";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg bg-card border-fuchsia-500/30">
+      <DialogContent className="max-w-2xl bg-card border-fuchsia-500/30">
         <DialogHeader>
           <DialogTitle className="font-display text-xl flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-fuchsia-400" />
@@ -1208,146 +1192,158 @@ function MintManowarDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-4">
-          {/* Banner Upload */}
-          <div>
-            <Label className="text-xs font-mono text-muted-foreground mb-2 block">BANNER IMAGE</Label>
-            <input
-              ref={bannerInputRef}
-              type="file"
-              accept="image/*"
-              onChange={handleBannerSelect}
-              className="hidden"
-            />
-            <button
-              type="button"
-              onClick={() => bannerInputRef.current?.click()}
-              className="w-full h-24 rounded-sm bg-background/50 border border-sidebar-border border-dashed flex items-center justify-center text-muted-foreground hover:border-fuchsia-500 hover:text-fuchsia-400 transition-colors overflow-hidden"
-            >
-              {bannerPreview ? (
-                <img src={bannerPreview} alt="Banner" className="w-full h-full object-cover" />
-              ) : (
-                <div className="flex items-center gap-2">
-                  <Upload className="w-4 h-4" />
-                  <span className="text-xs font-mono">Upload banner (optional)</span>
-                </div>
-              )}
-            </button>
-          </div>
+        <div className="grid grid-cols-2 gap-4 py-4">
+          {/* Left Column */}
+          <div className="space-y-4">
+            {/* Banner Upload */}
+            <div>
+              <Label className="text-xs font-mono text-muted-foreground mb-2 block">BANNER IMAGE</Label>
+              <input
+                ref={bannerInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleBannerSelect}
+                className="hidden"
+              />
+              <button
+                type="button"
+                onClick={() => bannerInputRef.current?.click()}
+                className="w-full h-20 rounded-sm bg-background/50 border border-sidebar-border border-dashed flex items-center justify-center text-muted-foreground hover:border-fuchsia-500 hover:text-fuchsia-400 transition-colors overflow-hidden"
+              >
+                {bannerPreview ? (
+                  <img src={bannerPreview} alt="Banner" className="w-full h-full object-cover" />
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <Upload className="w-4 h-4" />
+                    <span className="text-xs font-mono">Upload banner</span>
+                  </div>
+                )}
+              </button>
+            </div>
 
-          {/* Title & Description */}
-          <div className="space-y-2">
-            <Label className="text-xs font-mono text-muted-foreground">TITLE</Label>
-            <Input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="My Workflow"
-              className="bg-background/50 font-mono border-sidebar-border"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label className="text-xs font-mono text-muted-foreground">DESCRIPTION</Label>
-            <Textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="What does this workflow do?"
-              className="bg-background/50 font-mono border-sidebar-border resize-none"
-              rows={2}
-            />
-          </div>
-
-          {/* Pricing */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label className="text-xs font-mono text-muted-foreground flex items-center gap-1">
-                <DollarSign className="w-3 h-3" /> X402 PRICE (USDC)
-              </Label>
+            {/* Title */}
+            <div className="space-y-1">
+              <Label className="text-xs font-mono text-muted-foreground">TITLE</Label>
               <Input
-                type="number"
-                step="0.001"
-                value={x402Price}
-                onChange={(e) => setX402Price(e.target.value)}
-                className="bg-background/50 font-mono border-sidebar-border"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="My Workflow"
+                className="bg-background/50 font-mono border-sidebar-border h-9"
               />
             </div>
-            <div className="space-y-2">
-              <Label className="text-xs font-mono text-muted-foreground">SUPPLY CAP</Label>
-              <Input
-                type="number"
-                value={units}
-                onChange={(e) => setUnits(e.target.value)}
-                placeholder="∞"
-                className="bg-background/50 font-mono border-sidebar-border"
+
+            {/* Description */}
+            <div className="space-y-1">
+              <Label className="text-xs font-mono text-muted-foreground">DESCRIPTION</Label>
+              <Textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="What does this workflow do?"
+                className="bg-background/50 font-mono border-sidebar-border resize-none h-16"
+                rows={2}
               />
             </div>
           </div>
 
-          {/* Coordinator */}
-          <div className="space-y-2">
-            <Label className="text-xs font-mono text-muted-foreground">COORDINATOR MODEL (optional)</Label>
-            <Select value={coordinatorModel} onValueChange={setCoordinatorModel}>
-              <SelectTrigger className="bg-background/50 border-sidebar-border">
-                <SelectValue placeholder="No coordinator" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">No coordinator</SelectItem>
-                {AVAILABLE_MODELS.filter((m, i, arr) => arr.findIndex(x => x.id === m.id) === i).map((model) => (
-                  <SelectItem key={model.id} value={model.id}>
-                    {model.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-[10px] text-muted-foreground">
-              Supervisor agent to coordinate workflow steps
-            </p>
-          </div>
+          {/* Right Column */}
+          <div className="space-y-4">
 
-          {/* Lease Toggle */}
-          <div className="flex items-center justify-between p-3 rounded-sm border border-sidebar-border bg-background/30">
-            <div className="space-y-0.5">
-              <Label className="text-sm font-mono flex items-center gap-1">
-                <Clock className="w-3 h-3" /> Enable Leasing
-              </Label>
+            {/* Pricing */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label className="text-xs font-mono text-muted-foreground flex items-center gap-1">
+                  <DollarSign className="w-3 h-3" /> X402 PRICE (USDC)
+                </Label>
+                <Input
+                  type="number"
+                  step="0.001"
+                  value={x402Price}
+                  onChange={(e) => setX402Price(e.target.value)}
+                  className="bg-background/50 font-mono border-sidebar-border"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-mono text-muted-foreground">SUPPLY CAP</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  value={units}
+                  onChange={(e) => setUnits(e.target.value)}
+                  placeholder="1 (default)"
+                  className="bg-background/50 font-mono border-sidebar-border"
+                />
+              </div>
+            </div>
+
+            {/* Coordinator */}
+            <div className="space-y-2">
+              <Label className="text-xs font-mono text-muted-foreground">COORDINATOR MODEL (optional)</Label>
+              <Select value={coordinatorModel || "none"} onValueChange={(v) => setCoordinatorModel(v === "none" ? "" : v)}>
+                <SelectTrigger className="bg-background/50 border-sidebar-border">
+                  <SelectValue placeholder="No coordinator" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No coordinator</SelectItem>
+                  {AVAILABLE_MODELS.filter((m, i, arr) => arr.findIndex(x => x.id === m.id) === i).map((model) => (
+                    <SelectItem key={model.id} value={model.id}>
+                      {model.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <p className="text-[10px] text-muted-foreground">
-                Allow others to lease this workflow
+                Supervisor agent to coordinate workflow steps
               </p>
             </div>
-            <Switch checked={leaseEnabled} onCheckedChange={setLeaseEnabled} />
+
+            {/* Lease Toggle */}
+            <div className="flex items-center justify-between p-3 rounded-sm border border-sidebar-border bg-background/30">
+              <div className="space-y-0.5">
+                <Label className="text-sm font-mono flex items-center gap-1">
+                  <Clock className="w-3 h-3" /> Enable Leasing
+                </Label>
+                <p className="text-[10px] text-muted-foreground">
+                  Allow others to lease this workflow
+                </p>
+              </div>
+              <Switch checked={leaseEnabled} onCheckedChange={setLeaseEnabled} />
+            </div>
+
+            {leaseEnabled && (
+              <div className="grid grid-cols-2 gap-4 pl-4 border-l-2 border-fuchsia-500/30">
+                <div className="space-y-2">
+                  <Label className="text-xs font-mono text-muted-foreground">DURATION (days)</Label>
+                  <Input
+                    type="number"
+                    value={leaseDuration}
+                    onChange={(e) => setLeaseDuration(e.target.value)}
+                    className="bg-background/50 font-mono border-sidebar-border"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs font-mono text-muted-foreground">YOUR % (max 20)</Label>
+                  <Input
+                    type="number"
+                    max={20}
+                    value={leasePercent}
+                    onChange={(e) => setLeasePercent(e.target.value)}
+                    className="bg-background/50 font-mono border-sidebar-border"
+                  />
+                </div>
+              </div>
+            )}
           </div>
+        </div>
 
-          {leaseEnabled && (
-            <div className="grid grid-cols-2 gap-4 pl-4 border-l-2 border-fuchsia-500/30">
-              <div className="space-y-2">
-                <Label className="text-xs font-mono text-muted-foreground">DURATION (days)</Label>
-                <Input
-                  type="number"
-                  value={leaseDuration}
-                  onChange={(e) => setLeaseDuration(e.target.value)}
-                  className="bg-background/50 font-mono border-sidebar-border"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label className="text-xs font-mono text-muted-foreground">YOUR % (max 20)</Label>
-                <Input
-                  type="number"
-                  max={20}
-                  value={leasePercent}
-                  onChange={(e) => setLeasePercent(e.target.value)}
-                  className="bg-background/50 font-mono border-sidebar-border"
-                />
-              </div>
+        {/* Account status - full width */}
+        <div className="py-2">
+          {!wallet && (
+            <div className="flex items-center gap-2 p-2 rounded-sm bg-yellow-500/10 border border-yellow-500/30 text-yellow-200 text-xs">
+              <AlertCircle className="w-3 h-3" />
+              Connect wallet to mint (gas sponsored)
             </div>
           )}
-
-          {/* Account status */}
-          {!account && (
-            <div className="flex items-center gap-2 p-3 rounded-sm bg-yellow-500/10 border border-yellow-500/30 text-yellow-200 text-sm">
-              <AlertCircle className="w-4 h-4" />
-              Sign in to mint (gas sponsored)
-            </div>
-          )}
-          {account && (
+          {wallet && account && (
             <div className="flex items-center gap-2 p-2 rounded-sm bg-green-500/10 border border-green-500/30 text-green-200 text-xs">
               <CheckCircle2 className="w-3 h-3" />
               <span className="font-mono">{account.address.slice(0, 6)}...{account.address.slice(-4)}</span>
@@ -1357,45 +1353,26 @@ function MintManowarDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isMinting}>
             Cancel
           </Button>
-          {!preparedData ? (
-            <Button
-              onClick={handlePrepare}
-              disabled={!account || isUploading}
-              className="bg-fuchsia-500 hover:bg-fuchsia-600 text-white font-bold"
-            >
-              {isUploading ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Uploading...
-                </>
-              ) : (
-                <>
-                  <Upload className="w-4 h-4 mr-2" />
-                  Prepare
-                </>
-              )}
-            </Button>
-          ) : (
-            <TransactionButton
-              transaction={() => {
-                const contract = getManowarContract();
-                return prepareContractCall({
-                  contract,
-                  method: "function mintManowar((string title, string description, string banner, uint256 x402Price, uint256 units, bool leaseEnabled, uint256 leaseDuration, uint8 leasePercent, uint256 coordinatorAgentId, string coordinatorModel) params, uint256[] agentIds) returns (uint256 manowarId)",
-                  params: [preparedData.params, agentIds.map(id => BigInt(id))],
-                });
-              }}
-              onTransactionConfirmed={handleMintSuccess}
-              onError={handleMintError}
-              className="!bg-gradient-to-r !from-cyan-500 !to-fuchsia-500 !text-white !font-bold"
-            >
-              <Sparkles className="w-4 h-4 mr-2" />
-              Mint Manowar
-            </TransactionButton>
-          )}
+          <Button
+            onClick={handleMint}
+            disabled={!wallet || isMinting}
+            className="bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white font-bold"
+          >
+            {isMinting ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Minting...
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-4 h-4 mr-2" />
+                Mint as NFT
+              </>
+            )}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -1498,7 +1475,7 @@ function ComposeFlow() {
   // x402 Payment state
   const wallet = useActiveWallet();
   const { sessionActive, budgetRemaining } = useSession();
-  const [showSessionDialog, setShowSessionDialog] = useState(false);
+
 
   // Execution state
   const { execute, isRunning, logs, result, error: execError, reset: resetExecution } = useWorkflowExecution();
@@ -1819,7 +1796,6 @@ function ComposeFlow() {
         <CardHeader className="pb-2 border-b border-sidebar-border">
           <div className="flex items-center justify-between">
             <CardTitle className="text-lg font-display font-bold text-cyan-400">ADD STEPS</CardTitle>
-            <ServicesStatus />
           </div>
         </CardHeader>
         <CardContent className="flex-1 overflow-hidden p-0">
@@ -2154,11 +2130,7 @@ function ComposeFlow() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Session Budget Dialog */}
-      <SessionBudgetDialog
-        open={showSessionDialog}
-        onOpenChange={setShowSessionDialog}
-      />
+
     </div>
   );
 }
