@@ -14,18 +14,12 @@ export default function Home() {
         </div>
 
         <div className="relative z-10 animate-in fade-in zoom-in duration-700 space-y-4 max-w-2xl">
-          {/* Network Status Badge */}
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-cyan-950/30 border border-cyan-500/30 text-cyan-400 text-xs font-mono uppercase tracking-wider rounded-sm">
-            <span className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse"></span>
-            System Online: Avalanche Fuji
-          </div>
-
           {/* Main Title */}
           <h1 className="text-4xl md:text-6xl font-display font-black text-white leading-tight">
             <GlitchText text="COMPOSE" className="text-white" /><br />
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-cyan-200 to-white">THE FUTURE</span>
           </h1>
-          
+
           <p className="text-lg text-muted-foreground font-sans max-w-lg mx-auto">
             The marketplace for autonomous agents. Create, lease, and compose AI workflows.
             Powered by the <strong className="text-cyan-400">Manowar Framework</strong>.
@@ -61,19 +55,19 @@ export default function Home() {
 
       {/* Features Grid */}
       <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <FeatureCard 
-          icon={ShieldCheck} 
-          title="ERC8004 Identity" 
+        <FeatureCard
+          icon={ShieldCheck}
+          title="ERC8004 Identity"
           description="Agents own their reputation. On-chain verification ensures trust in an autonomous world."
         />
-        <FeatureCard 
-          icon={Zap} 
-          title="x402 Payments" 
+        <FeatureCard
+          icon={Zap}
+          title="x402 Payments"
           description="Native streaming payments. Agents pay agents autonomously for services rendered."
         />
-        <FeatureCard 
-          icon={Layers} 
-          title="Composable Workflows" 
+        <FeatureCard
+          icon={Layers}
+          title="Composable Workflows"
           description="Mint complex logic as Nested NFTs (ERC7401). Lease entire swarms with one click."
         />
       </section>
@@ -83,18 +77,18 @@ export default function Home() {
         <div className="absolute top-0 right-0 p-4 opacity-10">
           <Hexagon size={200} strokeWidth={1} />
         </div>
-        
+
         <div className="relative z-10 grid md:grid-cols-2 gap-12 items-center">
           <div className="space-y-6">
             <h3 className="text-3xl font-display font-bold text-white">
               COMPOSE THE <span className="text-fuchsia-500">HIVE MIND</span>
             </h3>
             <p className="text-muted-foreground leading-relaxed">
-              Drag and drop agents into a canvas. Link their inputs and outputs. 
-              Mint the entire configuration as an ERC7401 Nested NFT that can be leased, 
+              Drag and drop agents into a canvas. Link their inputs and outputs.
+              Mint the entire configuration as an ERC7401 Nested NFT that can be leased,
               sold, or forked.
             </p>
-            
+
             <div className="space-y-4 font-mono text-sm text-muted-foreground">
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 bg-sidebar-accent flex items-center justify-center text-cyan-400 font-bold border border-sidebar-border">01</div>
@@ -124,7 +118,7 @@ export default function Home() {
               <div className="text-[10px] text-cyan-400 font-mono mb-1">INPUT_SOURCE</div>
               <div className="font-bold text-sm text-white">Twitter_Stream</div>
             </div>
-            
+
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-32 p-3 bg-sidebar-accent border border-fuchsia-500/50 rounded-sm shadow-[0_0_15px_rgba(217,70,239,0.2)]">
               <div className="text-[10px] text-fuchsia-400 font-mono mb-1">PROCESSOR</div>
               <div className="font-bold text-sm text-white">GPT-4_Analysis</div>
@@ -164,10 +158,9 @@ export default function Home() {
       {/* Footer */}
       <footer className="border-t border-sidebar-border pt-8 flex flex-col md:flex-row justify-between items-center text-muted-foreground font-mono text-xs">
         <div className="flex gap-6 mb-4 md:mb-0">
-          <a href="#" className="hover:text-cyan-400 transition-colors">MANIFESTO</a>
-          <a href="#" className="hover:text-cyan-400 transition-colors">DOCS</a>
-          <a href="#" className="hover:text-cyan-400 transition-colors">GITHUB</a>
-          <a href="#" className="hover:text-cyan-400 transition-colors">TWITTER</a>
+          <a href="https://docs.compose.market" className="hover:text-cyan-400 transition-colors">DOCS</a>
+          <a href="https://github.com/compose-market" className="hover:text-cyan-400 transition-colors">GITHUB</a>
+          <a href="https://x.com/compose_market" className="hover:text-cyan-400 transition-colors">X</a>
         </div>
         <div>
           <span className="text-muted">SYS.VER.2.0.4 // </span>
@@ -182,7 +175,7 @@ function StatCard({ label, value, trend, icon: Icon }: { label: string, value: s
   return (
     <div className="relative p-6 bg-background border border-sidebar-border overflow-hidden group hover:border-cyan-500/50 transition-colors corner-decoration">
       <div className="absolute -right-6 -top-6 w-24 h-24 bg-cyan-500/5 rounded-full blur-2xl group-hover:bg-cyan-500/10 transition-colors"></div>
-      
+
       <div className="relative z-10 flex justify-between items-start">
         <div>
           <p className="text-xs font-mono text-muted-foreground uppercase tracking-widest mb-1">{label}</p>
@@ -192,7 +185,7 @@ function StatCard({ label, value, trend, icon: Icon }: { label: string, value: s
           <Icon className="w-4 h-4 text-cyan-400" />
         </div>
       </div>
-      
+
       <div className="relative z-10 mt-4 flex items-center gap-2 text-xs font-mono">
         <span className="text-fuchsia-400">{trend}</span>
         <span className="text-muted">past 24h</span>
