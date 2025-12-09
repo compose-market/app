@@ -88,40 +88,44 @@ export interface Agent {
   address: string;
   name: string;
   description: string;
-  
+
   // Registry source
   registry: AgentRegistryId;
-  
+
   // Optional details
   readme?: string;
   protocols: AgentProtocol[];
   avatarUrl: string | null;
-  
+
   // Metrics
   totalInteractions: number;
   recentInteractions: number;
   rating: number;
-  
+
   // Status
   status: "active" | "inactive";
   type: "hosted" | "local";
   featured: boolean;
   verified: boolean;
-  
+
   // Categorization
   category: string;
   tags: string[];
-  
+
   // Metadata
   owner: string;
   createdAt: string;
   updatedAt: string;
   externalUrl?: string;
-  
+
   // Warp status (for compose flow validation)
   warpStatus?: WarpStatus;
   warpedAgentId?: number; // Manowar agent ID if this external agent has been warped
   isWarped?: boolean; // True if this is a warped manowar agent
+
+  // Manowar-specific properties
+  onchainAgentId?: number; // Numeric agent ID for on-chain agents
+  pricePerRequest?: string; // Price per request in USDC (e.g., "0.01")
 }
 
 export interface AgentSearchResponse {
@@ -223,7 +227,7 @@ function normalizeTags(tags: string[]): string[] {
 function extractCapabilityTags(description: string, protocols: AgentProtocol[]): string[] {
   const tags = new Set<string>();
   const descLower = description.toLowerCase();
-  
+
   // Capability keywords
   const capabilities: Record<string, string[]> = {
     "defi": ["swap", "trade", "liquidity", "yield", "lending", "borrow", "stake"],
@@ -235,13 +239,13 @@ function extractCapabilityTags(description: string, protocols: AgentProtocol[]):
     "automation": ["automate", "schedule", "trigger", "workflow", "bot"],
     "payments": ["pay", "transfer", "send", "receive", "wallet"],
   };
-  
+
   for (const [tag, keywords] of Object.entries(capabilities)) {
     if (keywords.some(kw => descLower.includes(kw))) {
       tags.add(tag);
     }
   }
-  
+
   // Check protocols
   protocols.forEach(p => {
     const pName = p.name.toLowerCase();
@@ -249,7 +253,7 @@ function extractCapabilityTags(description: string, protocols: AgentProtocol[]):
     if (pName.includes("nft")) tags.add("nft");
     if (pName.includes("chat") || pName.includes("message")) tags.add("social");
   });
-  
+
   return Array.from(tags);
 }
 
@@ -262,12 +266,12 @@ function agentverseToAgent(av: AgentverseAgent): Agent {
     version: p.version,
     digest: p.digest,
   })) || [];
-  
+
   // Get normalized tags + capability tags
   const baseTags = normalizeTags(av.system_wide_tags || []);
   const capabilityTags = extractCapabilityTags(av.description || av.readme || "", protocols);
   const allTags = Array.from(new Set([...baseTags, ...capabilityTags]));
-  
+
   return {
     id: av.address,
     address: av.address,
@@ -317,10 +321,10 @@ function registryServerToAgent(server: RegistryServer, registry: AgentRegistryId
     name: t.name,
     version: "1.0.0",
   })) || [];
-  
+
   const capabilityTags = extractCapabilityTags(server.description, protocols);
   const allTags = Array.from(new Set([...server.tags, ...capabilityTags])).slice(0, 8);
-  
+
   return {
     id: server.registryId,
     address: server.registryId,
@@ -350,14 +354,14 @@ function registryServerToAgent(server: RegistryServer, registry: AgentRegistryId
  */
 function deriveCategory(tags: string[]): string {
   const tagSet = new Set(tags.map(t => t.toLowerCase()));
-  
+
   if (tagSet.has("defi") || tagSet.has("trading") || tagSet.has("swap")) return "DeFi";
   if (tagSet.has("nft")) return "NFT";
   if (tagSet.has("social") || tagSet.has("discord") || tagSet.has("twitter")) return "Social";
   if (tagSet.has("ai") || tagSet.has("llm")) return "AI";
   if (tagSet.has("data") || tagSet.has("analytics")) return "Data";
   if (tagSet.has("automation")) return "Automation";
-  
+
   return "Utility";
 }
 
@@ -372,7 +376,7 @@ async function searchAgentverse(
   options: SearchAgentsOptions
 ): Promise<{ agents: Agent[]; total: number; tags: string[]; categories: string[] }> {
   const params = new URLSearchParams();
-  
+
   if (options.search) params.set("search", options.search);
   if (options.category) params.set("category", options.category);
   if (options.tags?.length) params.set("tags", options.tags.join(","));
@@ -381,16 +385,16 @@ async function searchAgentverse(
   if (options.offset) params.set("offset", options.offset.toString());
   if (options.sort) params.set("sort", options.sort);
   if (options.direction) params.set("direction", options.direction);
-  
+
   const response = await fetch(apiUrl(`/api/agentverse/agents?${params}`));
-  
+
   if (!response.ok) {
     const data = await response.json().catch(() => ({ error: "Unknown error" }));
     throw new Error(data.error || `Failed to fetch agents: ${response.status}`);
   }
-  
+
   const data: AgentverseSearchResponse = await response.json();
-  
+
   return {
     agents: data.agents.map(agentverseToAgent),
     total: data.total,
@@ -407,7 +411,7 @@ function getConnectorBaseUrl(): string {
   if (connectorUrl) {
     return connectorUrl.replace(/\/$/, "");
   }
-  
+
   // Derive from API URL (connector is on a different subdomain)
   const apiUrl = import.meta.env.VITE_API_URL;
   if (apiUrl) {
@@ -415,7 +419,7 @@ function getConnectorBaseUrl(): string {
       .replace(/\/api$/, "")
       .replace("api.", "connector.");
   }
-  
+
   return "http://localhost:4001";
 }
 
@@ -431,44 +435,44 @@ async function searchGoat(
       limit: String(options.limit || 50),
       offset: String(options.offset || 0),
     });
-    
+
     const response = await fetch(`${getConnectorBaseUrl()}/registry/servers?${params}`);
-    
+
     if (!response.ok) {
       console.warn("Failed to fetch GOAT plugins:", response.status);
       return { agents: [], total: 0, tags: [], categories: [] };
     }
-    
+
     const data = await response.json();
     const servers: RegistryServer[] = data.servers || [];
-    
+
     // Filter by search if provided
     let filtered = servers;
     if (options.search) {
       const q = options.search.toLowerCase();
-      filtered = servers.filter(s => 
+      filtered = servers.filter(s =>
         s.name.toLowerCase().includes(q) ||
         s.description.toLowerCase().includes(q) ||
         s.tags.some(t => t.toLowerCase().includes(q))
       );
     }
-    
+
     // Filter by tags
     if (options.tags?.length) {
       filtered = filtered.filter(s =>
         options.tags!.some(t => s.tags.includes(t.toLowerCase()))
       );
     }
-    
+
     const agents = filtered.map(s => registryServerToAgent(s, "goat"));
     const allTags = new Set<string>();
     const allCategories = new Set<string>();
-    
+
     agents.forEach(a => {
       a.tags.forEach(t => allTags.add(t));
       if (a.category) allCategories.add(a.category);
     });
-    
+
     return {
       agents,
       total: data.total || agents.length,
@@ -493,44 +497,44 @@ async function searchEliza(
       limit: String(options.limit || 50),
       offset: String(options.offset || 0),
     });
-    
+
     const response = await fetch(`${getConnectorBaseUrl()}/registry/servers?${params}`);
-    
+
     if (!response.ok) {
       console.warn("Failed to fetch ElizaOS plugins:", response.status);
       return { agents: [], total: 0, tags: [], categories: [] };
     }
-    
+
     const data = await response.json();
     const servers: RegistryServer[] = data.servers || [];
-    
+
     // Filter by search if provided
     let filtered = servers;
     if (options.search) {
       const q = options.search.toLowerCase();
-      filtered = servers.filter(s => 
+      filtered = servers.filter(s =>
         s.name.toLowerCase().includes(q) ||
         s.description.toLowerCase().includes(q) ||
         s.tags.some(t => t.toLowerCase().includes(q))
       );
     }
-    
+
     // Filter by tags
     if (options.tags?.length) {
       filtered = filtered.filter(s =>
         options.tags!.some(t => s.tags.includes(t.toLowerCase()))
       );
     }
-    
+
     const agents = filtered.map(s => registryServerToAgent(s, "eliza"));
     const allTags = new Set<string>();
     const allCategories = new Set<string>();
-    
+
     agents.forEach(a => {
       a.tags.forEach(t => allTags.add(t));
       if (a.category) allCategories.add(a.category);
     });
-    
+
     return {
       agents,
       total: data.total || agents.length,
@@ -562,7 +566,7 @@ export async function searchAgents(
   const registries = options.registries?.length
     ? options.registries.filter(r => AGENT_REGISTRIES[r]?.enabled)
     : (Object.keys(AGENT_REGISTRIES) as AgentRegistryId[]).filter(r => AGENT_REGISTRIES[r].enabled);
-  
+
   // Fetch from all selected registries in parallel
   const results = await Promise.allSettled(
     registries.map(async (registry) => {
@@ -580,13 +584,13 @@ export async function searchAgents(
       }
     })
   );
-  
+
   // Merge results
   const allAgents: Agent[] = [];
   const allTags = new Set<string>();
   const allCategories = new Set<string>();
   let totalCount = 0;
-  
+
   results.forEach((result, i) => {
     if (result.status === "fulfilled") {
       allAgents.push(...result.value.agents);
@@ -597,16 +601,16 @@ export async function searchAgents(
       console.warn(`Failed to fetch from ${registries[i]}:`, result.reason);
     }
   });
-  
+
   // Sort merged results
   if (options.sort === "interactions") {
-    allAgents.sort((a, b) => 
-      options.direction === "asc" 
+    allAgents.sort((a, b) =>
+      options.direction === "asc"
         ? a.totalInteractions - b.totalInteractions
         : b.totalInteractions - a.totalInteractions
     );
   } else if (options.sort === "created-at") {
-    allAgents.sort((a, b) => 
+    allAgents.sort((a, b) =>
       options.direction === "asc"
         ? new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
         : new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
@@ -620,7 +624,7 @@ export async function searchAgents(
       return options.direction === "asc" ? scoreA - scoreB : scoreB - scoreA;
     });
   }
-  
+
   return {
     agents: allAgents,
     total: totalCount,
@@ -639,27 +643,27 @@ function getRelevancyScore(agent: Agent, query: string): number {
   let score = 0;
   const nameLower = agent.name.toLowerCase();
   const descLower = agent.description.toLowerCase();
-  
+
   // Exact name match
   if (nameLower === query) score += 100;
   // Name contains query
   else if (nameLower.includes(query)) score += 50;
-  
+
   // Description contains query
   if (descLower.includes(query)) score += 20;
-  
+
   // Tag match
   if (agent.tags.some(t => t.toLowerCase().includes(query))) score += 15;
-  
+
   // Category match
   if (agent.category?.toLowerCase().includes(query)) score += 10;
-  
+
   // Verified boost
   if (agent.verified) score += 5;
-  
+
   // Interaction boost
   score += Math.min(agent.totalInteractions / 1000, 10);
-  
+
   return score;
 }
 
@@ -669,12 +673,12 @@ function getRelevancyScore(agent: Agent, query: string): number {
 export async function getAgent(address: string): Promise<Agent> {
   // For now, only Agentverse is implemented
   const response = await fetch(apiUrl(`/api/agentverse/agents/${encodeURIComponent(address)}`));
-  
+
   if (!response.ok) {
     const data = await response.json().catch(() => ({ error: "Unknown error" }));
     throw new Error(data.error || `Failed to fetch agent: ${response.status}`);
   }
-  
+
   const data: AgentverseAgent = await response.json();
   return agentverseToAgent(data);
 }
@@ -697,7 +701,7 @@ export function formatInteractions(count: number): string {
  */
 export function getReadmeExcerpt(readme: string, maxLength = 150): string {
   if (!readme) return "";
-  
+
   // Remove markdown badges and images
   let clean = readme
     .replace(/!\[.*?\]\(.*?\)/g, "") // Remove images
@@ -707,7 +711,7 @@ export function getReadmeExcerpt(readme: string, maxLength = 150): string {
     .replace(/\*{1,2}(.*?)\*{1,2}/g, "$1") // Remove bold/italic
     .replace(/\n{2,}/g, " ") // Collapse newlines
     .trim();
-  
+
   if (clean.length <= maxLength) return clean;
   return clean.slice(0, maxLength).trim() + "...";
 }
@@ -745,7 +749,7 @@ export const COMMON_TAGS = [
  * Check if agent has a specific capability based on protocols
  */
 export function hasProtocol(agent: Agent, protocolName: string): boolean {
-  return agent.protocols?.some(p => 
+  return agent.protocols?.some(p =>
     p.name.toLowerCase().includes(protocolName.toLowerCase())
   ) ?? false;
 }
