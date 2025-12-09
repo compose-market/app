@@ -1,18 +1,52 @@
 import { useState, useEffect } from "react";
+import { Link, useLocation } from "wouter";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
-import { Menu, X } from "lucide-react";
+import { Menu, X, Home, Box, Layers, PlusCircle, Sparkles, Activity } from "lucide-react";
 import { ComposeLogo } from "@/components/brand/Logo";
+import { cn } from "@/lib/utils";
+import { WalletConnector } from "@/components/connector";
 
 interface LayoutProps {
   children: React.ReactNode;
 }
 
+// Navigation links (shared between desktop Sidebar and mobile drawer)
+const moduleLinks = [
+  { href: "/", icon: Home, label: "HOME" },
+  { href: "/market", icon: Box, label: "MARKET" },
+  { href: "/compose", icon: Layers, label: "COMPOSE" },
+  { href: "/create-agent", icon: PlusCircle, label: "CREATE AGENT" },
+  { href: "/playground", icon: Sparkles, label: "PLAYGROUND" },
+];
+
+const networkLinks = [
+  { href: "/my-assets", icon: Activity, label: "MY ASSETS" },
+];
+
 export function Layout({ children }: LayoutProps) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  const [location] = useLocation();
 
-  // Parallax effect on mouse move
+  // Close menu when route changes
+  useEffect(() => {
+    setIsMenuOpen(false);
+  }, [location]);
+
+  // Prevent body scroll when menu is open
+  useEffect(() => {
+    if (isMenuOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isMenuOpen]);
+
+  // Parallax effect on mouse move (desktop only)
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       setMousePos({
@@ -36,40 +70,137 @@ export function Layout({ children }: LayoutProps) {
       <div className="fixed inset-0 bg-gradient-to-b from-background via-transparent to-background z-0 pointer-events-none" />
       
       {/* Scanline Effect */}
-      <div className="scanline fixed inset-0 z-50 pointer-events-none" />
+      <div className="scanline fixed inset-0 z-[60] pointer-events-none" />
 
       {/* Desktop Sidebar */}
       <div className="hidden md:block">
         <Sidebar />
       </div>
 
-      {/* Mobile Sidebar */}
-      <aside className={`fixed md:hidden w-64 h-full bg-background/95 border-r border-sidebar-border flex flex-col backdrop-blur-md transition-transform duration-300 z-40 ${isMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="p-6 border-b border-sidebar-border flex items-center gap-3">
-          <ComposeLogo className="w-10 h-10 text-cyan-400 drop-shadow-[0_0_15px_rgba(6,182,212,0.5)]" />
-          <div>
-            <h1 className="font-display font-black text-xl tracking-tighter text-foreground leading-none">
-              COMPOSE<br/>
-              <span className="text-cyan-400">.MARKET</span>
-            </h1>
-            <p className="font-mono text-[8px] text-fuchsia-500 tracking-widest mt-1">POWERED BY MANOWAR</p>
+      {/* Mobile Backdrop Overlay */}
+      <div 
+        className={cn(
+          "fixed inset-0 bg-black/60 backdrop-blur-sm z-40 md:hidden transition-opacity duration-300",
+          isMenuOpen ? "opacity-100" : "opacity-0 pointer-events-none"
+        )}
+        onClick={() => setIsMenuOpen(false)}
+        aria-hidden="true"
+      />
+
+      {/* Mobile Sidebar Drawer */}
+      <aside 
+        className={cn(
+          "fixed md:hidden w-[280px] max-w-[85vw] h-full bg-background/98 border-r border-sidebar-border flex flex-col backdrop-blur-md transition-transform duration-300 ease-out z-50",
+          isMenuOpen ? 'translate-x-0' : '-translate-x-full'
+        )}
+      >
+        {/* Mobile Sidebar Header */}
+        <div className="p-5 border-b border-sidebar-border flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <ComposeLogo className="w-9 h-9 text-cyan-400 drop-shadow-[0_0_15px_rgba(6,182,212,0.5)]" />
+            <div>
+              <h1 className="font-display font-black text-lg tracking-tighter text-foreground leading-none">
+                COMPOSE<br/>
+                <span className="text-cyan-400">.MARKET</span>
+              </h1>
+              <p className="font-mono text-[7px] text-fuchsia-500 tracking-widest mt-0.5">POWERED BY MANOWAR</p>
+            </div>
+          </div>
+          <button 
+            onClick={() => setIsMenuOpen(false)} 
+            className="p-2 text-muted-foreground hover:text-foreground transition-colors"
+            aria-label="Close menu"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        {/* Mobile Navigation */}
+        <nav className="flex-1 py-4 overflow-y-auto">
+          <div className="px-4 mb-2 text-[10px] font-mono text-muted-foreground uppercase tracking-widest">Modules</div>
+          {moduleLinks.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              className={cn(
+                "w-full flex items-center gap-3 px-4 py-3.5 text-sm font-medium transition-all border-l-2 group active:bg-cyan-950/40",
+                location === link.href
+                  ? "border-cyan-400 bg-cyan-950/30 text-cyan-400"
+                  : "border-transparent text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
+              )}
+            >
+              <link.icon className={cn(
+                "w-5 h-5",
+                location === link.href
+                  ? "text-cyan-400 drop-shadow-[0_0_10px_cyan]"
+                  : "group-hover:text-cyan-400"
+              )} />
+              <span className="font-mono tracking-wider">{link.label}</span>
+              {location === link.href && (
+                <div className="ml-auto w-1.5 h-1.5 bg-cyan-400 rounded-full animate-ping" />
+              )}
+            </Link>
+          ))}
+
+          <div className="px-4 mt-5 mb-2 text-[10px] font-mono text-muted-foreground uppercase tracking-widest">Network</div>
+          {networkLinks.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              className={cn(
+                "w-full flex items-center gap-3 px-4 py-3.5 text-sm font-medium transition-all border-l-2 group active:bg-cyan-950/40",
+                location === link.href
+                  ? "border-cyan-400 bg-cyan-950/30 text-cyan-400"
+                  : "border-transparent text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
+              )}
+            >
+              <link.icon className={cn(
+                "w-5 h-5",
+                location === link.href
+                  ? "text-cyan-400 drop-shadow-[0_0_10px_cyan]"
+                  : "group-hover:text-cyan-400"
+              )} />
+              <span className="font-mono tracking-wider">{link.label}</span>
+              {location === link.href && (
+                <div className="ml-auto w-1.5 h-1.5 bg-cyan-400 rounded-full animate-ping" />
+              )}
+            </Link>
+          ))}
+        </nav>
+
+        {/* Mobile Network Status Footer */}
+        <div className="p-4 border-t border-sidebar-border">
+          <div className="glass-panel p-3 rounded-sm border border-primary/20">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-muted-foreground font-mono">NETWORK</span>
+              <span className="text-[10px] text-cyan-400 font-bold flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
+                AVALANCHE FUJI
+              </span>
+            </div>
           </div>
         </div>
-        {/* Mobile nav would go here - using same links as Sidebar */}
       </aside>
 
       {/* Mobile Header */}
-      <div className="md:hidden fixed top-0 left-0 right-0 h-16 bg-background border-b border-sidebar-border flex items-center justify-between px-4 z-30">
-        <div className="flex items-center gap-2">
-          <ComposeLogo className="w-8 h-8 text-cyan-400" />
-          <span className="font-display font-bold text-white tracking-tight">COMPOSE.MARKET</span>
+      <div className="md:hidden fixed top-0 left-0 right-0 h-14 bg-background/95 backdrop-blur-md border-b border-sidebar-border flex items-center justify-between px-3 z-30 safe-area-top">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <button 
+            onClick={() => setIsMenuOpen(!isMenuOpen)} 
+            className="p-2 text-muted-foreground border border-sidebar-border rounded-sm hover:border-cyan-500/50 active:bg-cyan-500/10 transition-colors touch-manipulation shrink-0"
+            aria-label="Toggle menu"
+            aria-expanded={isMenuOpen}
+          >
+            {isMenuOpen ? <X size={18} /> : <Menu size={18} />}
+          </button>
+          <ComposeLogo className="w-6 h-6 text-cyan-400 shrink-0" />
+          <span className="font-display font-bold text-white tracking-tight text-xs truncate hidden xs:block">COMPOSE.MARKET</span>
         </div>
-        <button 
-          onClick={() => setIsMenuOpen(!isMenuOpen)} 
-          className="p-2 text-muted-foreground border border-sidebar-border rounded-sm hover:border-cyan-500/50 transition-colors"
-        >
-          {isMenuOpen ? <X size={20} /> : <Menu size={20} />}
-        </button>
+        
+        {/* Mobile Connect Button */}
+        <div className="shrink-0">
+          <WalletConnector compact />
+        </div>
       </div>
 
       {/* Desktop TopBar */}
@@ -78,8 +209,8 @@ export function Layout({ children }: LayoutProps) {
       </div>
       
       {/* Main Content */}
-      <main className="md:pl-64 pt-16 min-h-screen relative overflow-hidden">
-        <div className="relative z-10 p-6 max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <main className="pl-0 md:pl-64 pt-14 md:pt-16 min-h-screen relative overflow-hidden">
+        <div className="relative z-10 p-4 md:p-6 max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
           {children}
         </div>
       </main>
