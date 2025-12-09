@@ -569,53 +569,52 @@ export default function CreateAgent() {
   // =============================================================================
   if (mode === "choice") {
     return (
-      <div className="max-w-3xl mx-auto pb-20">
+      <div className="max-w-3xl mx-auto pb-20 px-1">
         {/* Page Header */}
-        <div className="mb-8 space-y-2 border-b border-sidebar-border pb-6">
+        <div className="mb-6 sm:mb-8 space-y-2 border-b border-sidebar-border pb-4 sm:pb-6">
           <div className="flex items-center gap-4">
-            <h1 className="text-2xl font-display font-bold text-white">
+            <h1 className="text-xl sm:text-2xl font-display font-bold text-white">
               <span className="text-fuchsia-500 mr-2">//</span>
               CREATE AGENT
             </h1>
             <div className="hidden md:flex h-px w-32 bg-gradient-to-r from-fuchsia-500 to-transparent"></div>
           </div>
-          <p className="text-muted-foreground font-mono text-sm">
+          <p className="text-muted-foreground font-mono text-xs sm:text-sm">
             Choose how you want to create your agent.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
           {/* Create from Scratch */}
           <Card
-            className="glass-panel border-cyan-500/20 cursor-pointer hover:border-cyan-500/50 transition-all group"
+            className="glass-panel border-cyan-500/20 cursor-pointer hover:border-cyan-500/50 transition-all group active:bg-cyan-500/5"
             onClick={handleSelectScratch}
           >
-            <CardContent className="p-8 text-center space-y-4">
-              <div className="w-16 h-16 mx-auto rounded-full bg-cyan-500/10 flex items-center justify-center border-2 border-cyan-500/30 group-hover:border-cyan-500/50 group-hover:bg-cyan-500/20 transition-colors">
-                <Plus className="w-8 h-8 text-cyan-400" />
+            <CardContent className="p-5 sm:p-8 text-center space-y-3 sm:space-y-4">
+              <div className="w-12 h-12 sm:w-16 sm:h-16 mx-auto rounded-full bg-cyan-500/10 flex items-center justify-center border-2 border-cyan-500/30 group-hover:border-cyan-500/50 group-hover:bg-cyan-500/20 transition-colors">
+                <Plus className="w-6 h-6 sm:w-8 sm:h-8 text-cyan-400" />
               </div>
               <div>
-                <h2 className="text-xl font-display font-bold text-cyan-400 mb-2">
+                <h2 className="text-lg sm:text-xl font-display font-bold text-cyan-400 mb-1 sm:mb-2">
                   CREATE FROM SCRATCH
                 </h2>
-                <p className="text-sm text-muted-foreground">
-                  Build a new agent with custom plugins, models, and pricing. Full control over
-                  your agent's capabilities.
+                <p className="text-xs sm:text-sm text-muted-foreground">
+                  Build a new agent with custom plugins, models, and pricing.
                 </p>
               </div>
-              <div className="flex flex-wrap justify-center gap-2">
-                <Badge variant="outline" className="text-[10px] border-cyan-500/30 text-cyan-400">
+              <div className="flex flex-wrap justify-center gap-1.5 sm:gap-2">
+                <Badge variant="outline" className="text-[9px] sm:text-[10px] border-cyan-500/30 text-cyan-400">
                   Custom Model
                 </Badge>
-                <Badge variant="outline" className="text-[10px] border-cyan-500/30 text-cyan-400">
+                <Badge variant="outline" className="text-[9px] sm:text-[10px] border-cyan-500/30 text-cyan-400">
                   200+ Plugins
                 </Badge>
-                <Badge variant="outline" className="text-[10px] border-cyan-500/30 text-cyan-400">
+                <Badge variant="outline" className="text-[9px] sm:text-[10px] border-cyan-500/30 text-cyan-400">
                   ERC8004
                 </Badge>
               </div>
-              <Button className="w-full bg-cyan-500 text-black hover:bg-cyan-400 font-bold font-mono">
-                <Plus className="w-4 h-4 mr-2" />
+              <Button className="w-full bg-cyan-500 text-black hover:bg-cyan-400 font-bold font-mono text-xs sm:text-sm h-9 sm:h-10">
+                <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
                 START BUILDING
               </Button>
             </CardContent>
@@ -623,35 +622,34 @@ export default function CreateAgent() {
 
           {/* Warp Existing */}
           <Card
-            className="glass-panel border-fuchsia-500/20 cursor-pointer hover:border-fuchsia-500/50 transition-all group"
+            className="glass-panel border-fuchsia-500/20 cursor-pointer hover:border-fuchsia-500/50 transition-all group active:bg-fuchsia-500/5"
             onClick={handleSelectWarp}
           >
-            <CardContent className="p-8 text-center space-y-4">
-              <div className="w-16 h-16 mx-auto rounded-full bg-fuchsia-500/10 flex items-center justify-center border-2 border-fuchsia-500/30 group-hover:border-fuchsia-500/50 group-hover:bg-fuchsia-500/20 transition-colors">
-                <ArrowRightLeft className="w-8 h-8 text-fuchsia-400" />
+            <CardContent className="p-5 sm:p-8 text-center space-y-3 sm:space-y-4">
+              <div className="w-12 h-12 sm:w-16 sm:h-16 mx-auto rounded-full bg-fuchsia-500/10 flex items-center justify-center border-2 border-fuchsia-500/30 group-hover:border-fuchsia-500/50 group-hover:bg-fuchsia-500/20 transition-colors">
+                <ArrowRightLeft className="w-6 h-6 sm:w-8 sm:h-8 text-fuchsia-400" />
               </div>
               <div>
-                <h2 className="text-xl font-display font-bold text-fuchsia-400 mb-2">
+                <h2 className="text-lg sm:text-xl font-display font-bold text-fuchsia-400 mb-1 sm:mb-2">
                   WARP EXISTING
                 </h2>
-                <p className="text-sm text-muted-foreground">
-                  Port an agent from external registries (Agentverse, etc.) into Manowar. Earn 80%
-                  royalties as the warper.
+                <p className="text-xs sm:text-sm text-muted-foreground">
+                  Port an agent from external registries into Manowar. Earn 80% royalties.
                 </p>
               </div>
-              <div className="flex flex-wrap justify-center gap-2">
-                <Badge variant="outline" className="text-[10px] border-fuchsia-500/30 text-fuchsia-400">
+              <div className="flex flex-wrap justify-center gap-1.5 sm:gap-2">
+                <Badge variant="outline" className="text-[9px] sm:text-[10px] border-fuchsia-500/30 text-fuchsia-400">
                   80% Royalties
                 </Badge>
-                <Badge variant="outline" className="text-[10px] border-fuchsia-500/30 text-fuchsia-400">
+                <Badge variant="outline" className="text-[9px] sm:text-[10px] border-fuchsia-500/30 text-fuchsia-400">
                   On-chain Identity
                 </Badge>
-                <Badge variant="outline" className="text-[10px] border-fuchsia-500/30 text-fuchsia-400">
+                <Badge variant="outline" className="text-[9px] sm:text-[10px] border-fuchsia-500/30 text-fuchsia-400">
                   x402 Payments
                 </Badge>
               </div>
-              <Button className="w-full bg-fuchsia-500 text-white hover:bg-fuchsia-400 font-bold font-mono">
-                <Globe className="w-4 h-4 mr-2" />
+              <Button className="w-full bg-fuchsia-500 text-white hover:bg-fuchsia-400 font-bold font-mono text-xs sm:text-sm h-9 sm:h-10">
+                <Globe className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
                 BROWSE AGENTS
               </Button>
             </CardContent>
@@ -659,15 +657,15 @@ export default function CreateAgent() {
         </div>
 
         {/* Info Box */}
-        <div className="mt-8 p-4 rounded-sm bg-sidebar-accent border border-sidebar-border">
-          <h3 className="font-bold font-display text-foreground mb-2">
-            <Sparkles className="w-4 h-4 inline mr-2 text-cyan-400" />
+        <div className="mt-6 sm:mt-8 p-3 sm:p-4 rounded-sm bg-sidebar-accent border border-sidebar-border">
+          <h3 className="font-bold font-display text-foreground mb-2 text-sm sm:text-base">
+            <Sparkles className="w-3.5 h-3.5 sm:w-4 sm:h-4 inline mr-1.5 sm:mr-2 text-cyan-400" />
             What's the difference?
           </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-muted-foreground">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-xs sm:text-sm text-muted-foreground">
             <div>
               <p className="font-mono text-cyan-400 mb-1">Create from Scratch:</p>
-              <ul className="list-disc list-inside space-y-1">
+              <ul className="list-disc list-inside space-y-0.5 sm:space-y-1">
                 <li>You are the original creator</li>
                 <li>Full control over plugins & model</li>
                 <li>100% of earnings (minus protocol fee)</li>
@@ -675,7 +673,7 @@ export default function CreateAgent() {
             </div>
             <div>
               <p className="font-mono text-fuchsia-400 mb-1">Warp Existing:</p>
-              <ul className="list-disc list-inside space-y-1">
+              <ul className="list-disc list-inside space-y-0.5 sm:space-y-1">
                 <li>Port agents from other ecosystems</li>
                 <li>Original creator gets 10% royalties</li>
                 <li>You (warper) earn 80% of usage fees</li>
@@ -698,30 +696,30 @@ export default function CreateAgent() {
   // Render Create from Scratch Form
   // =============================================================================
   return (
-    <div className="max-w-3xl mx-auto pb-20">
+    <div className="max-w-3xl mx-auto pb-20 px-1">
       {/* Page Header */}
-      <div className="mb-8 space-y-2 border-b border-sidebar-border pb-6">
+      <div className="mb-6 sm:mb-8 space-y-2 border-b border-sidebar-border pb-4 sm:pb-6">
         <Button
           variant="ghost"
           size="sm"
           onClick={() => setMode("choice")}
-          className="text-muted-foreground hover:text-cyan-400 -ml-2 mb-2"
+          className="text-muted-foreground hover:text-cyan-400 -ml-2 mb-2 text-xs sm:text-sm"
         >
-          <ChevronRight className="w-4 h-4 mr-2 rotate-180" />
+          <ChevronRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2 rotate-180" />
           Back to Choice
         </Button>
         <div className="flex items-center gap-4">
-          <h1 className="text-2xl font-display font-bold text-white">
+          <h1 className="text-xl sm:text-2xl font-display font-bold text-white">
             <span className="text-fuchsia-500 mr-2">//</span>
             MINT NEW AGENT
           </h1>
           <div className="hidden md:flex h-px w-32 bg-gradient-to-r from-fuchsia-500 to-transparent"></div>
         </div>
-        <p className="text-muted-foreground font-mono text-sm">Deploy a new autonomous entity with ERC8004 Identity.</p>
+        <p className="text-muted-foreground font-mono text-xs sm:text-sm">Deploy a new autonomous entity with ERC8004 Identity.</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-        <div className="md:col-span-2">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
+        <div className="lg:col-span-2 order-2 lg:order-1">
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
               <Card className="glass-panel border-cyan-500/20">
@@ -762,13 +760,13 @@ export default function CreateAgent() {
                       </FormItem>
                     )}
                   />
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <FormField
                       control={form.control}
                       name="model"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel className="font-mono text-foreground">LLM Model</FormLabel>
+                          <FormLabel className="font-mono text-foreground text-sm">LLM Model</FormLabel>
                           {selectedHFModel ? (
                             <div className="space-y-2">
                               <div className="p-3 rounded-sm bg-cyan-500/10 border border-cyan-500/30">
@@ -875,7 +873,7 @@ export default function CreateAgent() {
                             <span className="text-orange-400 hover:text-orange-300 ml-1">Test plugins first →</span>
                           </Link>
                         </FormDescription>
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
                           {FRAMEWORKS.map((fw) => {
                             const isSelected = field.value === fw.id;
                             const colorClass = fw.color === "fuchsia"
@@ -898,7 +896,7 @@ export default function CreateAgent() {
                                     );
                                   }
                                 }}
-                                className={`p-3 rounded-sm border text-left transition-all ${isSelected
+                                className={`p-2.5 sm:p-3 rounded-sm border text-left transition-all touch-manipulation ${isSelected
                                   ? colorClass
                                   : "border-sidebar-border bg-background/30 hover:border-sidebar-border/80"
                                   }`}
@@ -909,13 +907,13 @@ export default function CreateAgent() {
                                   ) : (
                                     <Boxes className="w-4 h-4" />
                                   )}
-                                  <span className="font-mono font-bold text-sm">{fw.name}</span>
+                                  <span className="font-mono font-bold text-xs sm:text-sm">{fw.name}</span>
                                   {isSelected && <CheckCircle2 className="w-3 h-3 ml-auto" />}
                                 </div>
-                                <p className="text-[10px] text-muted-foreground line-clamp-2">{fw.description}</p>
-                                <div className="flex flex-wrap gap-1 mt-2">
+                                <p className="text-[9px] sm:text-[10px] text-muted-foreground line-clamp-2">{fw.description}</p>
+                                <div className="flex flex-wrap gap-1 mt-1.5 sm:mt-2">
                                   {fw.features.slice(0, 2).map((f) => (
-                                    <span key={f} className="text-[8px] px-1 py-0.5 rounded bg-white/5 text-muted-foreground">
+                                    <span key={f} className="text-[7px] sm:text-[8px] px-1 py-0.5 rounded bg-white/5 text-muted-foreground">
                                       {f}
                                     </span>
                                   ))}
@@ -1071,24 +1069,24 @@ export default function CreateAgent() {
               </Card>
 
               <Card className="glass-panel border-fuchsia-500/20">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg font-bold font-display text-fuchsia-400">
-                    <DollarSign className="w-5 h-5" />
+                <CardHeader className="p-4 sm:p-6">
+                  <CardTitle className="flex items-center gap-2 text-base sm:text-lg font-bold font-display text-fuchsia-400">
+                    <DollarSign className="w-4 h-4 sm:w-5 sm:h-5" />
                     FINANCIAL SPECS (x402)
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
+                <CardContent className="space-y-4 p-4 sm:p-6 pt-0 sm:pt-0">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <FormField
                       control={form.control}
                       name="licensePrice"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel className="font-mono text-foreground">License Price (USDC)</FormLabel>
+                          <FormLabel className="font-mono text-foreground text-sm">License Price (USDC)</FormLabel>
                           <FormControl>
                             <Input type="number" step="0.001" {...field} className="bg-background/50 font-mono border-sidebar-border focus:border-fuchsia-500" />
                           </FormControl>
-                          <FormDescription className="text-muted-foreground text-xs">
+                          <FormDescription className="text-muted-foreground text-[10px] sm:text-xs">
                             Cost to license into a Manowar
                           </FormDescription>
                           <FormMessage />
@@ -1100,11 +1098,11 @@ export default function CreateAgent() {
                       name="licenses"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel className="font-mono text-foreground">License Supply</FormLabel>
+                          <FormLabel className="font-mono text-foreground text-sm">License Supply</FormLabel>
                           <FormControl>
                             <Input type="number" placeholder="∞ (leave empty)" {...field} className="bg-background/50 font-mono border-sidebar-border focus:border-fuchsia-500" />
                           </FormControl>
-                          <FormDescription className="text-muted-foreground text-xs">
+                          <FormDescription className="text-muted-foreground text-[10px] sm:text-xs">
                             Max licenses (empty = infinite)
                           </FormDescription>
                           <FormMessage />
@@ -1179,9 +1177,9 @@ export default function CreateAgent() {
         </div>
 
         {/* Sidebar Info */}
-        <div className="space-y-6">
+        <div className="space-y-4 sm:space-y-6 order-1 lg:order-2">
           {/* Avatar Upload */}
-          <div className="glass-panel p-6 rounded-sm space-y-4 border border-fuchsia-500/20 corner-decoration">
+          <div className="glass-panel p-4 sm:p-6 rounded-sm space-y-4 border border-fuchsia-500/20 corner-decoration">
             <input
               ref={fileInputRef}
               type="file"
@@ -1192,14 +1190,14 @@ export default function CreateAgent() {
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="w-full aspect-square rounded-sm bg-background/50 border border-sidebar-border border-dashed flex flex-col items-center justify-center text-muted-foreground cursor-pointer hover:border-cyan-500 hover:text-cyan-400 transition-colors overflow-hidden"
+              className="w-full aspect-square max-w-[200px] lg:max-w-none mx-auto rounded-sm bg-background/50 border border-sidebar-border border-dashed flex flex-col items-center justify-center text-muted-foreground cursor-pointer hover:border-cyan-500 hover:text-cyan-400 transition-colors overflow-hidden touch-manipulation"
             >
               {avatarPreview ? (
                 <img src={avatarPreview} alt="Avatar preview" className="w-full h-full object-cover" />
               ) : (
                 <>
-                  <Upload className="w-8 h-8 mb-2" />
-                  <span className="text-xs font-mono">UPLOAD AVATAR</span>
+                  <Upload className="w-6 h-6 sm:w-8 sm:h-8 mb-2" />
+                  <span className="text-[10px] sm:text-xs font-mono">UPLOAD AVATAR</span>
                 </>
               )}
             </button>
