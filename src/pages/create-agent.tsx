@@ -106,10 +106,10 @@ const formSchema = z.object({
   description: z.string().min(10),
   framework: z.enum(["eliza", "langchain"]),
   model: z.string(),
-  pricePerUse: z.string(),
+  licensePrice: z.string(),
   endpoint: z.string().url().optional().or(z.literal("")),
   isCloneable: z.boolean(),
-  units: z.string().optional(),
+  licenses: z.string().optional(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -236,10 +236,10 @@ export default function CreateAgent() {
       description: "",
       framework: "eliza",
       model: "asi1-mini",
-      pricePerUse: "0.01",
+      licensePrice: "0.01",
       endpoint: "",
       isCloneable: false,
-      units: "",
+      licenses: "",
     },
   });
 
@@ -304,8 +304,8 @@ export default function CreateAgent() {
     dnaHash: `0x${string}`;
     walletAddress: `0x${string}`;
     walletTimestamp: number;
-    units: bigint;
-    price: bigint;
+    licenses: bigint;
+    licensePrice: bigint;
     cloneable: boolean;
     agentCardUri: string;
   } | null>(null);
@@ -315,8 +315,8 @@ export default function CreateAgent() {
   const prepareForMint = async (values: FormValues): Promise<{
     dnaHash: `0x${string}`;
     walletAddress: `0x${string}`;
-    units: bigint;
-    price: bigint;
+    licenses: bigint;
+    licensePrice: bigint;
     cloneable: boolean;
     agentCardUri: string;
   } | null> => {
@@ -345,10 +345,10 @@ export default function CreateAgent() {
       const modelId = selectedHFModel?.id || values.model;
       const skills = selectedPlugins.map(p => p.id);
       const timestamp = Date.now();
-      
+
       // dnaHash = hash(skills, chainId, model) - NO timestamp (contract expects this)
       const dnaHash = computeDnaHash(skills, chainId, modelId);
-      
+
       // Derive wallet from dnaHash + timestamp (timestamp makes each wallet unique)
       const walletAddress = deriveAgentWalletAddress(dnaHash, timestamp);
 
@@ -368,8 +368,8 @@ export default function CreateAgent() {
         chain: chainId,
         model: modelId,
         framework: values.framework, // ElizaOS or LangChain
-        price: usdcToWei(parseFloat(values.pricePerUse)).toString(),
-        units: values.units ? parseInt(values.units) : 0,
+        price: usdcToWei(parseFloat(values.licensePrice)).toString(),
+        units: values.licenses ? parseInt(values.licenses) : 0,
         cloneable: values.isCloneable,
         endpoint: values.endpoint || undefined, // Optional - x402 handles routing
         protocols: [{ name: "x402", version: "1.0" }],
@@ -385,22 +385,22 @@ export default function CreateAgent() {
       const cardCid = await uploadAgentCard(agentCard);
       const agentCardUri = getIpfsUri(cardCid);
 
-      const priceWei = usdcToWei(parseFloat(values.pricePerUse));
-      const units = values.units ? BigInt(values.units) : BigInt(0);
+      const licensePrice = usdcToWei(parseFloat(values.licensePrice));
+      const licenses = values.licenses ? BigInt(values.licenses) : BigInt(0);
 
       const txData = {
         dnaHash,
         walletAddress,
         walletTimestamp: timestamp,
-        units,
-        price: priceWei,
+        licenses,
+        licensePrice,
         cloneable: values.isCloneable,
         agentCardUri,
       };
-      
+
       setPreparedTx(txData);
       setMintStep("minting");
-      
+
       // Return the prepared data so caller can trigger transaction immediately
       return txData;
     } catch (error) {
@@ -512,29 +512,29 @@ export default function CreateAgent() {
   const handleConfirmedMint = async () => {
     if (!pendingValues) return;
     setShowConfirmDialog(false);
-    
+
     // Step 1: Upload to IPFS and prepare transaction data
     const txData = await prepareForMint(pendingValues);
     if (!txData) return; // Upload failed
-    
+
     // Step 2: Immediately trigger on-chain transaction (no second click needed)
     try {
       const contract = getAgentFactoryContract();
       const transaction = prepareContractCall({
         contract,
-        method: "function mintAgent(bytes32 dnaHash, uint256 units, uint256 price, bool cloneable, string agentCardUri) returns (uint256 agentId)",
+        method: "function mintAgent(bytes32 dnaHash, uint256 licenses, uint256 licensePrice, bool cloneable, string agentCardUri) returns (uint256 agentId)",
         params: [
           txData.dnaHash,
-          txData.units,
-          txData.price,
+          txData.licenses,
+          txData.licensePrice,
           txData.cloneable,
           txData.agentCardUri,
         ],
       });
-      
+
       // Send transaction (gasless sponsorship configured on ThirdWeb)
       const result = await sendTransaction(transaction);
-      
+
       // Handle success
       await handleMintSuccess({ transactionHash: result.transactionHash });
     } catch (error) {
@@ -1081,15 +1081,15 @@ export default function CreateAgent() {
                   <div className="grid grid-cols-2 gap-4">
                     <FormField
                       control={form.control}
-                      name="pricePerUse"
+                      name="licensePrice"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel className="font-mono text-foreground">Price Per Request (USDC)</FormLabel>
+                          <FormLabel className="font-mono text-foreground">License Price (USDC)</FormLabel>
                           <FormControl>
                             <Input type="number" step="0.001" {...field} className="bg-background/50 font-mono border-sidebar-border focus:border-fuchsia-500" />
                           </FormControl>
                           <FormDescription className="text-muted-foreground text-xs">
-                            Amount deducted via x402 per call
+                            Cost to license into a Manowar
                           </FormDescription>
                           <FormMessage />
                         </FormItem>
@@ -1097,15 +1097,15 @@ export default function CreateAgent() {
                     />
                     <FormField
                       control={form.control}
-                      name="units"
+                      name="licenses"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel className="font-mono text-foreground">Supply Cap</FormLabel>
+                          <FormLabel className="font-mono text-foreground">License Supply</FormLabel>
                           <FormControl>
                             <Input type="number" placeholder="∞ (leave empty)" {...field} className="bg-background/50 font-mono border-sidebar-border focus:border-fuchsia-500" />
                           </FormControl>
                           <FormDescription className="text-muted-foreground text-xs">
-                            Max units (empty = infinite)
+                            Max licenses (empty = infinite)
                           </FormDescription>
                           <FormMessage />
                         </FormItem>
@@ -1295,12 +1295,12 @@ export default function CreateAgent() {
                 <span className="font-mono text-cyan-400">{selectedHFModel?.name || pendingValues.model}</span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Price per use</span>
-                <span className="font-mono text-green-400">${pendingValues.pricePerUse} USDC</span>
+                <span className="text-muted-foreground">License Price</span>
+                <span className="font-mono text-green-400">${pendingValues.licensePrice} USDC</span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Supply</span>
-                <span className="font-mono">{pendingValues.units || "∞ Unlimited"}</span>
+                <span className="text-muted-foreground">License Supply</span>
+                <span className="font-mono">{pendingValues.licenses || "∞ Unlimited"}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Cloneable</span>

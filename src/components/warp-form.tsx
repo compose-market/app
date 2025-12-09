@@ -88,8 +88,8 @@ export interface WarpAgentData {
 const warpFormSchema = z.object({
   name: z.string().min(2).max(50),
   description: z.string().min(10),
-  pricePerUse: z.string(),
-  units: z.string().optional(),
+  licensePrice: z.string(),
+  licenses: z.string().optional(),
   originalCreator: z.string().optional(),
 });
 
@@ -123,8 +123,8 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
   const [preparedTx, setPreparedTx] = useState<{
     originalAgentHash: `0x${string}`;
     originalCreator: `0x${string}`;
-    units: bigint;
-    price: bigint;
+    licenses: bigint;
+    licensePrice: bigint;
     agentCardUri: string;
   } | null>(null);
 
@@ -141,8 +141,8 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
     defaultValues: {
       name: agent.name,
       description: agent.description || "",
-      pricePerUse: "0.01",
-      units: "",
+      licensePrice: "0.01",
+      licenses: "",
       originalCreator: "",
     },
   });
@@ -205,7 +205,7 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
       // 2. Compute external agent hash
       const originalAgentHash = computeExternalAgentHash(agent.registry, agent.address);
       const timestamp = Date.now();
-      
+
       // 3. Derive wallet from hash + timestamp (timestamp makes wallet unique)
       const walletAddress = deriveAgentWalletAddress(originalAgentHash, timestamp);
 
@@ -223,8 +223,8 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
         walletTimestamp: timestamp, // Backend needs this to derive private key
         chain: chainId,
         model: "warped", // Warped agents use their original model
-        price: usdcToWei(parseFloat(values.pricePerUse)).toString(),
-        units: values.units ? parseInt(values.units) : 0,
+        price: usdcToWei(parseFloat(values.licensePrice)).toString(),
+        units: values.licenses ? parseInt(values.licenses) : 0,
         cloneable: false, // Warped agents are not cloneable by default
         protocols: agent.protocols || [{ name: "x402", version: "1.0" }],
         createdAt: new Date().toISOString(),
@@ -235,15 +235,15 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
       const agentCardUri = getIpfsUri(cardCid);
 
       // 4. Prepare transaction params
-      const priceWei = usdcToWei(parseFloat(values.pricePerUse));
-      const units = values.units ? BigInt(values.units) : BigInt(0);
+      const licensePrice = usdcToWei(parseFloat(values.licensePrice));
+      const licenses = values.licenses ? BigInt(values.licenses) : BigInt(0);
       const originalCreator = (values.originalCreator?.trim() || "0x0000000000000000000000000000000000000000") as `0x${string}`;
 
       setPreparedTx({
         originalAgentHash,
         originalCreator,
-        units,
-        price: priceWei,
+        licenses,
+        licensePrice,
         agentCardUri,
       });
 
@@ -457,11 +457,11 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
                   <div className="grid grid-cols-2 gap-4">
                     <FormField
                       control={form.control}
-                      name="pricePerUse"
+                      name="licensePrice"
                       render={({ field }) => (
                         <FormItem>
                           <FormLabel className="font-mono text-foreground">
-                            Price Per Use (USDC)
+                            License Price (USDC)
                           </FormLabel>
                           <FormControl>
                             <Input
@@ -472,7 +472,7 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
                             />
                           </FormControl>
                           <FormDescription className="text-muted-foreground text-xs">
-                            x402 payment per request
+                            x402 payment per license
                           </FormDescription>
                           <FormMessage />
                         </FormItem>
@@ -480,10 +480,10 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
                     />
                     <FormField
                       control={form.control}
-                      name="units"
+                      name="licenses"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel className="font-mono text-foreground">Supply Cap</FormLabel>
+                          <FormLabel className="font-mono text-foreground">License Supply Cap</FormLabel>
                           <FormControl>
                             <Input
                               type="number"
@@ -493,7 +493,7 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
                             />
                           </FormControl>
                           <FormDescription className="text-muted-foreground text-xs">
-                            Max units (empty = infinite)
+                            Max licenses (empty = infinite)
                           </FormDescription>
                           <FormMessage />
                         </FormItem>
@@ -585,12 +585,12 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
                     return prepareContractCall({
                       contract,
                       method:
-                        "function warpAgent(bytes32 originalAgentHash, address originalCreator, uint256 units, uint256 price, string agentCardUri) returns (uint256 warpedAgentId)",
+                        "function warpAgent(bytes32 originalAgentHash, address originalCreator, uint256 licenses, uint256 licensePrice, string agentCardUri) returns (uint256 warpedAgentId)",
                       params: [
                         preparedTx.originalAgentHash,
                         preparedTx.originalCreator,
-                        preparedTx.units,
-                        preparedTx.price,
+                        preparedTx.licenses,
+                        preparedTx.licensePrice,
                         preparedTx.agentCardUri,
                       ],
                     });
@@ -672,11 +672,10 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
 
           {/* Account Status */}
           <div
-            className={`p-4 rounded-sm border text-sm ${
-              account
-                ? "bg-green-500/10 border-green-500/20 text-green-200"
-                : "bg-yellow-500/10 border-yellow-500/20 text-yellow-200"
-            }`}
+            className={`p-4 rounded-sm border text-sm ${account
+              ? "bg-green-500/10 border-green-500/20 text-green-200"
+              : "bg-yellow-500/10 border-yellow-500/20 text-yellow-200"
+              }`}
           >
             {account ? (
               <>
@@ -737,12 +736,12 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
                 <span className="font-mono text-cyan-400">{pendingValues.name}</span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Price per use</span>
-                <span className="font-mono text-green-400">${pendingValues.pricePerUse} USDC</span>
+                <span className="text-muted-foreground">License Price</span>
+                <span className="font-mono text-green-400">${pendingValues.licensePrice} USDC</span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Supply</span>
-                <span className="font-mono">{pendingValues.units || "∞ Unlimited"}</span>
+                <span className="text-muted-foreground">License Supply</span>
+                <span className="font-mono">{pendingValues.licenses || "∞ Unlimited"}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Your Royalty</span>
