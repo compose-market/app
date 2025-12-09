@@ -34,10 +34,10 @@ import { Badge } from "@/components/ui/badge";
 import { useActiveAccount, useActiveWallet, TransactionButton, useSendTransaction } from "thirdweb/react";
 import { wrapFetchWithPayment } from "thirdweb/x402";
 import { prepareContractCall } from "thirdweb";
-import { getManowarContract, usdcToWei, computeExternalAgentHash, getWarpContract } from "@/lib/contracts";
+import { getManowarContract, usdcToWei, computeExternalAgentHash, getWarpContract, getContractAddress, getAgentFactoryContract, formatUsdcPrice, weiToUsdc } from "@/lib/contracts";
 import { readContract } from "thirdweb";
-import { uploadManowarBanner, uploadManowarMetadata, getIpfsUri, fileToDataUrl, isPinataConfigured, type ManowarMetadata } from "@/lib/pinata";
-import { CHAIN_IDS, CHAIN_CONFIG, thirdwebClient, INFERENCE_PRICE_WEI } from "@/lib/thirdweb";
+import { uploadManowarBanner, uploadManowarMetadata, getIpfsUri, getIpfsUrl, fileToDataUrl, isPinataConfigured, type ManowarMetadata } from "@/lib/pinata";
+import { CHAIN_IDS, CHAIN_CONFIG, thirdwebClient, INFERENCE_PRICE_WEI, getPaymentTokenContract } from "@/lib/thirdweb";
 import { createNormalizedFetch } from "@/lib/payment";
 import { AVAILABLE_MODELS } from "@/lib/models";
 import { useSession } from "@/hooks/use-session";
@@ -80,7 +80,7 @@ import {
 } from "@/hooks/use-services";
 import { useAgents } from "@/hooks/use-agents";
 import { useOnchainAgents } from "@/hooks/use-onchain";
-import { getIpfsUrl } from "@/lib/pinata";
+import { usdcToWei as usdcToWeiBigInt } from "@/lib/contracts";
 import {
   useRegistryServers,
   useRegistrySearch,
@@ -845,6 +845,7 @@ function AgentsPicker({
       }
       return {
         id: `manowar-${a.id}`,
+        onchainAgentId: a.id, // Preserve numeric ID for price lookup
         address: a.creator,
         name: a.metadata?.name || `Agent #${a.id}`,
         description: a.metadata?.description || "",
@@ -861,6 +862,7 @@ function AgentsPicker({
         category: "ai-agent",
         tags: a.metadata?.skills || [],
         owner: a.creator,
+        pricePerRequest: a.licensePrice, // Store the license price from onchain data
         createdAt: a.metadata?.createdAt || new Date().toISOString(),
         updatedAt: a.metadata?.createdAt || new Date().toISOString(),
       };
@@ -1025,6 +1027,7 @@ interface MintManowarDialogProps {
   workflowName: string;
   workflowDescription: string;
   agentIds: number[];
+  agentPrices?: Map<number, bigint>; // Agent ID -> price in USDC wei (6 decimals)
 }
 
 function MintManowarDialog({
@@ -1032,7 +1035,8 @@ function MintManowarDialog({
   onOpenChange,
   workflowName,
   workflowDescription,
-  agentIds
+  agentIds,
+  agentPrices = new Map()
 }: MintManowarDialogProps) {
   const { toast } = useToast();
   const wallet = useActiveWallet();
@@ -1049,8 +1053,21 @@ function MintManowarDialog({
   const [coordinatorModel, setCoordinatorModel] = useState("");
   const [bannerFile, setBannerFile] = useState<File | null>(null);
   const [bannerPreview, setBannerPreview] = useState<string | null>(null);
-  const [mintStep, setMintStep] = useState<"idle" | "minting">("idle");
+  const [isMinting, setIsMinting] = useState(false);
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const bannerInputRef = useRef<HTMLInputElement>(null);
+
+  // Calculate total agent price
+  const totalAgentPrice = useMemo(() => {
+    let total = BigInt(0);
+    for (const agentId of agentIds) {
+      const price = agentPrices.get(agentId) || BigInt(0);
+      total += price;
+    }
+    return total;
+  }, [agentIds, agentPrices]);
+
+  const totalAgentPriceFormatted = weiToUsdc(totalAgentPrice);
 
   useEffect(() => {
     setTitle(workflowName);
@@ -1073,8 +1090,8 @@ function MintManowarDialog({
     setBannerPreview(dataUrl);
   };
 
-  // Single-click mint: upload to IPFS and send transaction in one action
-  const handleMint = async () => {
+  // Validate and show price confirmation popup
+  const handleMintClick = () => {
     if (!title.trim()) {
       toast({ title: "Title required", variant: "destructive" });
       return;
@@ -1087,9 +1104,15 @@ function MintManowarDialog({
       toast({ title: "IPFS not configured", variant: "destructive" });
       return;
     }
+    setShowConfirmDialog(true);
+  };
+
+  // Execute batched approval + mint transaction
+  const handleConfirmMint = async () => {
+    setShowConfirmDialog(false);
 
     try {
-      setMintStep("minting");
+      setIsMinting(true);
 
       // 1. Upload banner if provided
       let bannerImageUri = "";
@@ -1103,12 +1126,13 @@ function MintManowarDialog({
         schemaVersion: "1.0.0",
         title,
         description,
-        banner: bannerImageUri, // Banner image URI
+        banner: bannerImageUri,
+        image: bannerImageUri ? getIpfsUrl(bannerImageUri.replace("ipfs://", "")) : undefined,
         agents: agentIds.map((id, idx) => ({ agentId: id, name: `Agent ${idx + 1}` })),
         coordinator: coordinatorModel ? { agentId: 0, model: coordinatorModel } : undefined,
         pricing: {
           x402Price: usdcToWei(parseFloat(x402Price)).toString(),
-          totalAgentPrice: "0", // Calculate on-chain
+          totalAgentPrice: totalAgentPrice.toString(),
         },
         lease: leaseEnabled ? {
           enabled: true,
@@ -1122,16 +1146,20 @@ function MintManowarDialog({
       const metadataCid = await uploadManowarMetadata(metadata);
       const metadataUri = getIpfsUri(metadataCid);
 
-      // 3. Prepare contract call - use metadataUri as banner field for tokenURI
-      const contract = getManowarContract();
-      const transaction = prepareContractCall({
-        contract,
+      // 3. Prepare USDC approval transaction (if agents have price)
+      const manowarContract = getManowarContract();
+      const usdcContract = getPaymentTokenContract();
+      const manowarAddress = getContractAddress("Manowar");
+
+      // 4. Prepare mint transaction
+      const mintTransaction = prepareContractCall({
+        contract: manowarContract,
         method: "function mintManowar((string title, string description, string banner, uint256 x402Price, uint256 units, bool leaseEnabled, uint256 leaseDuration, uint8 leasePercent, uint256 coordinatorAgentId, string coordinatorModel) params, uint256[] agentIds) returns (uint256 manowarId)",
         params: [
           {
             title,
             description,
-            banner: metadataUri, // Store metadata URI for tokenURI
+            banner: metadataUri,
             x402Price: usdcToWei(parseFloat(x402Price)),
             units: units ? BigInt(parseInt(units)) : BigInt(1),
             leaseEnabled,
@@ -1144,15 +1172,30 @@ function MintManowarDialog({
         ],
       });
 
-      // 4. Send transaction (gasless via ThirdWeb)
-      const result = await sendTransaction(transaction);
+      // 5. If there's a cost, we need approval first
+      if (totalAgentPrice > BigInt(0)) {
+        const approvalTx = prepareContractCall({
+          contract: usdcContract,
+          method: "function approve(address spender, uint256 amount) returns (bool)",
+          params: [manowarAddress, totalAgentPrice],
+        });
+        await sendTransaction(approvalTx);
+      }
 
-      // 5. Handle success
+      // 6. Send mint transaction
+      const result = await sendTransaction(mintTransaction);
+
+      // 7. Handle success
       toast({
         title: "Manowar Minted!",
         description: (
           <div className="space-y-1">
             <p>{title} deployed to Avalanche Fuji.</p>
+            {totalAgentPrice > BigInt(0) && (
+              <p className="text-xs text-muted-foreground">
+                ${totalAgentPriceFormatted} USDC paid to agent creators
+              </p>
+            )}
             <a
               href={`${CHAIN_CONFIG[CHAIN_IDS.avalancheFuji].explorer}/tx/${result.transactionHash}`}
               target="_blank"
@@ -1165,219 +1208,273 @@ function MintManowarDialog({
         ),
       });
       onOpenChange(false);
-      setMintStep("idle");
     } catch (error) {
       console.error("Mint error:", error);
-      setMintStep("idle");
       toast({
         title: "Minting Failed",
         description: error instanceof Error ? error.message : "Unknown error",
         variant: "destructive",
       });
+    } finally {
+      setIsMinting(false);
     }
   };
 
-  const isMinting = mintStep === "minting";
-
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl bg-card border-fuchsia-500/30">
-        <DialogHeader>
-          <DialogTitle className="font-display text-xl flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-fuchsia-400" />
-            Mint as Manowar
-          </DialogTitle>
-          <DialogDescription>
-            Deploy this workflow as an ERC-7401 nestable NFT on Avalanche Fuji
-          </DialogDescription>
-        </DialogHeader>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-2xl bg-card border-fuchsia-500/30">
+          <DialogHeader>
+            <DialogTitle className="font-display text-xl flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-fuchsia-400" />
+              Mint as Manowar
+            </DialogTitle>
+            <DialogDescription>
+              Deploy this workflow as an ERC-7401 nestable NFT on Avalanche Fuji
+            </DialogDescription>
+          </DialogHeader>
 
-        <div className="grid grid-cols-2 gap-4 py-4">
-          {/* Left Column */}
-          <div className="space-y-4">
-            {/* Banner Upload */}
-            <div>
-              <Label className="text-xs font-mono text-muted-foreground mb-2 block">BANNER IMAGE</Label>
-              <input
-                ref={bannerInputRef}
-                type="file"
-                accept="image/*"
-                onChange={handleBannerSelect}
-                className="hidden"
-              />
-              <button
-                type="button"
-                onClick={() => bannerInputRef.current?.click()}
-                className="w-full h-20 rounded-sm bg-background/50 border border-sidebar-border border-dashed flex items-center justify-center text-muted-foreground hover:border-fuchsia-500 hover:text-fuchsia-400 transition-colors overflow-hidden"
-              >
-                {bannerPreview ? (
-                  <img src={bannerPreview} alt="Banner" className="w-full h-full object-cover" />
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <Upload className="w-4 h-4" />
-                    <span className="text-xs font-mono">Upload banner</span>
-                  </div>
-                )}
-              </button>
-            </div>
+          <div className="grid grid-cols-2 gap-4 py-4">
+            {/* Left Column */}
+            <div className="space-y-4">
+              {/* Banner Upload */}
+              <div>
+                <Label className="text-xs font-mono text-muted-foreground mb-2 block">BANNER IMAGE</Label>
+                <input
+                  ref={bannerInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleBannerSelect}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => bannerInputRef.current?.click()}
+                  className="w-full h-20 rounded-sm bg-background/50 border border-sidebar-border border-dashed flex items-center justify-center text-muted-foreground hover:border-fuchsia-500 hover:text-fuchsia-400 transition-colors overflow-hidden"
+                >
+                  {bannerPreview ? (
+                    <img src={bannerPreview} alt="Banner" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <Upload className="w-4 h-4" />
+                      <span className="text-xs font-mono">Upload banner</span>
+                    </div>
+                  )}
+                </button>
+              </div>
 
-            {/* Title */}
-            <div className="space-y-1">
-              <Label className="text-xs font-mono text-muted-foreground">TITLE</Label>
-              <Input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="My Workflow"
-                className="bg-background/50 font-mono border-sidebar-border h-9"
-              />
-            </div>
-
-            {/* Description */}
-            <div className="space-y-1">
-              <Label className="text-xs font-mono text-muted-foreground">DESCRIPTION</Label>
-              <Textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="What does this workflow do?"
-                className="bg-background/50 font-mono border-sidebar-border resize-none h-16"
-                rows={2}
-              />
-            </div>
-          </div>
-
-          {/* Right Column */}
-          <div className="space-y-4">
-
-            {/* Pricing */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label className="text-xs font-mono text-muted-foreground flex items-center gap-1">
-                  <DollarSign className="w-3 h-3" /> X402 PRICE (USDC)
-                </Label>
+              {/* Title */}
+              <div className="space-y-1">
+                <Label className="text-xs font-mono text-muted-foreground">TITLE</Label>
                 <Input
-                  type="number"
-                  step="0.001"
-                  value={x402Price}
-                  onChange={(e) => setX402Price(e.target.value)}
-                  className="bg-background/50 font-mono border-sidebar-border"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="My Workflow"
+                  className="bg-background/50 font-mono border-sidebar-border h-9"
                 />
               </div>
-              <div className="space-y-2">
-                <Label className="text-xs font-mono text-muted-foreground">SUPPLY CAP</Label>
-                <Input
-                  type="number"
-                  min="1"
-                  value={units}
-                  onChange={(e) => setUnits(e.target.value)}
-                  placeholder="1 (default)"
-                  className="bg-background/50 font-mono border-sidebar-border"
+
+              {/* Description */}
+              <div className="space-y-1">
+                <Label className="text-xs font-mono text-muted-foreground">DESCRIPTION</Label>
+                <Textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="What does this workflow do?"
+                  className="bg-background/50 font-mono border-sidebar-border resize-none h-16"
+                  rows={2}
                 />
               </div>
             </div>
 
-            {/* Coordinator */}
-            <div className="space-y-2">
-              <Label className="text-xs font-mono text-muted-foreground">COORDINATOR MODEL (optional)</Label>
-              <Select value={coordinatorModel || "none"} onValueChange={(v) => setCoordinatorModel(v === "none" ? "" : v)}>
-                <SelectTrigger className="bg-background/50 border-sidebar-border">
-                  <SelectValue placeholder="No coordinator" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No coordinator</SelectItem>
-                  {AVAILABLE_MODELS.filter((m, i, arr) => arr.findIndex(x => x.id === m.id) === i).map((model) => (
-                    <SelectItem key={model.id} value={model.id}>
-                      {model.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-[10px] text-muted-foreground">
-                Supervisor agent to coordinate workflow steps
-              </p>
-            </div>
+            {/* Right Column */}
+            <div className="space-y-4">
 
-            {/* Lease Toggle */}
-            <div className="flex items-center justify-between p-3 rounded-sm border border-sidebar-border bg-background/30">
-              <div className="space-y-0.5">
-                <Label className="text-sm font-mono flex items-center gap-1">
-                  <Clock className="w-3 h-3" /> Enable Leasing
-                </Label>
+              {/* Pricing */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="text-xs font-mono text-muted-foreground flex items-center gap-1">
+                    <DollarSign className="w-3 h-3" /> X402 PRICE (USDC)
+                  </Label>
+                  <Input
+                    type="number"
+                    step="0.001"
+                    value={x402Price}
+                    onChange={(e) => setX402Price(e.target.value)}
+                    className="bg-background/50 font-mono border-sidebar-border"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs font-mono text-muted-foreground">SUPPLY CAP</Label>
+                  <Input
+                    type="number"
+                    min="1"
+                    value={units}
+                    onChange={(e) => setUnits(e.target.value)}
+                    placeholder="1 (default)"
+                    className="bg-background/50 font-mono border-sidebar-border"
+                  />
+                </div>
+              </div>
+
+              {/* Coordinator */}
+              <div className="space-y-2">
+                <Label className="text-xs font-mono text-muted-foreground">COORDINATOR MODEL (optional)</Label>
+                <Select value={coordinatorModel || "none"} onValueChange={(v) => setCoordinatorModel(v === "none" ? "" : v)}>
+                  <SelectTrigger className="bg-background/50 border-sidebar-border">
+                    <SelectValue placeholder="No coordinator" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No coordinator</SelectItem>
+                    {AVAILABLE_MODELS.filter((m, i, arr) => arr.findIndex(x => x.id === m.id) === i).map((model) => (
+                      <SelectItem key={model.id} value={model.id}>
+                        {model.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <p className="text-[10px] text-muted-foreground">
-                  Allow others to lease this workflow
+                  Supervisor agent to coordinate workflow steps
                 </p>
               </div>
-              <Switch checked={leaseEnabled} onCheckedChange={setLeaseEnabled} />
-            </div>
 
-            {leaseEnabled && (
-              <div className="grid grid-cols-2 gap-4 pl-4 border-l-2 border-fuchsia-500/30">
-                <div className="space-y-2">
-                  <Label className="text-xs font-mono text-muted-foreground">DURATION (days)</Label>
-                  <Input
-                    type="number"
-                    value={leaseDuration}
-                    onChange={(e) => setLeaseDuration(e.target.value)}
-                    className="bg-background/50 font-mono border-sidebar-border"
-                  />
+              {/* Lease Toggle */}
+              <div className="flex items-center justify-between p-3 rounded-sm border border-sidebar-border bg-background/30">
+                <div className="space-y-0.5">
+                  <Label className="text-sm font-mono flex items-center gap-1">
+                    <Clock className="w-3 h-3" /> Enable Leasing
+                  </Label>
+                  <p className="text-[10px] text-muted-foreground">
+                    Allow others to lease this workflow
+                  </p>
                 </div>
-                <div className="space-y-2">
-                  <Label className="text-xs font-mono text-muted-foreground">YOUR % (max 20)</Label>
-                  <Input
-                    type="number"
-                    max={20}
-                    value={leasePercent}
-                    onChange={(e) => setLeasePercent(e.target.value)}
-                    className="bg-background/50 font-mono border-sidebar-border"
-                  />
+                <Switch checked={leaseEnabled} onCheckedChange={setLeaseEnabled} />
+              </div>
+
+              {leaseEnabled && (
+                <div className="grid grid-cols-2 gap-4 pl-4 border-l-2 border-fuchsia-500/30">
+                  <div className="space-y-2">
+                    <Label className="text-xs font-mono text-muted-foreground">DURATION (days)</Label>
+                    <Input
+                      type="number"
+                      value={leaseDuration}
+                      onChange={(e) => setLeaseDuration(e.target.value)}
+                      className="bg-background/50 font-mono border-sidebar-border"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs font-mono text-muted-foreground">YOUR % (max 20)</Label>
+                    <Input
+                      type="number"
+                      max={20}
+                      value={leasePercent}
+                      onChange={(e) => setLeasePercent(e.target.value)}
+                      className="bg-background/50 font-mono border-sidebar-border"
+                    />
+                  </div>
                 </div>
+              )}
+            </div>
+          </div>
+
+          {/* Account status - full width */}
+          <div className="py-2">
+            {!wallet && (
+              <div className="flex items-center gap-2 p-2 rounded-sm bg-yellow-500/10 border border-yellow-500/30 text-yellow-200 text-xs">
+                <AlertCircle className="w-3 h-3" />
+                Connect wallet to mint (gas sponsored)
+              </div>
+            )}
+            {wallet && account && (
+              <div className="flex items-center gap-2 p-2 rounded-sm bg-green-500/10 border border-green-500/30 text-green-200 text-xs">
+                <CheckCircle2 className="w-3 h-3" />
+                <span className="font-mono">{account.address.slice(0, 6)}...{account.address.slice(-4)}</span>
+                <span className="text-green-300/70">• Gas sponsored</span>
               </div>
             )}
           </div>
-        </div>
 
-        {/* Account status - full width */}
-        <div className="py-2">
-          {!wallet && (
-            <div className="flex items-center gap-2 p-2 rounded-sm bg-yellow-500/10 border border-yellow-500/30 text-yellow-200 text-xs">
-              <AlertCircle className="w-3 h-3" />
-              Connect wallet to mint (gas sponsored)
+          {/* Agent Cost Preview */}
+          {agentIds.length > 0 && (
+            <div className="p-3 rounded-sm border border-sidebar-border bg-background/30">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">
+                  {agentIds.length} agent{agentIds.length > 1 ? "s" : ""} • Total cost:
+                </span>
+                <span className="font-mono text-cyan-400 font-semibold">
+                  ${totalAgentPriceFormatted} USDC
+                </span>
+              </div>
             </div>
           )}
-          {wallet && account && (
-            <div className="flex items-center gap-2 p-2 rounded-sm bg-green-500/10 border border-green-500/30 text-green-200 text-xs">
-              <CheckCircle2 className="w-3 h-3" />
-              <span className="font-mono">{account.address.slice(0, 6)}...{account.address.slice(-4)}</span>
-              <span className="text-green-300/70">• Gas sponsored</span>
-            </div>
-          )}
-        </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isMinting}>
-            Cancel
-          </Button>
-          <Button
-            onClick={handleMint}
-            disabled={!wallet || isMinting}
-            className="bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white font-bold"
-          >
-            {isMinting ? (
-              <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Minting...
-              </>
-            ) : (
-              <>
-                <Sparkles className="w-4 h-4 mr-2" />
-                Mint as NFT
-              </>
-            )}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isMinting}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleMintClick}
+              disabled={!wallet || isMinting}
+              className="bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white font-bold"
+            >
+              {isMinting ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Minting...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4 mr-2" />
+                  Mint Manowar
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Simple Price Confirmation Popup */}
+      <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
+        <AlertDialogContent className="bg-card border-cyan-500/30">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-display flex items-center gap-2">
+              <DollarSign className="w-5 h-5 text-cyan-400" />
+              Confirm Minting Cost
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 pt-2">
+                <div className="flex justify-between items-center py-2 border-b border-sidebar-border">
+                  <span>Agents included:</span>
+                  <span className="font-mono">{agentIds.length}</span>
+                </div>
+                <div className="flex justify-between items-center text-lg font-semibold">
+                  <span>Total Cost:</span>
+                  <span className="text-cyan-400 font-mono">${totalAgentPriceFormatted} USDC</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {Number(totalAgentPriceFormatted) > 0
+                    ? "This amount will be distributed to agent creators. Gas is sponsored."
+                    : "No USDC cost for this manowar. Gas is sponsored."}
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmMint}
+              className="bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white font-bold"
+            >
+              <Sparkles className="w-4 h-4 mr-2" />
+              Confirm & Mint
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
+
 
 // =============================================================================
 // Fullscreen Canvas Overlay
@@ -1475,6 +1572,58 @@ function ComposeFlow() {
   // x402 Payment state
   const wallet = useActiveWallet();
   const { sessionActive, budgetRemaining } = useSession();
+
+  // Fetch onchain agents for prices
+  const { data: onchainAgents } = useOnchainAgents();
+
+  // Extract agent IDs and prices from workflow nodes
+  const { workflowAgentIds, agentPrices } = useMemo(() => {
+    const ids: number[] = [];
+    const prices = new Map<number, bigint>();
+
+    nodes.forEach((node) => {
+      if (node.type === "agentNode") {
+        const nodeData = node.data as AgentNodeData & { step: WorkflowStep };
+        const agent = nodeData.agent;
+
+        // For manowar native agents, use the preserved onchainAgentId
+        // For warped external agents, use warpedAgentId
+        let agentId: number | null = null;
+
+        if (agent.registry === "manowar") {
+          // Manowar native agent - use the preserved numeric ID
+          agentId = agent.onchainAgentId || null;
+
+          // Fallback: parse from prefixed id ("manowar-123")
+          if (!agentId && agent.id.startsWith("manowar-")) {
+            agentId = parseInt(agent.id.replace("manowar-", "")) || null;
+          }
+        } else if (agent.warpedAgentId) {
+          // External agent that has been warped - use warped ID
+          agentId = agent.warpedAgentId;
+        }
+
+        if (agentId && agentId > 0) {
+          ids.push(agentId);
+
+          // Get price from agent.pricePerRequest (stored during manowar agent creation)
+          // or look up from onchain data as fallback
+          if (agent.pricePerRequest) {
+            const priceWei = BigInt(Math.floor(parseFloat(agent.pricePerRequest) * 1_000_000));
+            prices.set(agentId, priceWei);
+          } else {
+            const onchainAgent = onchainAgents?.find((a) => a.id === agentId);
+            if (onchainAgent) {
+              const priceWei = BigInt(Math.floor(parseFloat(onchainAgent.price) * 1_000_000));
+              prices.set(agentId, priceWei);
+            }
+          }
+        }
+      }
+    });
+
+    return { workflowAgentIds: ids, agentPrices: prices };
+  }, [nodes, onchainAgents]);
 
 
   // Execution state
@@ -2076,7 +2225,8 @@ function ComposeFlow() {
         onOpenChange={setShowMintDialog}
         workflowName={workflowName}
         workflowDescription={workflowDescription}
-        agentIds={[]} // TODO: Extract agent IDs from workflow steps
+        agentIds={workflowAgentIds}
+        agentPrices={agentPrices}
       />
 
       {/* Warp Required Dialog */}
