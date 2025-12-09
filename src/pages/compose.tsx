@@ -1614,7 +1614,7 @@ function ComposeFlow() {
           } else {
             const onchainAgent = onchainAgents?.find((a) => a.id === agentId);
             if (onchainAgent) {
-              const priceWei = BigInt(Math.floor(parseFloat(onchainAgent.price) * 1_000_000));
+              const priceWei = BigInt(Math.floor(parseFloat(onchainAgent.licensePrice) * 1_000_000));
               prices.set(agentId, priceWei);
             }
           }

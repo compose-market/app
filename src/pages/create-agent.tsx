@@ -368,8 +368,8 @@ export default function CreateAgent() {
         chain: chainId,
         model: modelId,
         framework: values.framework, // ElizaOS or LangChain
-        price: usdcToWei(parseFloat(values.licensePrice)).toString(),
-        units: values.licenses ? parseInt(values.licenses) : 0,
+        licensePrice: usdcToWei(parseFloat(values.licensePrice)).toString(),
+        licenses: values.licenses ? parseInt(values.licenses) : 0,
         cloneable: values.isCloneable,
         endpoint: values.endpoint || undefined, // Optional - x402 handles routing
         protocols: [{ name: "x402", version: "1.0" }],

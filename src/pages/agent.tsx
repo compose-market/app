@@ -121,17 +121,17 @@ export default function AgentDetailPage() {
   // Auto-register agent with backend if not registered
   const autoRegisterAgent = useCallback(async (): Promise<boolean> => {
     if (!agent || !agentWallet) return false;
-    
+
     try {
       const metadata = agent.metadata;
-      
+
       // walletTimestamp is optional - agent works for chat without it
       // Only needed if agent needs to sign transactions
       const walletTimestamp = metadata?.walletTimestamp;
       if (!walletTimestamp) {
         console.log(`[agent] No walletTimestamp in metadata - agent will work without signing capability`);
       }
-      
+
       const response = await fetch(`${MCP_URL}/agent/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -147,13 +147,13 @@ export default function AgentDetailPage() {
           plugins: metadata?.plugins?.map(p => p.registryId) || [],
         }),
       });
-      
+
       if (response.ok || response.status === 409) {
         // 409 = already registered, which is fine
         console.log(`[agent] Auto-registered agent ${agentWallet}`);
         return true;
       }
-      
+
       console.warn(`[agent] Auto-registration failed:`, await response.text());
       return false;
     } catch (err) {
@@ -202,12 +202,29 @@ export default function AgentDetailPage() {
 
       // ALL agents use MCP for chat - MCP handles both plugin and non-plugin agents
       const makeChatRequest = async (): Promise<Response> => {
+        // Persistent thread ID scoped to user and agent
+        const userAddress = wallet.getAccount()?.address;
+        const threadKey = `thread-${userAddress}-${agentWallet}`;
+        let threadId = sessionStorage.getItem(threadKey);
+        if (!threadId) {
+          threadId = `thread-${userAddress}-${agentWallet}-${crypto.randomUUID()}`;
+          sessionStorage.setItem(threadKey, threadId);
+        }
+
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+        };
+
+        if (userAddress) {
+          headers["x-session-user-address"] = userAddress;
+        }
+
         return fetchWithPayment(`${MCP_URL}/agent/${agentWallet}/chat`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({
             message: userMessage.content,
-            threadId: `chat-${agentWallet}-${Date.now()}`,
+            threadId: threadId,
           }),
         });
       };
@@ -371,7 +388,7 @@ export default function AgentDetailPage() {
     .slice(0, 2)
     .toUpperCase();
 
-  const unitsDisplay = agent.units === 0 ? "∞" : `${agent.unitsAvailable}/${agent.units}`;
+  const licensesDisplay = agent.licenses === 0 ? "∞" : `${agent.licensesAvailable}/${agent.licenses}`;
 
   return (
     <div className="max-w-4xl mx-auto pb-20">
@@ -400,7 +417,7 @@ export default function AgentDetailPage() {
         {/* Avatar - overlapping */}
         <div className="-mt-16 flex justify-center relative z-10">
           <Avatar className="w-32 h-32 border-4 border-background shadow-xl">
-            <AvatarImage src={avatarUrl || undefined} alt={agent.metadata?.name || `Agent ${agent.id}`} />
+            <AvatarImage src={avatarUrl || undefined} alt={agent.metadata?.name || `Agent #${agent.id}`} />
             <AvatarFallback className="bg-cyan-500/20 text-cyan-400 font-mono text-2xl">
               {initials}
             </AvatarFallback>
@@ -435,12 +452,12 @@ export default function AgentDetailPage() {
             <div className="p-4 bg-background/50 border border-sidebar-border rounded-lg text-center">
               <DollarSign className="w-5 h-5 text-green-400 mx-auto mb-2" />
               <p className="text-[10px] text-muted-foreground uppercase">Price</p>
-              <p className="font-mono text-lg text-green-400">{agent.priceFormatted}</p>
+              <p className="font-mono text-lg text-green-400">{agent.licensePriceFormatted}</p>
             </div>
             <div className="p-4 bg-background/50 border border-sidebar-border rounded-lg text-center">
               <Package className="w-5 h-5 text-cyan-400 mx-auto mb-2" />
-              <p className="text-[10px] text-muted-foreground uppercase">Supply</p>
-              <p className="font-mono text-lg text-cyan-400">{unitsDisplay}</p>
+              <p className="text-[10px] text-muted-foreground uppercase">Licenses</p>
+              <p className="font-mono text-lg text-cyan-400">{licensesDisplay}</p>
             </div>
             <div className="p-4 bg-background/50 border border-sidebar-border rounded-lg text-center">
               <Zap className="w-5 h-5 text-yellow-400 mx-auto mb-2" />
