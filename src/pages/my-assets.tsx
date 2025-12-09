@@ -6,9 +6,9 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { 
-  Bot, 
-  Layers, 
+import {
+  Bot,
+  Layers,
   Sparkles,
   ExternalLink,
   Zap,
@@ -130,15 +130,15 @@ export default function MyAssetsPage() {
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4 sm:space-y-6">
         <TabsList className="bg-sidebar-accent border border-sidebar-border p-1 w-full sm:w-auto">
-          <TabsTrigger 
-            value="agents" 
+          <TabsTrigger
+            value="agents"
             className="flex-1 sm:flex-none font-mono data-[state=active]:bg-cyan-500 data-[state=active]:text-black text-xs sm:text-sm px-3 sm:px-4"
           >
             <Bot className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
             AGENTS ({agentCount})
           </TabsTrigger>
-          <TabsTrigger 
-            value="workflows" 
+          <TabsTrigger
+            value="workflows"
             className="flex-1 sm:flex-none font-mono data-[state=active]:bg-fuchsia-500 data-[state=active]:text-black text-xs sm:text-sm px-3 sm:px-4"
           >
             <Layers className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
@@ -245,7 +245,7 @@ function AgentAssetCard({ agent }: { agent: OnchainAgent }) {
   const metadata = agent.metadata;
   const name = metadata?.name || `Agent #${agent.id}`;
   const description = metadata?.description || "No description available";
-  
+
   let avatarUrl: string | null = null;
   if (metadata?.avatar && metadata.avatar !== "none") {
     // Handle both gateway URLs (https://) and IPFS URIs (ipfs://)
@@ -258,14 +258,14 @@ function AgentAssetCard({ agent }: { agent: OnchainAgent }) {
 
   const initials = name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
   const explorerUrl = `${CHAIN_CONFIG[CHAIN_IDS.avalancheFuji].explorer}/token/${getContractAddress("AgentFactory")}?a=${agent.id}`;
-  
+
   // Agent page URL using wallet address (primary) or ID (fallback)
-  const agentPageUrl = agent.walletAddress 
+  const agentPageUrl = agent.walletAddress
     ? `/agent/${agent.walletAddress}`
     : `/agent/${agent.id}`;
 
   return (
-    <Card 
+    <Card
       className="bg-background border-sidebar-border hover:border-cyan-500/50 transition-colors cursor-pointer group"
       onClick={() => window.location.href = agentPageUrl}
     >
@@ -329,18 +329,18 @@ function AgentAssetCard({ agent }: { agent: OnchainAgent }) {
         <div className="grid grid-cols-3 gap-1.5 sm:gap-3 text-[10px] sm:text-xs font-mono">
           <div className="text-center p-1.5 sm:p-2 rounded-sm bg-sidebar-accent">
             <DollarSign className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-green-400" />
-            <p className="text-foreground font-bold truncate">{agent.priceFormatted}</p>
-            <p className="text-muted-foreground text-[8px] sm:text-[10px]">per use</p>
+            <p className="text-foreground font-bold truncate">{agent.licensePriceFormatted}</p>
+            <p className="text-muted-foreground text-[8px] sm:text-[10px]">license cost</p>
           </div>
           <div className="text-center p-1.5 sm:p-2 rounded-sm bg-sidebar-accent">
             <Users className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-cyan-400" />
-            <p className="text-foreground font-bold">{agent.unitsMinted}</p>
+            <p className="text-foreground font-bold">{agent.licensesMinted}</p>
             <p className="text-muted-foreground text-[8px] sm:text-[10px]">minted</p>
           </div>
           <div className="text-center p-1.5 sm:p-2 rounded-sm bg-sidebar-accent">
             <Zap className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-fuchsia-400" />
             <p className="text-foreground font-bold">
-              {agent.units === 0 ? "∞" : agent.unitsAvailable}
+              {agent.licenses === 0 ? "∞" : agent.licensesAvailable}
             </p>
             <p className="text-muted-foreground text-[8px] sm:text-[10px]">available</p>
           </div>

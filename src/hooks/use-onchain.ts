@@ -401,3 +401,17 @@ export function useManowarsWithRFA() {
 
 
 
+/**
+ * Fetch a single manowar by ID
+ */
+export function useOnchainManowar(manowarId: number | null) {
+  return useQuery({
+    queryKey: ["onchain-manowar", manowarId],
+    queryFn: async () => {
+      if (!manowarId) return null;
+      return fetchManowarData(manowarId);
+    },
+    enabled: !!manowarId,
+    staleTime: 30 * 1000,
+  });
+}

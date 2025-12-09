@@ -9,11 +9,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { 
-  ArrowLeft, 
-  Search, 
-  Bot, 
-  Layers, 
+import {
+  ArrowLeft,
+  Search,
+  Bot,
+  Layers,
   Sparkles,
   Check,
   CheckCircle2,
@@ -31,14 +31,14 @@ import { useAgents } from "@/hooks/use-agents";
 import { useOnchainAgents, type OnchainAgent } from "@/hooks/use-onchain";
 import { useIsExternalWarped } from "@/hooks/use-warp";
 import { getIpfsUrl } from "@/lib/pinata";
-import { 
+import {
   type Agent,
   type AgentRegistryId,
   AGENT_REGISTRIES,
   getEnabledRegistries,
-  formatInteractions, 
+  formatInteractions,
   getReadmeExcerpt,
-  COMMON_TAGS 
+  COMMON_TAGS
 } from "@/lib/agents";
 
 export default function AgentsPage() {
@@ -67,11 +67,11 @@ export default function AgentsPage() {
 
   // Fetch on-chain Manowar agents
   const { data: onchainAgents, isLoading: isLoadingOnchain } = useOnchainAgents();
-  
+
   // Convert on-chain agents to unified Agent format
   const manowarAgents = useMemo((): ExtendedAgent[] => {
     if (!onchainAgents || !selectedRegistries.includes("manowar")) return [];
-    
+
     return onchainAgents
       .filter(a => {
         // Filter by search
@@ -79,8 +79,8 @@ export default function AgentsPage() {
           const searchLower = debouncedSearch.toLowerCase();
           const name = a.metadata?.name || `Agent #${a.id}`;
           const desc = a.metadata?.description || "";
-          if (!name.toLowerCase().includes(searchLower) && 
-              !desc.toLowerCase().includes(searchLower)) {
+          if (!name.toLowerCase().includes(searchLower) &&
+            !desc.toLowerCase().includes(searchLower)) {
             return false;
           }
         }
@@ -92,7 +92,7 @@ export default function AgentsPage() {
         if (avatarUri && avatarUri !== "none" && avatarUri.startsWith("ipfs://")) {
           avatarUrl = getIpfsUrl(avatarUri.replace("ipfs://", ""));
         }
-        
+
         return {
           id: `manowar-${a.id}`,
           address: a.creator,
@@ -114,8 +114,8 @@ export default function AgentsPage() {
           createdAt: a.metadata?.createdAt || new Date().toISOString(),
           updatedAt: a.metadata?.createdAt || new Date().toISOString(),
           // Manowar-specific fields
-          price: a.priceFormatted,
-          units: a.units === 0 ? "∞" : `${a.unitsAvailable}/${a.units}`,
+          price: a.licensePriceFormatted,
+          units: a.licenses === 0 ? "∞" : `${a.licensesAvailable}/${a.licenses}`,
           cloneable: a.cloneable,
           isClone: a.isClone,
           isWarped: a.isWarped,
@@ -149,7 +149,7 @@ export default function AgentsPage() {
   };
 
   const toggleRegistry = (registryId: AgentRegistryId) => {
-    setSelectedRegistries(prev => 
+    setSelectedRegistries(prev =>
       prev.includes(registryId)
         ? prev.filter(r => r !== registryId)
         : [...prev, registryId]
@@ -175,7 +175,7 @@ export default function AgentsPage() {
             Back to Compose
           </Button>
         </Link>
-        
+
         <div className="flex items-center gap-4">
           <h1 className="text-xl sm:text-2xl font-display font-bold text-white">
             <span className="text-fuchsia-500 mr-2">//</span>
@@ -198,7 +198,7 @@ export default function AgentsPage() {
               const registry = AGENT_REGISTRIES[registryId];
               const isEnabled = registry.enabled;
               const isSelected = selectedRegistries.includes(registryId);
-              
+
               return (
                 <div key={registryId} className="flex items-center gap-1.5 sm:gap-2">
                   <Checkbox
@@ -208,15 +208,14 @@ export default function AgentsPage() {
                     disabled={!isEnabled}
                     className="border-sidebar-border data-[state=checked]:bg-fuchsia-500 data-[state=checked]:border-fuchsia-500 w-4 h-4"
                   />
-                  <Label 
+                  <Label
                     htmlFor={`registry-${registryId}`}
-                    className={`text-xs sm:text-sm font-mono cursor-pointer ${
-                      !isEnabled 
-                        ? "text-muted-foreground/50 cursor-not-allowed" 
-                        : isSelected 
-                          ? "text-fuchsia-400" 
+                    className={`text-xs sm:text-sm font-mono cursor-pointer ${!isEnabled
+                        ? "text-muted-foreground/50 cursor-not-allowed"
+                        : isSelected
+                          ? "text-fuchsia-400"
                           : "text-muted-foreground hover:text-foreground"
-                    }`}
+                      }`}
                   >
                     {registry.name}
                     {!isEnabled && <span className="ml-1 text-[8px] sm:text-[10px]">(soon)</span>}
@@ -238,7 +237,7 @@ export default function AgentsPage() {
               className="pl-10 bg-background/50 border-sidebar-border focus:border-fuchsia-500 font-mono text-sm h-9"
             />
           </div>
-          
+
           <div className="flex gap-2 sm:gap-4">
             <Select value={selectedTag} onValueChange={setSelectedTag}>
               <SelectTrigger className="w-full sm:w-[180px] lg:w-[220px] bg-background/50 border-sidebar-border h-9 text-sm">
@@ -361,27 +360,27 @@ function AgentCard({ agent, onSelect }: { agent: ExtendedAgent; onSelect: (a: Ag
     .join("")
     .slice(0, 2)
     .toUpperCase();
-  
+
   const registryInfo = AGENT_REGISTRIES[agent.registry];
   const isManowar = agent.registry === "manowar";
-  
+
   // Extract numeric ID for manowar agents (e.g., "manowar-5" -> 5)
   const manowarId = isManowar ? parseInt(agent.id.replace("manowar-", "")) : null;
-  
+
   // Check if external agent has been warped
   const externalRegistry = !isManowar ? agent.registry : null;
   const externalAddress = !isManowar ? agent.address : null;
   const { data: externalWarpData } = useIsExternalWarped(externalRegistry, externalAddress);
-  
+
   // Determine if agent is warped (either manowar isWarped or external has been warped)
   const isAgentWarped = isManowar ? agent.isWarped : externalWarpData?.isWarped;
-  
+
   const handleWarp = () => {
     // Store agent for warp flow
     sessionStorage.setItem("warpAgent", JSON.stringify(agent));
     setLocation("/create-agent?warp=true");
   };
-  
+
   const handleViewEndpoint = () => {
     // Use wallet address for navigation (consistent with backend)
     if (agent.walletAddress) {
@@ -391,7 +390,7 @@ function AgentCard({ agent, onSelect }: { agent: ExtendedAgent; onSelect: (a: Ag
       setLocation(`/agent/${manowarId}`);
     }
   };
-  
+
   return (
     <Card className={`group bg-background border-sidebar-border hover:border-fuchsia-500/50 transition-all duration-300 corner-decoration overflow-hidden ${isManowar ? "ring-1 ring-cyan-500/20" : ""}`}>
       <CardContent className="p-4 sm:p-5 space-y-3 sm:space-y-4">
@@ -494,28 +493,28 @@ function AgentCard({ agent, onSelect }: { agent: ExtendedAgent; onSelect: (a: Ag
             </>
           ) : (
             <>
-          <div className="flex items-center gap-1.5 sm:gap-2 text-muted-foreground">
-            <Zap className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-green-400 shrink-0" />
-            <span>{formatInteractions(agent.totalInteractions)} uses</span>
-          </div>
-          <div className="flex items-center gap-1.5 sm:gap-2 text-muted-foreground">
-            <Star className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-yellow-400 shrink-0" />
-            <span>{agent.rating.toFixed(1)} rating</span>
-          </div>
+              <div className="flex items-center gap-1.5 sm:gap-2 text-muted-foreground">
+                <Zap className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-green-400 shrink-0" />
+                <span>{formatInteractions(agent.totalInteractions)} uses</span>
+              </div>
+              <div className="flex items-center gap-1.5 sm:gap-2 text-muted-foreground">
+                <Star className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-yellow-400 shrink-0" />
+                <span>{agent.rating.toFixed(1)} rating</span>
+              </div>
             </>
           )}
         </div>
 
         {/* Action Buttons */}
         <div className="flex flex-col sm:flex-row gap-1.5 sm:gap-2">
-        <Button
-          onClick={() => onSelect(agent)}
+          <Button
+            onClick={() => onSelect(agent)}
             className={`flex-1 bg-sidebar-accent border border-sidebar-border text-foreground hover:border-fuchsia-500 hover:text-fuchsia-400 font-mono text-[10px] sm:text-xs transition-colors group-hover:bg-fuchsia-500/10 h-8 sm:h-9 ${isManowar ? "hover:border-cyan-500 hover:text-cyan-400 group-hover:bg-cyan-500/10" : ""}`}
-        >
+          >
             <Check className="w-3 h-3 sm:w-3.5 sm:h-3.5 mr-1 sm:mr-1.5" />
             SELECT
           </Button>
-          
+
           {/* WARP button for non-manowar agents that haven't been warped yet */}
           {!isManowar && !externalWarpData?.isWarped && (
             <Button
@@ -527,7 +526,7 @@ function AgentCard({ agent, onSelect }: { agent: ExtendedAgent; onSelect: (a: Ag
               WARP
             </Button>
           )}
-          
+
           {/* Show WARPED indicator for already warped external agents */}
           {!isManowar && externalWarpData?.isWarped && (
             <Button
@@ -539,7 +538,7 @@ function AgentCard({ agent, onSelect }: { agent: ExtendedAgent; onSelect: (a: Ag
               WARPED
             </Button>
           )}
-          
+
           {/* VIEW ENDPOINT button for manowar agents */}
           {isManowar && (
             <Button
@@ -549,7 +548,7 @@ function AgentCard({ agent, onSelect }: { agent: ExtendedAgent; onSelect: (a: Ag
             >
               <Eye className="w-3 h-3 sm:w-3.5 sm:h-3.5 mr-1" />
               VIEW
-        </Button>
+            </Button>
           )}
         </div>
       </CardContent>

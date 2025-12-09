@@ -223,8 +223,8 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
         walletTimestamp: timestamp, // Backend needs this to derive private key
         chain: chainId,
         model: "warped", // Warped agents use their original model
-        price: usdcToWei(parseFloat(values.licensePrice)).toString(),
-        units: values.licenses ? parseInt(values.licenses) : 0,
+        licensePrice: usdcToWei(parseFloat(values.licensePrice)).toString(),
+        licenses: values.licenses ? parseInt(values.licenses) : 0,
         cloneable: false, // Warped agents are not cloneable by default
         protocols: agent.protocols || [{ name: "x402", version: "1.0" }],
         createdAt: new Date().toISOString(),
