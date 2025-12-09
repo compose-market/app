@@ -1207,44 +1207,80 @@ export default function PlaygroundPage() {
   // ==========================================================================
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] bg-zinc-950">
+    <div className="flex min-h-[calc(100vh-4rem)] lg:h-[calc(100vh-4rem)] bg-zinc-950">
       <div className="flex-1 flex flex-col">
         {/* Header */}
-        <div className="border-b border-zinc-800 p-4">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-4">
+        <div className="border-b border-zinc-800 p-3 lg:p-4">
+          {/* Mobile: Session controls row (shown first on mobile for prominence) */}
+          <div className="flex sm:hidden items-center justify-between gap-2 mb-3 pb-3 border-b border-zinc-800">
+            <div className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800">
+              <DollarSign className="h-3.5 w-3.5 text-emerald-500" />
+              <span className="text-xs font-mono text-white">
+                {sessionActive ? formatBudget(budgetRemaining) : "$0.00"}
+              </span>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <Button
+                variant={sessionActive ? "outline" : "default"}
+                onClick={() => setShowSessionDialog(true)}
+                className={cn(
+                  "h-9 text-xs px-3",
+                  sessionActive && "border-emerald-500/50 text-emerald-400"
+                )}
+              >
+                <Zap className="h-3.5 w-3.5 mr-1.5" />
+                {sessionActive ? "Active" : "Start Session"}
+              </Button>
+
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setShowSettings(!showSettings)}
+                className="h-9 w-9"
+              >
+                <Settings2 className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+
+          {/* Top row: Title, Tabs, and Session controls (desktop) */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-4">
               <div className="flex items-center gap-2">
-                <Sparkles className="h-5 w-5 text-cyan-400" />
-                <h1 className="text-lg font-semibold text-white font-mono">PLAYGROUND</h1>
+                <Sparkles className="h-4 w-4 sm:h-5 sm:w-5 text-cyan-400" />
+                <h1 className="text-base sm:text-lg font-semibold text-white font-mono">PLAYGROUND</h1>
               </div>
 
               {/* Tab switcher */}
               <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "model" | "plugins")}>
-                <TabsList className="bg-zinc-900">
-                  <TabsTrigger value="model" className="gap-1.5">
-                    <Bot className="h-3.5 w-3.5" />
-                    Models
+                <TabsList className="bg-zinc-900 h-8 sm:h-9">
+                  <TabsTrigger value="model" className="gap-1 sm:gap-1.5 text-xs sm:text-sm px-2 sm:px-3">
+                    <Bot className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                    <span className="hidden xs:inline">Models</span>
+                    <span className="xs:hidden">AI</span>
                   </TabsTrigger>
-                  <TabsTrigger value="plugins" className="gap-1.5">
-                    <Plug className="h-3.5 w-3.5" />
-                    Plugins
+                  <TabsTrigger value="plugins" className="gap-1 sm:gap-1.5 text-xs sm:text-sm px-2 sm:px-3">
+                    <Plug className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                    <span className="hidden xs:inline">Plugins</span>
+                    <span className="xs:hidden">Tools</span>
                   </TabsTrigger>
                 </TabsList>
               </Tabs>
 
-              {/* Model task indicator */}
+              {/* Model task indicator - hide on mobile */}
               {activeTab === "model" && selectedModelInfo && (
-                <Badge variant="outline" className="gap-1 border-zinc-700 text-zinc-400">
+                <Badge variant="outline" className="gap-1 border-zinc-700 text-zinc-400 hidden md:flex text-[10px] sm:text-xs">
                   {selectedModelInfo.task || "text-generation"}
                 </Badge>
               )}
             </div>
 
-            {/* Session & Settings */}
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800">
-                <DollarSign className="h-4 w-4 text-emerald-500" />
-                <span className="text-sm font-mono text-white">
+            {/* Session & Settings - Desktop only */}
+            <div className="hidden sm:flex items-center gap-2 sm:gap-3">
+              <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg bg-zinc-900 border border-zinc-800">
+                <DollarSign className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-emerald-500" />
+                <span className="text-xs sm:text-sm font-mono text-white">
                   {sessionActive ? formatBudget(budgetRemaining) : "$0.00"}
                 </span>
               </div>
@@ -1253,10 +1289,11 @@ export default function PlaygroundPage() {
                 variant={sessionActive ? "outline" : "default"}
                 onClick={() => setShowSessionDialog(true)}
                 className={cn(
+                  "h-8 sm:h-9 text-xs sm:text-sm px-2 sm:px-4",
                   sessionActive && "border-emerald-500/50 text-emerald-400"
                 )}
               >
-                <Zap className="h-4 w-4 mr-2" />
+                <Zap className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
                 {sessionActive ? "Session Active" : "Start Session"}
               </Button>
 
@@ -1264,18 +1301,19 @@ export default function PlaygroundPage() {
                 variant="ghost"
                 size="icon"
                 onClick={() => setShowSettings(!showSettings)}
+                className="h-8 w-8 sm:h-9 sm:w-9"
               >
-                <Settings2 className="h-4 w-4" />
+                <Settings2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
               </Button>
             </div>
           </div>
 
           {/* Model Test: Model selector row */}
           {activeTab === "model" && (
-            <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 flex-wrap">
               {/* Task filter dropdown */}
               <Select value={selectedTask} onValueChange={setSelectedTask} disabled={taskCategories.length === 0}>
-                <SelectTrigger className="w-44 bg-zinc-900 border-zinc-700">
+                <SelectTrigger className="w-full sm:w-36 lg:w-44 bg-zinc-900 border-zinc-700 h-9">
                   <SelectValue placeholder={modelsLoading ? "Loading..." : "All tasks"} />
                 </SelectTrigger>
                 <SelectContent className="bg-zinc-900 border-zinc-700 max-h-80">
@@ -1303,7 +1341,7 @@ export default function PlaygroundPage() {
 
               {/* Model Selector with search */}
               <Select value={selectedModel} onValueChange={setSelectedModel}>
-                <SelectTrigger className="w-96 bg-zinc-900 border-zinc-700">
+                <SelectTrigger className="w-full sm:flex-1 lg:w-80 xl:w-96 bg-zinc-900 border-zinc-700 h-9">
                   <SelectValue placeholder={modelsLoading ? "Loading..." : "Select model"} />
                 </SelectTrigger>
                 <SelectContent className="bg-zinc-900 border-zinc-700 max-h-96">
@@ -1337,13 +1375,13 @@ export default function PlaygroundPage() {
                       return (
                         <SelectItem key={model.id} value={model.id}>
                           <div className="flex items-center gap-2 w-full">
-                            <span className="truncate max-w-40">{model.name}</span>
-                            {/* Task type badge with color */}
+                            <span className="truncate max-w-32 sm:max-w-40">{model.name}</span>
+                            {/* Task type badge with color - hide on very small */}
                             {model.task && (
                               <Badge
                                 variant="outline"
                                 className={cn(
-                                  "text-[10px] shrink-0 px-1.5 py-0 font-normal border",
+                                  "text-[10px] shrink-0 px-1.5 py-0 font-normal border hidden sm:flex",
                                   taskStyle.bg,
                                   taskStyle.text,
                                   taskStyle.border
@@ -1369,29 +1407,31 @@ export default function PlaygroundPage() {
                 </SelectContent>
               </Select>
 
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={fetchModels}
-                disabled={modelsLoading}
-                className="text-zinc-400 hover:text-white shrink-0"
-              >
-                <RefreshCw className={cn("h-4 w-4", modelsLoading && "animate-spin")} />
-              </Button>
+              <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={fetchModels}
+                  disabled={modelsLoading}
+                  className="text-zinc-400 hover:text-white h-8 w-8 sm:h-9 sm:w-9"
+                >
+                  <RefreshCw className={cn("h-3.5 w-3.5 sm:h-4 sm:w-4", modelsLoading && "animate-spin")} />
+                </Button>
 
-              {/* Model count */}
-              <span className="text-xs text-zinc-500 shrink-0">
-                {filteredModels.length} models
-              </span>
+                {/* Model count */}
+                <span className="text-[10px] sm:text-xs text-zinc-500">
+                  {filteredModels.length} models
+                </span>
+              </div>
             </div>
           )}
 
           {/* Plugins Test: Source selector and dynamic plugin/server selector */}
           {activeTab === "plugins" && (
-            <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 flex-wrap">
               {/* Source selector with color-coded badges */}
               <Select value={pluginSource} onValueChange={(v) => handleSourceChange(v as PluginSource)}>
-                <SelectTrigger className="w-32 bg-zinc-900 border-zinc-700">
+                <SelectTrigger className="w-full sm:w-28 lg:w-32 bg-zinc-900 border-zinc-700 h-9">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-zinc-900 border-zinc-700">
@@ -1420,7 +1460,7 @@ export default function PlaygroundPage() {
               {pluginSource === "goat" && (
                 <>
                   <Select value={selectedPlugin} onValueChange={handlePluginChange} disabled={!goatStatus?.plugins?.length}>
-                    <SelectTrigger className="w-52 bg-zinc-900 border-zinc-700">
+                    <SelectTrigger className="w-full sm:w-40 lg:w-52 bg-zinc-900 border-zinc-700 h-9">
                       <SelectValue placeholder={pluginsLoading ? "Loading..." : "Select plugin"} />
                     </SelectTrigger>
                     <SelectContent className="bg-zinc-900 border-zinc-700 max-h-80">
@@ -1444,7 +1484,7 @@ export default function PlaygroundPage() {
 
                   {/* GOAT Tool selector */}
                   <Select value={selectedTool} onValueChange={handleToolSelect} disabled={pluginTools.length === 0}>
-                    <SelectTrigger className="w-72 bg-zinc-900 border-zinc-700">
+                    <SelectTrigger className="w-full sm:flex-1 lg:w-56 xl:w-72 bg-zinc-900 border-zinc-700 h-9">
                       <SelectValue placeholder={pluginTools.length === 0 ? "Select plugin first" : "Select tool"} />
                     </SelectTrigger>
                     <SelectContent className="bg-zinc-900 border-zinc-700 max-h-96">
@@ -1479,7 +1519,7 @@ export default function PlaygroundPage() {
               {pluginSource === "mcp" && (
                 <>
                   <Select value={selectedMcpServer} onValueChange={handleMcpServerChange} disabled={mcpServers.length === 0}>
-                    <SelectTrigger className="w-52 bg-zinc-900 border-zinc-700">
+                    <SelectTrigger className="w-full sm:w-40 lg:w-52 bg-zinc-900 border-zinc-700 h-9">
                       <SelectValue placeholder={pluginsLoading ? "Loading..." : "Select server"} />
                     </SelectTrigger>
                     <SelectContent className="bg-zinc-900 border-zinc-700 max-h-80">
@@ -1489,12 +1529,9 @@ export default function PlaygroundPage() {
                         mcpServers.map((server, idx) => (
                           <SelectItem key={`${idx}-${server.slug}`} value={server.slug}>
                             <div className="flex items-center gap-2">
-                              <span className="font-mono text-xs">{server.label || server.slug}</span>
+                              <span className="font-mono text-xs truncate max-w-24 sm:max-w-40">{server.label || server.slug}</span>
                               {server.remote && (
-                                <Badge variant="outline" className="text-[9px] px-1 py-0 border-cyan-500/50 text-cyan-400">remote</Badge>
-                              )}
-                              {server.category && (
-                                <Badge variant="outline" className="text-[9px] px-1 py-0">{server.category}</Badge>
+                                <Badge variant="outline" className="text-[9px] px-1 py-0 border-cyan-500/50 text-cyan-400 hidden sm:flex">remote</Badge>
                               )}
                             </div>
                           </SelectItem>
@@ -1505,7 +1542,7 @@ export default function PlaygroundPage() {
 
                   {/* MCP Tool selector */}
                   <Select value={selectedTool} onValueChange={handleMcpToolSelect} disabled={mcpTools.length === 0}>
-                    <SelectTrigger className="w-72 bg-zinc-900 border-zinc-700">
+                    <SelectTrigger className="w-full sm:flex-1 lg:w-56 xl:w-72 bg-zinc-900 border-zinc-700 h-9">
                       <SelectValue placeholder={mcpTools.length === 0 ? "Select server first" : "Select tool"} />
                     </SelectTrigger>
                     <SelectContent className="bg-zinc-900 border-zinc-700 max-h-96">
@@ -1516,7 +1553,7 @@ export default function PlaygroundPage() {
                           <SelectItem key={tool.name} value={tool.name}>
                             <div className="flex flex-col py-0.5">
                               <span className="font-mono text-xs">{tool.name}</span>
-                              <span className="text-[10px] text-zinc-500 truncate max-w-64">{tool.description || "No description"}</span>
+                              <span className="text-[10px] text-zinc-500 truncate max-w-48 sm:max-w-64">{tool.description || "No description"}</span>
                             </div>
                           </SelectItem>
                         ))
@@ -1525,8 +1562,8 @@ export default function PlaygroundPage() {
                   </Select>
 
                   {/* MCP Status indicator */}
-                  <div className="flex items-center gap-2 text-xs">
-                    <div className={cn("w-2 h-2 rounded-full", mcpServers.length > 0 ? "bg-purple-500" : "bg-zinc-500")} />
+                  <div className="flex items-center gap-2 text-[10px] sm:text-xs shrink-0">
+                    <div className={cn("w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full", mcpServers.length > 0 ? "bg-purple-500" : "bg-zinc-500")} />
                     <span className="text-zinc-500">
                       {mcpServers.length > 0 ? `${mcpServers.length} servers` : "Loading..."}
                     </span>
@@ -1538,7 +1575,7 @@ export default function PlaygroundPage() {
               {pluginSource === "eliza" && (
                 <>
                   <Select value={selectedElizaPlugin} onValueChange={handleElizaPluginChange} disabled={elizaPlugins.length === 0}>
-                    <SelectTrigger className="w-52 bg-zinc-900 border-zinc-700">
+                    <SelectTrigger className="w-full sm:w-40 lg:w-52 bg-zinc-900 border-zinc-700 h-9">
                       <SelectValue placeholder={pluginsLoading ? "Loading..." : "Select plugin"} />
                     </SelectTrigger>
                     <SelectContent className="bg-zinc-900 border-zinc-700 max-h-80">
@@ -1548,9 +1585,9 @@ export default function PlaygroundPage() {
                         elizaPlugins.map((plugin) => (
                           <SelectItem key={plugin.id} value={plugin.id}>
                             <div className="flex items-center gap-2">
-                              <span className="font-mono text-xs">{plugin.id}</span>
+                              <span className="font-mono text-xs truncate max-w-24 sm:max-w-40">{plugin.id}</span>
                               {plugin.version && (
-                                <Badge variant="outline" className="text-[9px] px-1 py-0 text-zinc-500">{plugin.version}</Badge>
+                                <Badge variant="outline" className="text-[9px] px-1 py-0 text-zinc-500 hidden sm:flex">{plugin.version}</Badge>
                               )}
                             </div>
                           </SelectItem>
@@ -1561,7 +1598,7 @@ export default function PlaygroundPage() {
 
                   {/* Eliza Action selector */}
                   <Select value={selectedElizaAction} onValueChange={handleElizaActionChange} disabled={elizaActions.length === 0}>
-                    <SelectTrigger className="w-72 bg-zinc-900 border-zinc-700">
+                    <SelectTrigger className="w-full sm:flex-1 lg:w-56 xl:w-72 bg-zinc-900 border-zinc-700 h-9">
                       <SelectValue placeholder={elizaActions.length === 0 ? "Select plugin first" : "Select action"} />
                     </SelectTrigger>
                     <SelectContent className="bg-zinc-900 border-zinc-700 max-h-96">
@@ -1572,7 +1609,7 @@ export default function PlaygroundPage() {
                           <SelectItem key={action.name} value={action.name}>
                             <div className="flex flex-col py-0.5">
                               <span className="font-mono text-xs">{action.name}</span>
-                              <span className="text-[10px] text-zinc-500 truncate max-w-64">{action.description}</span>
+                              <span className="text-[10px] text-zinc-500 truncate max-w-48 sm:max-w-64">{action.description}</span>
                             </div>
                           </SelectItem>
                         ))
@@ -1581,8 +1618,8 @@ export default function PlaygroundPage() {
                   </Select>
 
                   {/* Eliza Status indicator */}
-                  <div className="flex items-center gap-2 text-xs">
-                    <div className={cn("w-2 h-2 rounded-full", elizaPlugins.length > 0 ? "bg-fuchsia-500" : "bg-zinc-500")} />
+                  <div className="flex items-center gap-2 text-[10px] sm:text-xs shrink-0">
+                    <div className={cn("w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full", elizaPlugins.length > 0 ? "bg-fuchsia-500" : "bg-zinc-500")} />
                     <span className="text-zinc-500">
                       {elizaPlugins.length > 0 ? `${elizaPlugins.length} plugins` : "Loading..."}
                     </span>
@@ -1595,9 +1632,9 @@ export default function PlaygroundPage() {
                 size="icon"
                 onClick={pluginSource === "goat" ? fetchPluginStatus : pluginSource === "mcp" ? fetchMcpServers : fetchElizaPlugins}
                 disabled={pluginsLoading}
-                className="text-zinc-400 hover:text-white shrink-0"
+                className="text-zinc-400 hover:text-white shrink-0 h-8 w-8 sm:h-9 sm:w-9"
               >
-                <RefreshCw className={cn("h-4 w-4", pluginsLoading && "animate-spin")} />
+                <RefreshCw className={cn("h-3.5 w-3.5 sm:h-4 sm:w-4", pluginsLoading && "animate-spin")} />
               </Button>
             </div>
           )}
@@ -1605,25 +1642,25 @@ export default function PlaygroundPage() {
 
         {/* Settings Panel */}
         <Collapsible open={showSettings} onOpenChange={setShowSettings}>
-          <CollapsibleContent className="border-b border-zinc-800 p-4 bg-zinc-900/50">
+          <CollapsibleContent className="border-b border-zinc-800 p-3 lg:p-4 bg-zinc-900/50">
             <div className="space-y-4 max-w-3xl mx-auto">
               <div>
-                <Label className="text-zinc-400">System Prompt</Label>
+                <Label className="text-zinc-400 text-sm">System Prompt</Label>
                 <Textarea
                   value={systemPrompt}
                   onChange={(e) => setSystemPrompt(e.target.value)}
                   placeholder="Define the AI's behavior..."
-                  className="mt-2 bg-zinc-900 border-zinc-700 min-h-20"
+                  className="mt-2 bg-zinc-900 border-zinc-700 min-h-16 sm:min-h-20"
                 />
               </div>
               {selectedModelInfo && (
-                <div className="flex gap-4 text-sm text-zinc-500">
+                <div className="flex flex-wrap gap-2 sm:gap-4 text-xs sm:text-sm text-zinc-500">
                   <span>Provider: {selectedModelInfo.source}</span>
-                  <span>Owner: {selectedModelInfo.ownedBy}</span>
+                  <span className="hidden sm:inline">Owner: {selectedModelInfo.ownedBy}</span>
                   {selectedModelInfo.pricing && (
                     <>
-                      <span>Input: ${selectedModelInfo.pricing.inputPerMillion}/M tokens</span>
-                      <span>Output: ${selectedModelInfo.pricing.outputPerMillion}/M tokens</span>
+                      <span className="hidden lg:inline">Input: ${selectedModelInfo.pricing.inputPerMillion}/M</span>
+                      <span className="hidden lg:inline">Output: ${selectedModelInfo.pricing.outputPerMillion}/M</span>
                     </>
                   )}
                 </div>
