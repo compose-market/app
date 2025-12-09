@@ -5,40 +5,40 @@ import { ComposeLogo, GlitchText, WorkflowCube } from "@/components/brand/Logo";
 
 export default function Home() {
   return (
-    <div className="space-y-24 pb-20">
+    <div className="space-y-12 sm:space-y-16 lg:space-y-24 pb-20">
       {/* Hero Section */}
-      <section className="relative min-h-[60vh] flex flex-col items-center justify-center text-center space-y-8 py-20 border-b border-sidebar-border pb-12">
-        {/* Decorative floating cube */}
-        <div className="absolute -top-10 right-0 w-64 h-64 opacity-20 pointer-events-none animate-[spin_60s_linear_infinite]">
+      <section className="relative min-h-[50vh] sm:min-h-[60vh] flex flex-col items-center justify-center text-center space-y-6 sm:space-y-8 py-10 sm:py-20 border-b border-sidebar-border pb-8 sm:pb-12">
+        {/* Decorative floating cube - hidden on mobile */}
+        <div className="absolute -top-10 right-0 w-32 sm:w-48 lg:w-64 h-32 sm:h-48 lg:h-64 opacity-10 sm:opacity-20 pointer-events-none animate-[spin_60s_linear_infinite]">
           <WorkflowCube className="w-full h-full text-muted" />
         </div>
 
-        <div className="relative z-10 animate-in fade-in zoom-in duration-700 space-y-4 max-w-2xl">
+        <div className="relative z-10 animate-in fade-in zoom-in duration-700 space-y-3 sm:space-y-4 max-w-2xl px-2">
           {/* Main Title */}
-          <h1 className="text-4xl md:text-6xl font-display font-black text-white leading-tight">
+          <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-display font-black text-white leading-tight">
             <GlitchText text="COMPOSE" className="text-white" /><br />
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-cyan-200 to-white">THE FUTURE</span>
           </h1>
 
-          <p className="text-lg text-muted-foreground font-sans max-w-lg mx-auto">
+          <p className="text-sm sm:text-base lg:text-lg text-muted-foreground font-sans max-w-lg mx-auto px-2">
             The marketplace for autonomous agents. Create, lease, and compose AI workflows.
             Powered by the <strong className="text-cyan-400">Manowar Framework</strong>.
           </p>
-          <p className="text-sm text-muted-foreground/70 font-mono">
+          <p className="text-xs sm:text-sm text-muted-foreground/70 font-mono">
             ERC8004 Identity & x402 Payments on Avalanche
           </p>
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex gap-4 animate-in fade-in slide-in-from-bottom-8 duration-700" style={{ animationDelay: "200ms" }}>
-          <Link href="/market">
-            <Button size="lg" className="h-14 px-8 text-lg font-bold font-mono tracking-wider bg-cyan-500 text-black hover:bg-cyan-400 transition-colors shadow-[0_0_20px_rgba(6,182,212,0.4)]">
+        {/* Action Buttons - stack on mobile */}
+        <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 w-full sm:w-auto px-4 sm:px-0 animate-in fade-in slide-in-from-bottom-8 duration-700" style={{ animationDelay: "200ms" }}>
+          <Link href="/market" className="w-full sm:w-auto">
+            <Button size="lg" className="w-full sm:w-auto h-12 sm:h-14 px-6 sm:px-8 text-sm sm:text-lg font-bold font-mono tracking-wider bg-cyan-500 text-black hover:bg-cyan-400 transition-colors shadow-[0_0_20px_rgba(6,182,212,0.4)]">
               EXPLORE MARKET
-              <ArrowRight className="ml-2 w-5 h-5" />
+              <ArrowRight className="ml-2 w-4 h-4 sm:w-5 sm:h-5" />
             </Button>
           </Link>
-          <Link href="/compose">
-            <Button size="lg" variant="outline" className="h-14 px-8 text-lg font-bold font-mono tracking-wider border-sidebar-border text-foreground hover:border-fuchsia-500 hover:text-fuchsia-400 transition-colors">
+          <Link href="/compose" className="w-full sm:w-auto">
+            <Button size="lg" variant="outline" className="w-full sm:w-auto h-12 sm:h-14 px-6 sm:px-8 text-sm sm:text-lg font-bold font-mono tracking-wider border-sidebar-border text-foreground hover:border-fuchsia-500 hover:text-fuchsia-400 transition-colors">
               START COMPOSING
             </Button>
           </Link>
@@ -46,7 +46,7 @@ export default function Home() {
       </section>
 
       {/* Stats Dashboard */}
-      <section className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <section className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <StatCard label="Total Agents" value="8,420" trend="+12%" icon={Cpu} />
         <StatCard label="Workflows Active" value="1,204" trend="+5%" icon={Layers} />
         <StatCard label="24h Volume" value="$2.4M" trend="+8%" icon={Zap} />
@@ -54,7 +54,7 @@ export default function Home() {
       </section>
 
       {/* Features Grid */}
-      <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
         <FeatureCard
           icon={ShieldCheck}
           title="ERC8004 Identity"
@@ -73,66 +73,65 @@ export default function Home() {
       </section>
 
       {/* Composable Workflow Teaser */}
-      <section className="relative rounded-lg border border-sidebar-border bg-sidebar-accent/50 p-8 overflow-hidden">
-        <div className="absolute top-0 right-0 p-4 opacity-10">
-          <Hexagon size={200} strokeWidth={1} />
+      <section className="relative rounded-lg border border-sidebar-border bg-sidebar-accent/50 p-4 sm:p-6 lg:p-8 overflow-hidden">
+        <div className="absolute top-0 right-0 p-4 opacity-10 hidden sm:block">
+          <Hexagon size={150} className="sm:w-[150px] lg:w-[200px]" strokeWidth={1} />
         </div>
 
-        <div className="relative z-10 grid md:grid-cols-2 gap-12 items-center">
-          <div className="space-y-6">
-            <h3 className="text-3xl font-display font-bold text-white">
+        <div className="relative z-10 grid lg:grid-cols-2 gap-6 sm:gap-8 lg:gap-12 items-center">
+          <div className="space-y-4 sm:space-y-6">
+            <h3 className="text-xl sm:text-2xl lg:text-3xl font-display font-bold text-white">
               COMPOSE THE <span className="text-fuchsia-500">HIVE MIND</span>
             </h3>
-            <p className="text-muted-foreground leading-relaxed">
+            <p className="text-sm sm:text-base text-muted-foreground leading-relaxed">
               Drag and drop agents into a canvas. Link their inputs and outputs.
-              Mint the entire configuration as an ERC7401 Nested NFT that can be leased,
-              sold, or forked.
+              Mint the entire configuration as an ERC7401 Nested NFT.
             </p>
 
-            <div className="space-y-4 font-mono text-sm text-muted-foreground">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 bg-sidebar-accent flex items-center justify-center text-cyan-400 font-bold border border-sidebar-border">01</div>
+            <div className="space-y-3 sm:space-y-4 font-mono text-xs sm:text-sm text-muted-foreground">
+              <div className="flex items-center gap-2 sm:gap-3">
+                <div className="w-7 h-7 sm:w-8 sm:h-8 bg-sidebar-accent flex items-center justify-center text-cyan-400 font-bold border border-sidebar-border text-xs sm:text-sm shrink-0">01</div>
                 <p>Select specialized agents (finance, social, code).</p>
               </div>
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 bg-sidebar-accent flex items-center justify-center text-fuchsia-500 font-bold border border-sidebar-border">02</div>
+              <div className="flex items-center gap-2 sm:gap-3">
+                <div className="w-7 h-7 sm:w-8 sm:h-8 bg-sidebar-accent flex items-center justify-center text-fuchsia-500 font-bold border border-sidebar-border text-xs sm:text-sm shrink-0">02</div>
                 <p>Connect logic pipes and budget limits via x402.</p>
               </div>
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 bg-sidebar-accent flex items-center justify-center text-yellow-400 font-bold border border-sidebar-border">03</div>
+              <div className="flex items-center gap-2 sm:gap-3">
+                <div className="w-7 h-7 sm:w-8 sm:h-8 bg-sidebar-accent flex items-center justify-center text-yellow-400 font-bold border border-sidebar-border text-xs sm:text-sm shrink-0">03</div>
                 <p>Deploy to Manowar Protocol. Earn royalties.</p>
               </div>
             </div>
 
             <Link href="/compose">
-              <button className="flex items-center gap-2 text-cyan-400 hover:text-cyan-300 font-bold font-mono tracking-wider group">
+              <button className="flex items-center gap-2 text-cyan-400 hover:text-cyan-300 font-bold font-mono tracking-wider group text-sm sm:text-base">
                 ENTER COMPOSER <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
               </button>
             </Link>
           </div>
 
-          {/* Visual Representation of Composer */}
-          <div className="relative h-64 bg-background border border-sidebar-border rounded-sm p-4 glitch-border">
-            {/* Mock Nodes */}
-            <div className="absolute top-8 left-8 w-32 p-3 bg-sidebar-accent border border-cyan-500/50 rounded-sm shadow-[0_0_15px_rgba(6,182,212,0.2)]">
-              <div className="text-[10px] text-cyan-400 font-mono mb-1">INPUT_SOURCE</div>
-              <div className="font-bold text-sm text-white">Twitter_Stream</div>
+          {/* Visual Representation of Composer - simplified on mobile */}
+          <div className="relative h-48 sm:h-56 lg:h-64 bg-background border border-sidebar-border rounded-sm p-3 sm:p-4 glitch-border overflow-hidden">
+            {/* Mock Nodes - stacked vertically on mobile */}
+            <div className="absolute top-3 left-3 sm:top-8 sm:left-8 w-24 sm:w-32 p-2 sm:p-3 bg-sidebar-accent border border-cyan-500/50 rounded-sm shadow-[0_0_15px_rgba(6,182,212,0.2)]">
+              <div className="text-[8px] sm:text-[10px] text-cyan-400 font-mono mb-0.5 sm:mb-1">INPUT_SOURCE</div>
+              <div className="font-bold text-xs sm:text-sm text-white truncate">Twitter_Stream</div>
             </div>
 
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-32 p-3 bg-sidebar-accent border border-fuchsia-500/50 rounded-sm shadow-[0_0_15px_rgba(217,70,239,0.2)]">
-              <div className="text-[10px] text-fuchsia-400 font-mono mb-1">PROCESSOR</div>
-              <div className="font-bold text-sm text-white">GPT-4_Analysis</div>
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-24 sm:w-32 p-2 sm:p-3 bg-sidebar-accent border border-fuchsia-500/50 rounded-sm shadow-[0_0_15px_rgba(217,70,239,0.2)]">
+              <div className="text-[8px] sm:text-[10px] text-fuchsia-400 font-mono mb-0.5 sm:mb-1">PROCESSOR</div>
+              <div className="font-bold text-xs sm:text-sm text-white truncate">GPT-4_Analysis</div>
             </div>
 
-            <div className="absolute bottom-8 right-8 w-32 p-3 bg-sidebar-accent border border-yellow-500/50 rounded-sm shadow-[0_0_15px_rgba(234,179,8,0.2)]">
-              <div className="text-[10px] text-yellow-400 font-mono mb-1">ACTION</div>
-              <div className="font-bold text-sm text-white">Exec_Trade</div>
+            <div className="absolute bottom-3 right-3 sm:bottom-8 sm:right-8 w-24 sm:w-32 p-2 sm:p-3 bg-sidebar-accent border border-yellow-500/50 rounded-sm shadow-[0_0_15px_rgba(234,179,8,0.2)]">
+              <div className="text-[8px] sm:text-[10px] text-yellow-400 font-mono mb-0.5 sm:mb-1">ACTION</div>
+              <div className="font-bold text-xs sm:text-sm text-white truncate">Exec_Trade</div>
             </div>
 
-            {/* Connecting Lines (SVG) */}
-            <svg className="absolute inset-0 w-full h-full pointer-events-none z-0">
-              <path d="M120 40 C 200 40, 150 120, 230 120" stroke="rgba(6,182,212,0.5)" strokeWidth="2" strokeDasharray="4 2" fill="none" />
-              <path d="M350 120 C 400 120, 350 200, 420 200" stroke="rgba(217,70,239,0.5)" strokeWidth="2" strokeDasharray="4 2" fill="none" />
+            {/* Connecting Lines (SVG) - hidden on mobile */}
+            <svg className="absolute inset-0 w-full h-full pointer-events-none z-0 hidden sm:block">
+              <path d="M100 35 C 160 35, 120 95, 180 95" stroke="rgba(6,182,212,0.5)" strokeWidth="2" strokeDasharray="4 2" fill="none" />
+              <path d="M280 95 C 320 95, 280 160, 340 160" stroke="rgba(217,70,239,0.5)" strokeWidth="2" strokeDasharray="4 2" fill="none" />
             </svg>
           </div>
         </div>
@@ -141,29 +140,29 @@ export default function Home() {
       {/* CTA Section */}
       <section className="relative rounded-lg overflow-hidden border border-primary/20">
         <div className="absolute inset-0 bg-gradient-to-r from-cyan-500/10 to-fuchsia-500/10" />
-        <div className="relative z-10 p-12 flex flex-col md:flex-row items-center justify-between gap-8">
-          <div className="space-y-4">
-            <h2 className="text-4xl font-display font-bold text-white">Ready to evolve?</h2>
-            <p className="text-muted-foreground max-w-md">Join the symbiotic network. Deploy your agent or compose a new organism today.</p>
+        <div className="relative z-10 p-6 sm:p-8 lg:p-12 flex flex-col items-center text-center md:text-left md:flex-row md:justify-between gap-6 sm:gap-8">
+          <div className="space-y-2 sm:space-y-4">
+            <h2 className="text-2xl sm:text-3xl lg:text-4xl font-display font-bold text-white">Ready to evolve?</h2>
+            <p className="text-sm sm:text-base text-muted-foreground max-w-md">Join the symbiotic network. Deploy your agent or compose a new organism today.</p>
           </div>
-          <Link href="/create-agent">
-            <Button size="lg" className="h-16 px-10 text-xl font-display bg-fuchsia-500 text-white hover:bg-fuchsia-600 shadow-[0_0_25px_-5px_hsl(var(--accent))] border border-white/10">
+          <Link href="/create-agent" className="w-full md:w-auto shrink-0">
+            <Button size="lg" className="w-full md:w-auto h-12 sm:h-14 lg:h-16 px-6 sm:px-8 lg:px-10 text-base sm:text-lg lg:text-xl font-display bg-fuchsia-500 text-white hover:bg-fuchsia-600 shadow-[0_0_25px_-5px_hsl(var(--accent))] border border-white/10">
               MINT AGENT
-              <Cpu className="ml-3 w-6 h-6" />
+              <Cpu className="ml-2 sm:ml-3 w-5 h-5 sm:w-6 sm:h-6" />
             </Button>
           </Link>
         </div>
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-sidebar-border pt-8 flex flex-col md:flex-row justify-between items-center text-muted-foreground font-mono text-xs">
-        <div className="flex gap-6 mb-4 md:mb-0">
+      <footer className="border-t border-sidebar-border pt-6 sm:pt-8 flex flex-col sm:flex-row justify-between items-center gap-4 text-muted-foreground font-mono text-[10px] sm:text-xs">
+        <div className="flex gap-4 sm:gap-6">
           <a href="https://docs.compose.market" className="hover:text-cyan-400 transition-colors">DOCS</a>
           <a href="https://github.com/compose-market" className="hover:text-cyan-400 transition-colors">GITHUB</a>
           <a href="https://x.com/compose_market" className="hover:text-cyan-400 transition-colors">X</a>
         </div>
-        <div>
-          <span className="text-muted">SYS.VER.2.0.4 // </span>
+        <div className="text-center sm:text-right">
+          <span className="text-muted hidden sm:inline">SYS.VER.2.0.4 // </span>
           <span className="text-muted-foreground">COMPOSE.MARKET © 2025</span>
         </div>
       </footer>
@@ -173,22 +172,22 @@ export default function Home() {
 
 function StatCard({ label, value, trend, icon: Icon }: { label: string, value: string, trend: string, icon: any }) {
   return (
-    <div className="relative p-6 bg-background border border-sidebar-border overflow-hidden group hover:border-cyan-500/50 transition-colors corner-decoration">
+    <div className="relative p-4 sm:p-6 bg-background border border-sidebar-border overflow-hidden group hover:border-cyan-500/50 transition-colors corner-decoration">
       <div className="absolute -right-6 -top-6 w-24 h-24 bg-cyan-500/5 rounded-full blur-2xl group-hover:bg-cyan-500/10 transition-colors"></div>
 
-      <div className="relative z-10 flex justify-between items-start">
-        <div>
-          <p className="text-xs font-mono text-muted-foreground uppercase tracking-widest mb-1">{label}</p>
-          <h3 className="text-2xl font-bold font-display text-foreground">{value}</h3>
+      <div className="relative z-10 flex justify-between items-start gap-2">
+        <div className="min-w-0">
+          <p className="text-[10px] sm:text-xs font-mono text-muted-foreground uppercase tracking-widest mb-0.5 sm:mb-1 truncate">{label}</p>
+          <h3 className="text-lg sm:text-xl lg:text-2xl font-bold font-display text-foreground">{value}</h3>
         </div>
-        <div className="p-2 bg-sidebar-accent border border-sidebar-border rounded-sm">
-          <Icon className="w-4 h-4 text-cyan-400" />
+        <div className="p-1.5 sm:p-2 bg-sidebar-accent border border-sidebar-border rounded-sm shrink-0">
+          <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-cyan-400" />
         </div>
       </div>
 
-      <div className="relative z-10 mt-4 flex items-center gap-2 text-xs font-mono">
+      <div className="relative z-10 mt-2 sm:mt-4 flex items-center gap-2 text-[10px] sm:text-xs font-mono">
         <span className="text-fuchsia-400">{trend}</span>
-        <span className="text-muted">past 24h</span>
+        <span className="text-muted hidden sm:inline">past 24h</span>
       </div>
     </div>
   );
@@ -196,12 +195,12 @@ function StatCard({ label, value, trend, icon: Icon }: { label: string, value: s
 
 function FeatureCard({ icon: Icon, title, description }: { icon: any, title: string, description: string }) {
   return (
-    <div className="glass-panel p-8 rounded-sm space-y-4 hover:border-cyan-500/50 transition-all duration-300 group corner-decoration">
-      <div className="w-12 h-12 rounded-sm bg-cyan-500/10 flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
-        <Icon className="w-6 h-6 text-cyan-400" />
+    <div className="glass-panel p-5 sm:p-6 lg:p-8 rounded-sm space-y-3 sm:space-y-4 hover:border-cyan-500/50 transition-all duration-300 group corner-decoration">
+      <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-sm bg-cyan-500/10 flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
+        <Icon className="w-5 h-5 sm:w-6 sm:h-6 text-cyan-400" />
       </div>
-      <h3 className="text-xl font-display font-bold text-foreground group-hover:text-cyan-400 transition-colors">{title}</h3>
-      <p className="text-muted-foreground leading-relaxed">{description}</p>
+      <h3 className="text-lg sm:text-xl font-display font-bold text-foreground group-hover:text-cyan-400 transition-colors">{title}</h3>
+      <p className="text-sm sm:text-base text-muted-foreground leading-relaxed">{description}</p>
     </div>
   );
 }
