@@ -1223,23 +1223,23 @@ function MintManowarDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-2xl bg-card border-fuchsia-500/30">
+        <DialogContent className="max-w-[95vw] sm:max-w-lg md:max-w-2xl bg-card border-fuchsia-500/30 max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="font-display text-xl flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-fuchsia-400" />
+            <DialogTitle className="font-display text-lg sm:text-xl flex items-center gap-2">
+              <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-fuchsia-400" />
               Mint as Manowar
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="text-xs sm:text-sm">
               Deploy this workflow as an ERC-7401 nestable NFT on Avalanche Fuji
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid grid-cols-2 gap-4 py-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-4">
             {/* Left Column */}
             <div className="space-y-4">
               {/* Banner Upload */}
               <div>
-                <Label className="text-xs font-mono text-muted-foreground mb-2 block">BANNER IMAGE</Label>
+                <Label className="text-[10px] sm:text-xs font-mono text-muted-foreground mb-2 block">BANNER IMAGE</Label>
                 <input
                   ref={bannerInputRef}
                   type="file"
@@ -1250,7 +1250,7 @@ function MintManowarDialog({
                 <button
                   type="button"
                   onClick={() => bannerInputRef.current?.click()}
-                  className="w-full h-20 rounded-sm bg-background/50 border border-sidebar-border border-dashed flex items-center justify-center text-muted-foreground hover:border-fuchsia-500 hover:text-fuchsia-400 transition-colors overflow-hidden"
+                  className="w-full h-20 rounded-sm bg-background/50 border border-sidebar-border border-dashed flex items-center justify-center text-muted-foreground hover:border-fuchsia-500 hover:text-fuchsia-400 transition-colors overflow-hidden touch-manipulation"
                 >
                   {bannerPreview ? (
                     <img src={bannerPreview} alt="Banner" className="w-full h-full object-cover" />
@@ -1265,7 +1265,7 @@ function MintManowarDialog({
 
               {/* Title */}
               <div className="space-y-1">
-                <Label className="text-xs font-mono text-muted-foreground">TITLE</Label>
+                <Label className="text-[10px] sm:text-xs font-mono text-muted-foreground">TITLE</Label>
                 <Input
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
@@ -1276,7 +1276,7 @@ function MintManowarDialog({
 
               {/* Description */}
               <div className="space-y-1">
-                <Label className="text-xs font-mono text-muted-foreground">DESCRIPTION</Label>
+                <Label className="text-[10px] sm:text-xs font-mono text-muted-foreground">DESCRIPTION</Label>
                 <Textarea
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
@@ -1291,7 +1291,7 @@ function MintManowarDialog({
             <div className="space-y-4">
 
               {/* Pricing */}
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-3 sm:gap-4">
                 <div className="space-y-2">
                   <Label className="text-xs font-mono text-muted-foreground flex items-center gap-1">
                     <DollarSign className="w-3 h-3" /> X402 PRICE (USDC)
@@ -1352,9 +1352,9 @@ function MintManowarDialog({
               </div>
 
               {leaseEnabled && (
-                <div className="grid grid-cols-2 gap-4 pl-4 border-l-2 border-fuchsia-500/30">
+                <div className="grid grid-cols-2 gap-3 sm:gap-4 pl-3 sm:pl-4 border-l-2 border-fuchsia-500/30">
                   <div className="space-y-2">
-                    <Label className="text-xs font-mono text-muted-foreground">DURATION (days)</Label>
+                    <Label className="text-[10px] sm:text-xs font-mono text-muted-foreground">DURATION (days)</Label>
                     <Input
                       type="number"
                       value={leaseDuration}
@@ -1363,7 +1363,7 @@ function MintManowarDialog({
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label className="text-xs font-mono text-muted-foreground">YOUR % (max 20)</Label>
+                    <Label className="text-[10px] sm:text-xs font-mono text-muted-foreground">YOUR % (max 20)</Label>
                     <Input
                       type="number"
                       max={20}
@@ -1939,36 +1939,36 @@ function ComposeFlow() {
   }, [currentWorkflow, inputJson, nodes, setNodes, toast, wallet, sessionActive, budgetRemaining]);
 
   return (
-    <div className="h-[calc(100vh-100px)] flex flex-col md:flex-row gap-4 pb-4">
+    <div className="min-h-[calc(100vh-120px)] lg:h-[calc(100vh-100px)] flex flex-col lg:flex-row gap-3 lg:gap-4 pb-4">
       {/* Sidebar - Picker Tabs */}
-      <Card className="w-full md:w-80 h-full flex flex-col glass-panel border-cyan-500/20 shrink-0">
-        <CardHeader className="pb-2 border-b border-sidebar-border">
+      <Card className="w-full lg:w-80 h-auto max-h-[40vh] lg:max-h-none lg:h-full flex flex-col glass-panel border-cyan-500/20 shrink-0 overflow-hidden">
+        <CardHeader className="pb-2 border-b border-sidebar-border shrink-0">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-lg font-display font-bold text-cyan-400">ADD STEPS</CardTitle>
+            <CardTitle className="text-base lg:text-lg font-display font-bold text-cyan-400">ADD STEPS</CardTitle>
           </div>
         </CardHeader>
-        <CardContent className="flex-1 overflow-hidden p-0">
+        <CardContent className="flex-1 overflow-hidden p-0 min-h-0">
           <Tabs defaultValue="connectors" className="h-full flex flex-col">
-            <TabsList className="w-full rounded-none border-b border-sidebar-border bg-transparent p-0 h-auto">
+            <TabsList className="w-full rounded-none border-b border-sidebar-border bg-transparent p-0 h-auto shrink-0">
               <TabsTrigger
                 value="connectors"
-                className="flex-1 rounded-none border-b-2 border-transparent data-[state=active]:border-cyan-500 data-[state=active]:bg-transparent data-[state=active]:text-cyan-400 py-2.5 font-mono text-xs"
+                className="flex-1 rounded-none border-b-2 border-transparent data-[state=active]:border-cyan-500 data-[state=active]:bg-transparent data-[state=active]:text-cyan-400 py-2.5 font-mono text-xs touch-manipulation"
               >
                 <Plug className="w-3 h-3 mr-1.5" />
                 PLUGINS
               </TabsTrigger>
               <TabsTrigger
                 value="agents"
-                className="flex-1 rounded-none border-b-2 border-transparent data-[state=active]:border-fuchsia-500 data-[state=active]:bg-transparent data-[state=active]:text-fuchsia-400 py-2.5 font-mono text-xs"
+                className="flex-1 rounded-none border-b-2 border-transparent data-[state=active]:border-fuchsia-500 data-[state=active]:bg-transparent data-[state=active]:text-fuchsia-400 py-2.5 font-mono text-xs touch-manipulation"
               >
                 <Bot className="w-3 h-3 mr-1.5" />
                 AGENTS
               </TabsTrigger>
             </TabsList>
-            <TabsContent value="connectors" className="flex-1 overflow-y-auto p-3 mt-0">
+            <TabsContent value="connectors" className="flex-1 overflow-y-auto p-3 mt-0 min-h-0">
               <ConnectorPicker onSelect={handleAddStep} />
             </TabsContent>
-            <TabsContent value="agents" className="flex-1 overflow-y-auto p-3 mt-0">
+            <TabsContent value="agents" className="flex-1 overflow-y-auto p-3 mt-0 min-h-0">
               <AgentsPicker onSelect={handleAddAgentStep} />
             </TabsContent>
           </Tabs>
@@ -1976,40 +1976,41 @@ function ComposeFlow() {
       </Card>
 
       {/* Canvas Area with Bottom Action Bar */}
-      <div className="flex-1 h-full flex flex-col">
+      <div className="flex-1 min-h-[50vh] lg:min-h-0 lg:h-full flex flex-col">
         {/* Main Canvas */}
-        <div className="flex-1 relative rounded-t-sm border border-cyan-500/20 overflow-hidden shadow-2xl bg-black/40">
-          {/* Toolbar */}
-          <div className="absolute top-4 right-4 z-10 flex gap-2">
+        <div className="flex-1 relative rounded-t-sm border border-cyan-500/20 overflow-hidden shadow-2xl bg-black/40 min-h-[300px]">
+          {/* Toolbar - responsive positioning */}
+          <div className="absolute top-2 right-2 lg:top-4 lg:right-4 z-10 flex flex-wrap gap-1.5 lg:gap-2">
             {/* Run Button */}
             <Button
               onClick={handleRun}
               disabled={isRunning || nodes.length === 0}
-              className="bg-green-500 text-white hover:bg-green-600 font-bold font-mono shadow-lg"
+              className="bg-green-500 text-white hover:bg-green-600 font-bold font-mono shadow-lg text-xs lg:text-sm h-8 lg:h-9 px-2.5 lg:px-4"
             >
               {isRunning ? (
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                <Loader2 className="w-3.5 h-3.5 lg:w-4 lg:h-4 mr-1.5 lg:mr-2 animate-spin" />
               ) : (
-                <Play className="w-4 h-4 mr-2" />
+                <Play className="w-3.5 h-3.5 lg:w-4 lg:h-4 mr-1.5 lg:mr-2" />
               )}
-              {isRunning ? "RUNNING..." : "RUN"}
+              <span className="hidden sm:inline">{isRunning ? "RUNNING..." : "RUN"}</span>
+              <span className="sm:hidden">{isRunning ? "..." : "RUN"}</span>
             </Button>
 
             {/* Expand Fullscreen Button */}
             <Button
               onClick={() => setIsFullscreen(true)}
               variant="outline"
-              className="border-sidebar-border hover:border-cyan-500 hover:bg-cyan-500/10"
+              className="border-sidebar-border hover:border-cyan-500 hover:bg-cyan-500/10 h-8 lg:h-9 w-8 lg:w-9"
               title="Expand to fullscreen"
             >
-              <Maximize2 className="w-4 h-4" />
+              <Maximize2 className="w-3.5 h-3.5 lg:w-4 lg:h-4" />
             </Button>
 
             {/* Settings Dialog */}
             <Sheet>
               <SheetTrigger asChild>
-                <Button variant="outline" className="border-sidebar-border">
-                  <Settings className="w-4 h-4" />
+                <Button variant="outline" className="border-sidebar-border h-8 lg:h-9 w-8 lg:w-9">
+                  <Settings className="w-3.5 h-3.5 lg:w-4 lg:h-4" />
                 </Button>
               </SheetTrigger>
               <SheetContent className="bg-card border-sidebar-border">
@@ -2057,8 +2058,8 @@ function ComposeFlow() {
           </div>
 
           {/* Step Count Badge */}
-          <div className="absolute top-4 left-4 z-10">
-            <Badge variant="outline" className="font-mono border-cyan-500/30 text-cyan-400">
+          <div className="absolute top-2 left-2 lg:top-4 lg:left-4 z-10">
+            <Badge variant="outline" className="font-mono border-cyan-500/30 text-cyan-400 text-[10px] lg:text-xs">
               {nodes.length} step{nodes.length !== 1 ? "s" : ""}
             </Badge>
           </div>
@@ -2144,20 +2145,20 @@ function ComposeFlow() {
 
           {/* Empty State */}
           {nodes.length === 0 && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="text-center space-y-3">
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-4">
+              <div className="text-center space-y-2 lg:space-y-3">
                 <div className="relative">
-                  <Plug className="w-16 h-16 mx-auto text-muted-foreground/20" />
-                  <div className="absolute -top-2 -right-2 animate-pulse">
-                    <Sparkles className="w-6 h-6 text-cyan-500/40" />
+                  <Plug className="w-12 h-12 lg:w-16 lg:h-16 mx-auto text-muted-foreground/20" />
+                  <div className="absolute -top-1 -right-1 lg:-top-2 lg:-right-2 animate-pulse">
+                    <Sparkles className="w-4 h-4 lg:w-6 lg:h-6 text-cyan-500/40" />
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-foreground/80 font-display text-lg">
+                  <p className="text-foreground/80 font-display text-base lg:text-lg">
                     Start Building
                   </p>
-                  <p className="text-muted-foreground font-mono text-xs max-w-[200px]">
-                    Select plugins or agents from the sidebar to add workflow steps
+                  <p className="text-muted-foreground font-mono text-[10px] lg:text-xs max-w-[180px] lg:max-w-[200px] mx-auto">
+                    Select plugins or agents from the panel above to add workflow steps
                   </p>
                 </div>
               </div>
@@ -2166,16 +2167,16 @@ function ComposeFlow() {
         </div>
 
         {/* Bottom Action Bar */}
-        <div className="flex items-center justify-between px-4 py-3 bg-card/60 border border-t-0 border-cyan-500/20 rounded-b-sm backdrop-blur-sm">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 sm:gap-4 px-3 lg:px-4 py-2.5 lg:py-3 bg-card/60 border border-t-0 border-cyan-500/20 rounded-b-sm backdrop-blur-sm">
           {/* Left: Workflow info */}
-          <div className="flex items-center gap-3 text-sm font-mono text-muted-foreground min-w-0">
-            <span className="text-foreground/80 truncate max-w-[150px]">
+          <div className="flex items-center gap-2 sm:gap-3 text-xs sm:text-sm font-mono text-muted-foreground min-w-0">
+            <span className="text-foreground/80 truncate max-w-[120px] sm:max-w-[150px]">
               {workflowName || "Untitled Workflow"}
             </span>
             {workflowDescription && (
               <>
-                <span className="text-muted-foreground/50">•</span>
-                <span className="text-xs opacity-60 truncate max-w-[200px] hidden md:block">
+                <span className="text-muted-foreground/50 hidden sm:inline">•</span>
+                <span className="text-[10px] sm:text-xs opacity-60 truncate max-w-[150px] lg:max-w-[200px] hidden sm:block">
                   {workflowDescription}
                 </span>
               </>
@@ -2186,9 +2187,9 @@ function ComposeFlow() {
           <Button
             onClick={() => setShowMintDialog(true)}
             disabled={nodes.length === 0}
-            className="bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white hover:from-cyan-400 hover:to-fuchsia-400 font-bold font-mono shadow-lg disabled:opacity-50"
+            className="bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white hover:from-cyan-400 hover:to-fuchsia-400 font-bold font-mono shadow-lg disabled:opacity-50 w-full sm:w-auto text-xs sm:text-sm h-9 sm:h-10 shrink-0"
           >
-            <Sparkles className="w-4 h-4 mr-2" />
+            <Sparkles className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
             MINT AS NFT
           </Button>
         </div>
