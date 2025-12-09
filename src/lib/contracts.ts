@@ -703,8 +703,8 @@ export interface MintAgentParams {
   skills: string[];
   chainId: number;
   model: string;
-  units: number; // 0 = infinite
-  price: number; // USDC
+  licenses: number; // 0 = infinite (Renamed from units)
+  licensePrice: number; // USDC (Renamed from price)
   cloneable: boolean;
   agentCardUri: string;
 }
