@@ -13,17 +13,17 @@ import { keccak256, encodePacked, type Address } from "viem";
 
 export const CONTRACT_ADDRESSES = {
   [CHAIN_IDS.avalancheFuji]: {
-    AgentFactory: "0xb6d62374Ba0076bE2c1020b6a8BBD1b3c67052F7" as Address,
-    Clone: "0xA5D57363d55698Cf7bad6a285632d40bd6a66DA6" as Address,
-    Warp: "0xd5008675e2FeC755cfe1Fd30295309BB65A049a5" as Address,
-    Manowar: "0x9fCdA3E828D142e942ECba6183dC09e294C5D38d" as Address,
-    RFA: "0xa0E3f84Ad2b2075aa36083962A4EAAB16d88227d" as Address,
-    Lease: "0x5DFa23efCa811cB974177b800cA1884eFFB51692" as Address,
-    Royalties: "0x0f938769179f116A29FD0c7F8876089A80D4B735" as Address,
-    Distributor: "0x1E8a036ED015b836D8543DB48f70EEEE86C77EAA" as Address,
-    Delegation: "0x962fC821626106c772b7F97B9Fcf7Ded3238678f" as Address,
-    AgentManager: "0xC4039E60391b1bFEEdfE577eB20967eD6CFd2D6e" as Address,
-    Utils: "0xc73dD4aB79149FC8E69D43940ec0D3A2Ea285c3c" as Address,
+    AgentFactory: "0xc4b30Ad875F91AaD49191de8C609718c1895862C" as Address,
+    Clone: "0x94670C88C62A6EEA434B2d31F779F9F730F4aBd2" as Address,
+    Warp: "0x7eE6427907307f2869c09F0242c5652d1705A299" as Address,
+    Manowar: "0xB5Ae710864ac00cF559d759961c94f0084C42B01" as Address,
+    RFA: "0x67Fb2BE7CFE01469EC2060369f37A0Ca97d77f3A" as Address,
+    Lease: "0xE0748625bC00e88579fCFcF9c2A0DE38f5cDf8f6" as Address,
+    Royalties: "0xa5f3e5fE7bb86ec30af58cF2E3349863E60b9501" as Address,
+    Distributor: "0x876147C80C0e6dB470B3269823527A770e21f8eF" as Address,
+    Delegation: "0x2A77d7f96017FC5b3D082F2cc67d2ed5af4C5E40" as Address,
+    AgentManager: "0xa98e03541e56f4D070f537C9920781666f67434A" as Address,
+    Utils: "0xD799B181fDDEddE862F5CCeAa8eB9eCd464D1a33" as Address,
   },
 } as const;
 
@@ -49,9 +49,9 @@ export const AgentFactoryABI = [
       type: "tuple",
       components: [
         { name: "dnaHash", type: "bytes32" },
-        { name: "units", type: "uint256" },
-        { name: "unitsMinted", type: "uint256" },
-        { name: "price", type: "uint256" },
+        { name: "licenses", type: "uint256" },
+        { name: "licensesMinted", type: "uint256" },
+        { name: "licensePrice", type: "uint256" },
         { name: "creator", type: "address" },
         { name: "cloneable", type: "bool" },
         { name: "isClone", type: "bool" },
@@ -68,7 +68,7 @@ export const AgentFactoryABI = [
     outputs: [{ name: "total", type: "uint256" }],
   },
   {
-    name: "hasAvailableUnits",
+    name: "hasAvailableLicenses",
     type: "function",
     stateMutability: "view",
     inputs: [{ name: "agentId", type: "uint256" }],
@@ -95,6 +95,39 @@ export const AgentFactoryABI = [
     inputs: [{ name: "tokenId", type: "uint256" }],
     outputs: [{ name: "uri", type: "string" }],
   },
+  {
+    name: "isLicensedTo",
+    type: "function",
+    stateMutability: "view",
+    inputs: [
+      { name: "agentId", type: "uint256" },
+      { name: "manowarContract", type: "address" },
+      { name: "manowarId", type: "uint256" },
+    ],
+    outputs: [{ name: "licensed", type: "bool" }],
+  },
+  {
+    name: "getLicenseRecords",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "agentId", type: "uint256" }],
+    outputs: [{
+      name: "records",
+      type: "tuple[]",
+      components: [
+        { name: "manowarContract", type: "address" },
+        { name: "manowarId", type: "uint256" },
+        { name: "licensedAt", type: "uint256" },
+      ],
+    }],
+  },
+  {
+    name: "agentExists",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "agentId", type: "uint256" }],
+    outputs: [{ name: "exists", type: "bool" }],
+  },
   // Write functions
   {
     name: "mintAgent",
@@ -102,8 +135,8 @@ export const AgentFactoryABI = [
     stateMutability: "nonpayable",
     inputs: [
       { name: "dnaHash", type: "bytes32" },
-      { name: "units", type: "uint256" },
-      { name: "price", type: "uint256" },
+      { name: "licenses", type: "uint256" },
+      { name: "licensePrice", type: "uint256" },
       { name: "cloneable", type: "bool" },
       { name: "agentCardUri", type: "string" },
     ],
@@ -127,9 +160,19 @@ export const AgentFactoryABI = [
       { name: "agentId", type: "uint256", indexed: true },
       { name: "creator", type: "address", indexed: true },
       { name: "dnaHash", type: "bytes32", indexed: false },
-      { name: "units", type: "uint256", indexed: false },
-      { name: "price", type: "uint256", indexed: false },
+      { name: "licenses", type: "uint256", indexed: false },
+      { name: "licensePrice", type: "uint256", indexed: false },
       { name: "cloneable", type: "bool", indexed: false },
+    ],
+  },
+  {
+    name: "AgentLicensed",
+    type: "event",
+    inputs: [
+      { name: "agentId", type: "uint256", indexed: true },
+      { name: "manowarContract", type: "address", indexed: true },
+      { name: "manowarId", type: "uint256", indexed: true },
+      { name: "licenseNumber", type: "uint256", indexed: false },
     ],
   },
 ] as const;
@@ -304,9 +347,9 @@ export const CloneABI = [
         type: "tuple",
         components: [
           { name: "chainId", type: "uint256" },
-          { name: "price", type: "uint256" },
+          { name: "licensePrice", type: "uint256" },
           { name: "model", type: "string" },
-          { name: "units", type: "uint256" },
+          { name: "licenses", type: "uint256" },
         ],
       },
       { name: "newAgentCardUri", type: "string" },
@@ -337,8 +380,8 @@ export const WarpABI = [
     inputs: [
       { name: "originalAgentHash", type: "bytes32" },
       { name: "originalCreator", type: "address" },
-      { name: "units", type: "uint256" },
-      { name: "price", type: "uint256" },
+      { name: "licenses", type: "uint256" },
+      { name: "licensePrice", type: "uint256" },
       { name: "agentCardUri", type: "string" },
     ],
     outputs: [{ name: "warpedAgentId", type: "uint256" }],
@@ -525,8 +568,8 @@ export function getRFAContract() {
  * Formula: keccak256(skills + chainId + model + timestamp)
  */
 export function computeDnaHash(
-  skills: string[], 
-  chainId: number, 
+  skills: string[],
+  chainId: number,
   model: string
 ): `0x${string}` {
   // Sort skills for deterministic hashing
@@ -628,9 +671,9 @@ export function computeExternalAgentHash(registry: string, address: string): `0x
 
 export interface AgentData {
   dnaHash: `0x${string}`;
-  units: bigint;
-  unitsMinted: bigint;
-  price: bigint;
+  licenses: bigint;
+  licensesMinted: bigint;
+  licensePrice: bigint;
   creator: Address;
   cloneable: boolean;
   isClone: boolean;

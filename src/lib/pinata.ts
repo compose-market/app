@@ -187,8 +187,8 @@ export interface AgentCard {
   chain: number;
   model: string;
   framework?: "eliza" | "langchain"; // Agent runtime framework
-  price: string; // USDC in smallest unit (6 decimals)
-  units: number; // 0 = infinite
+  licensePrice: string; // USDC in smallest unit (6 decimals) - cost to nest into Manowar
+  licenses: number; // License supply cap (0 = infinite)
   cloneable: boolean;
   endpoint?: string;
   protocols: Array<{ name: string; version: string }>;
@@ -237,6 +237,7 @@ export interface ManowarMetadata {
   title: string;
   description: string;
   banner?: string; // IPFS URI
+  image?: string;  // Standard NFT metadata field (gateway URL for explorer compatibility)
   agents: Array<{
     agentId: number;
     name: string;
