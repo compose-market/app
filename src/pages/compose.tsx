@@ -34,7 +34,7 @@ import { Badge } from "@/components/ui/badge";
 import { useActiveAccount, useActiveWallet, TransactionButton, useSendTransaction } from "thirdweb/react";
 import { wrapFetchWithPayment } from "thirdweb/x402";
 import { prepareContractCall } from "thirdweb";
-import { getManowarContract, usdcToWei, computeExternalAgentHash, getWarpContract, getContractAddress, getAgentFactoryContract, formatUsdcPrice, weiToUsdc } from "@/lib/contracts";
+import { getManowarContract, usdcToWei, computeExternalAgentHash, getWarpContract, getContractAddress, getAgentFactoryContract, formatUsdcPrice, weiToUsdc, computeManowarDnaHash, deriveManowarWalletAddress } from "@/lib/contracts";
 import { readContract } from "thirdweb";
 import { uploadManowarBanner, uploadManowarMetadata, getIpfsUri, getIpfsUrl, fileToDataUrl, isPinataConfigured, type ManowarMetadata } from "@/lib/pinata";
 import { CHAIN_IDS, CHAIN_CONFIG, thirdwebClient, INFERENCE_PRICE_WEI, getPaymentTokenContract } from "@/lib/thirdweb";
@@ -1121,13 +1121,24 @@ function MintManowarDialog({
         bannerImageUri = getIpfsUri(bannerCid);
       }
 
-      // 2. Build and upload metadata to IPFS
+      // 2. Generate unique manowar DNA hash and wallet address
+      // This is the SINGLE SOURCE OF TRUTH for manowar identification
+      // Both frontend and backend will fetch this from IPFS metadata
+      const mintTimestamp = Math.floor(Date.now() / 1000);
+      const dnaHash = computeManowarDnaHash(agentIds, mintTimestamp);
+      const walletAddress = deriveManowarWalletAddress(dnaHash, mintTimestamp);
+
+      // 3. Build and upload metadata to IPFS
       const metadata: ManowarMetadata = {
         schemaVersion: "1.0.0",
         title,
         description,
         banner: bannerImageUri,
         image: bannerImageUri ? getIpfsUrl(bannerImageUri.replace("ipfs://", "")) : undefined,
+        // Identity - single source of truth, derived once at mint time
+        dnaHash,
+        walletAddress,
+        walletTimestamp: mintTimestamp,
         agents: agentIds.map((id, idx) => ({ agentId: id, name: `Agent ${idx + 1}` })),
         coordinator: coordinatorModel ? { agentId: 0, model: coordinatorModel } : undefined,
         pricing: {

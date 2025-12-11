@@ -87,7 +87,7 @@ export default function ManowarPage() {
 
     // Send chat message with x402 payment
     const handleSendMessage = useCallback(async () => {
-        if (!inputValue.trim() || sending || !manowar || !coordinatorAgent) return;
+        if (!inputValue.trim() || sending || !manowar) return;
 
         if (!wallet) {
             toast({ title: "Connect wallet", description: "Please connect your wallet to execute workflow", variant: "destructive" });
@@ -137,14 +137,13 @@ export default function ManowarPage() {
                     headers["x-session-user-address"] = userAddress;
                 }
 
-                // Target the Coordinator Agent
-                return fetchWithPayment(`${MCP_URL}/agent/${coordinatorAgent.walletAddress}/chat`, {
+                // Use the new /manowar/:id/chat endpoint for LangGraph workflow execution
+                return fetchWithPayment(`${MCP_URL}/manowar/${manowar.id}/chat`, {
                     method: "POST",
                     headers,
                     body: JSON.stringify({
                         message: userMessage.content,
                         threadId: threadId,
-                        manowarId: manowar.id, // Explicitly pass Manowar ID
                     }),
                 });
             };
@@ -200,7 +199,7 @@ export default function ManowarPage() {
         } finally {
             setSending(false);
         }
-    }, [inputValue, sending, manowar, coordinatorAgent, wallet, toast]);
+    }, [inputValue, sending, manowar, wallet, toast]);
 
 
     if (isLoading) {
