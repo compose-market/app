@@ -28,8 +28,8 @@ interface SessionBudgetDialogProps {
   showTrigger?: boolean;
 }
 
-export function SessionBudgetDialog({ 
-  open: controlledOpen, 
+export function SessionBudgetDialog({
+  open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   showTrigger = true,
 }: SessionBudgetDialogProps = {}) {
@@ -38,11 +38,11 @@ export function SessionBudgetDialog({
   const [selectedBudget, setSelectedBudget] = useState(budgetPresets[1].value); // Default $5
   const [duration, setDuration] = useState(24); // Default 24 hours
   const [internalOpen, setInternalOpen] = useState(false);
-  
+
   // Support both controlled and uncontrolled modes
   const isControlled = controlledOpen !== undefined;
   const open = isControlled ? controlledOpen : internalOpen;
-  const setOpen = isControlled ? (controlledOnOpenChange || (() => {})) : setInternalOpen;
+  const setOpen = isControlled ? (controlledOnOpenChange || (() => { })) : setInternalOpen;
 
   if (!isConnected) return null;
 
@@ -58,13 +58,13 @@ export function SessionBudgetDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       {showTrigger && (
         <DialogTrigger asChild>
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             size="sm"
             className="border-cyan-500/30 bg-cyan-500/5 text-cyan-400 hover:bg-cyan-500/10 font-mono"
           >
             <Zap className="w-4 h-4 mr-2" />
-            {session.isActive ? "Session Active" : "Enable Agent Mode"}
+            {session.isActive ? "Session Active" : "Start Session"}
           </Button>
         </DialogTrigger>
       )}
@@ -251,8 +251,8 @@ export function SessionIndicator() {
 
   return (
     <div className="flex items-center gap-2">
-      <Badge 
-        variant="outline" 
+      <Badge
+        variant="outline"
         className="border-cyan-500/50 bg-cyan-500/10 text-cyan-400 font-mono text-xs"
       >
         <Zap className="w-3 h-3 mr-1" />
