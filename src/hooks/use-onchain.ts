@@ -60,6 +60,9 @@ export interface OnchainManowar {
   coordinatorModel: string;
   hasActiveRfa: boolean;
   rfaId: number;
+  // Identity fields from IPFS metadata
+  dnaHash?: string;
+  walletAddress?: string;
   // Resolved metadata
   metadata?: ManowarMetadata;
   agentIds?: number[];
@@ -219,6 +222,38 @@ async function fetchManowarData(manowarId: number): Promise<OnchainManowar | nul
   } catch (error) {
     console.error(`Failed to fetch manowar ${manowarId}:`, error);
     return null;
+  }
+}
+
+async function fetchManowarMetadata(manowar: OnchainManowar): Promise<OnchainManowar> {
+  if (!manowar.banner || !manowar.banner.startsWith("ipfs://")) {
+    return manowar;
+  }
+
+  try {
+    const cid = manowar.banner.replace("ipfs://", "");
+
+    // Validate CID format
+    if (!cid.startsWith("Qm") && !cid.startsWith("baf")) {
+      console.warn(`[use-onchain] Skipping invalid CID for manowar ${manowar.id}: ${cid}`);
+      return manowar;
+    }
+
+    const url = getIpfsUrl(cid);
+    const response = await fetch(url);
+    if (!response.ok) throw new Error("Failed to fetch metadata");
+    const metadata = await response.json() as ManowarMetadata;
+
+    // walletAddress and dnaHash come from IPFS metadata - this is the SINGLE SOURCE OF TRUTH
+    return {
+      ...manowar,
+      metadata,
+      dnaHash: metadata.dnaHash,
+      walletAddress: metadata.walletAddress,
+    };
+  } catch (error) {
+    console.error(`Failed to fetch metadata for manowar ${manowar.id}:`, error);
+    return manowar;
   }
 }
 
@@ -402,14 +437,16 @@ export function useManowarsWithRFA() {
 
 
 /**
- * Fetch a single manowar by ID
+ * Fetch a single manowar by ID (with IPFS metadata)
  */
 export function useOnchainManowar(manowarId: number | null) {
   return useQuery({
     queryKey: ["onchain-manowar", manowarId],
     queryFn: async () => {
       if (!manowarId) return null;
-      return fetchManowarData(manowarId);
+      const manowar = await fetchManowarData(manowarId);
+      if (!manowar) return null;
+      return fetchManowarMetadata(manowar);
     },
     enabled: !!manowarId,
     staleTime: 30 * 1000,

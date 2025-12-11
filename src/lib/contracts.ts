@@ -665,6 +665,55 @@ export function computeExternalAgentHash(registry: string, address: string): `0x
   );
 }
 
+/**
+ * Compute Manowar DNA hash for unique identification
+ * 
+ * This creates a unique identifier for a manowar workflow based on:
+ * - The manowar contract address
+ * - The agent IDs included in the workflow
+ * - A timestamp (for uniqueness even with same agents)
+ * 
+ * This hash is stored on-chain and in IPFS metadata at minting time.
+ * Both frontend and backend fetch it from there - never duplicate derivation.
+ */
+export function computeManowarDnaHash(
+  agentIds: number[],
+  timestamp: number
+): `0x${string}` {
+  const manowarContractAddress = getContractAddress("Manowar");
+  const sortedAgentIds = [...agentIds].sort((a, b) => a - b);
+  const agentIdsStr = sortedAgentIds.join(",");
+
+  return keccak256(
+    encodePacked(
+      ["address", "string", "uint256", "string"],
+      [manowarContractAddress, agentIdsStr, BigInt(timestamp), ":manowar:dna"]
+    )
+  );
+}
+
+/**
+ * Derive manowar wallet address from DNA hash + timestamp
+ * 
+ * Similar to agent wallet derivation, this creates a unique wallet address
+ * for the manowar workflow. This wallet can be used for:
+ * - Receiving x402 payments
+ * - Signing workflow-level transactions
+ * - Unique identification in the system
+ * 
+ * The wallet address is stored in IPFS metadata as the single source of truth.
+ */
+export function deriveManowarWalletAddress(dnaHash: `0x${string}`, timestamp: number): `0x${string}` {
+  const derivationSeed = keccak256(
+    encodePacked(
+      ["bytes32", "uint256", "string"],
+      [dnaHash, BigInt(timestamp), ":manowar:wallet"]
+    )
+  );
+
+  return computeAddressFromPrivateKey(derivationSeed);
+}
+
 // =============================================================================
 // Types
 // =============================================================================

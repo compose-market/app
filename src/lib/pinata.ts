@@ -238,6 +238,10 @@ export interface ManowarMetadata {
   description: string;
   banner?: string; // IPFS URI
   image?: string;  // Standard NFT metadata field (gateway URL for explorer compatibility)
+  // Identity - single source of truth derived at mint time
+  dnaHash?: string; // keccak256(contractAddress + agentIds + timestamp)
+  walletAddress?: string; // Derived wallet for x402 payments
+  walletTimestamp?: number; // Timestamp used in derivation
   agents: Array<{
     agentId: number;
     name: string;
