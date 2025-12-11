@@ -162,6 +162,17 @@ export default function AgentDetailPage() {
     }
   }, [agent, agentWallet]);
 
+  // Pre-register agent when chat is opened (avoids 404 -> register race condition)
+  useEffect(() => {
+    if (showChat && agentWallet) {
+      autoRegisterAgent().then((ok) => {
+        if (!ok) {
+          console.warn("[agent] Pre-registration failed, will retry on 404");
+        }
+      });
+    }
+  }, [showChat, agentWallet, autoRegisterAgent]);
+
   // Send chat message with x402 payment
   const handleSendMessage = useCallback(async () => {
     if (!inputValue.trim() || sending || !agentWallet) return;
