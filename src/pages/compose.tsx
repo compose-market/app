@@ -88,7 +88,7 @@ import {
 } from "@/hooks/use-registry";
 import type { ConnectorInfo, ConnectorTool, WorkflowStep } from "@/lib/services";
 import { executeRegistryTool } from "@/lib/services";
-import { WorkflowOutputPanel, type WorkflowExecutionResult } from "@/components/WorkflowOutput";
+import { WorkflowOutputPanel, type WorkflowExecutionResult } from "@/components/workflow-output";
 import { type Agent, type AgentRegistryId, AGENT_REGISTRIES, formatInteractions, COMMON_TAGS } from "@/lib/agents";
 
 // =============================================================================

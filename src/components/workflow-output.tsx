@@ -1,5 +1,5 @@
 /**
- * WorkflowOutput - Display multimodal workflow execution results
+ * workflow-output - Display multimodal workflow execution results
  * 
  * This component shows the output from workflow executions in compose.tsx,
  * supporting images, audio, video, text, and step-by-step results.
