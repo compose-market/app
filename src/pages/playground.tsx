@@ -1,10 +1,10 @@
 /**
  * Playground - Test models and MCP plugins with x402 payment
  */
-import { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from "react";
 import { useActiveWallet } from "thirdweb/react";
 import { wrapFetchWithPayment } from "thirdweb/x402";
-import { useSession } from "@/hooks/use-session";
+import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
 import { thirdwebClient, INFERENCE_PRICE_WEI } from "@/lib/thirdweb";
 import { createNormalizedFetch } from "@/lib/payment";
@@ -17,6 +17,15 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import {
   Send,
   Bot,
@@ -38,6 +47,11 @@ import {
   Paperclip,
   X,
   ExternalLink,
+  Mic,
+  MicOff,
+  Video,
+  ChevronsUpDown,
+  Check,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -76,9 +90,10 @@ interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   timestamp: number;
-  type?: "text" | "image" | "audio" | "embedding";
+  type?: "text" | "image" | "audio" | "video" | "embedding";
   imageUrl?: string;
   audioUrl?: string;
+  videoUrl?: string;
 }
 
 interface GoatTool {
@@ -274,6 +289,84 @@ function getTaskLabel(task?: string) {
 }
 
 // =============================================================================
+// Memoized Chat Message Component (prevents re-renders during streaming)
+// =============================================================================
+
+interface ChatMessageItemProps {
+  message: ChatMessage;
+}
+
+const ChatMessageItem = memo(function ChatMessageItem({ message }: ChatMessageItemProps) {
+  return (
+    <div
+      className={cn(
+        "flex gap-3",
+        message.role === "user" && "justify-end"
+      )}
+    >
+      {message.role === "assistant" && (
+        <div className="w-8 h-8 rounded-full bg-cyan-500/20 flex items-center justify-center flex-shrink-0">
+          {message.type === "image" ? (
+            <ImageIcon className="h-4 w-4 text-cyan-400" />
+          ) : message.type === "audio" ? (
+            <Music className="h-4 w-4 text-cyan-400" />
+          ) : message.type === "video" ? (
+            <Video className="h-4 w-4 text-cyan-400" />
+          ) : (
+            <Bot className="h-4 w-4 text-cyan-400" />
+          )}
+        </div>
+      )}
+      <div
+        className={cn(
+          "max-w-[80%] rounded-lg px-4 py-3",
+          message.role === "user"
+            ? "bg-cyan-600 text-white"
+            : "bg-zinc-800 text-zinc-100"
+        )}
+      >
+        {/* Image result */}
+        {message.imageUrl && (
+          <img
+            src={message.imageUrl}
+            alt="Generated"
+            className="rounded-lg max-w-full mb-2"
+          />
+        )}
+
+        {/* Audio result */}
+        {message.audioUrl && (
+          <audio controls className="w-full mb-2">
+            <source src={message.audioUrl} />
+          </audio>
+        )}
+
+        {/* Video result */}
+        {message.videoUrl && (
+          <video controls className="rounded-lg max-w-full mb-2">
+            <source src={message.videoUrl} />
+          </video>
+        )}
+
+        {/* Text content */}
+        {message.type === "embedding" ? (
+          <pre className="text-xs overflow-auto max-h-64 font-mono">
+            {message.content || "..."}
+          </pre>
+        ) : (
+          <p className="whitespace-pre-wrap">{message.content || "..."}</p>
+        )}
+      </div>
+      {message.role === "user" && (
+        <div className="w-8 h-8 rounded-full bg-zinc-700 flex items-center justify-center flex-shrink-0">
+          <User className="h-4 w-4 text-zinc-300" />
+        </div>
+      )}
+    </div>
+  );
+});
+
+// =============================================================================
 // Main Component
 // =============================================================================
 
@@ -294,8 +387,10 @@ export default function PlaygroundPage() {
 
   // Model filtering
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
   const [selectedTask, setSelectedTask] = useState("all");
   const [taskCategories, setTaskCategories] = useState<{ id: string; label: string; count: number }[]>([]);
+  const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
 
   // Model Test State
   const [selectedModel, setSelectedModel] = useState<string>("");
@@ -362,6 +457,13 @@ export default function PlaygroundPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const conversationIdRef = useRef<string>(`conv-${Date.now()}`);
 
+  // Audio recording state
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSupported, setRecordingSupported] = useState(true);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const resultsEndRef = useRef<HTMLDivElement>(null);
 
@@ -412,27 +514,37 @@ export default function PlaygroundPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Filtered models based on search and task filter
-  const filteredModels = models.filter((model) => {
-    // Task filter
-    if (selectedTask !== "all" && model.task !== selectedTask) {
-      return false;
-    }
-    // Search filter
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      return (
-        model.id.toLowerCase().includes(query) ||
-        model.name.toLowerCase().includes(query) ||
-        model.source.toLowerCase().includes(query) ||
-        (model.ownedBy && model.ownedBy.toLowerCase().includes(query))
-      );
-    }
-    return true;
-  });
+  // Debounce search query for performance (150ms delay)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
-  // Get selected model info
-  const selectedModelInfo = models.find((m) => m.id === selectedModel);
+  // Filtered models based on search and task filter (memoized for performance)
+  const filteredModels = useMemo(() => {
+    return models.filter((model) => {
+      // Task filter
+      if (selectedTask !== "all" && model.task !== selectedTask) {
+        return false;
+      }
+      // Search filter (using debounced value)
+      if (debouncedSearchQuery) {
+        const query = debouncedSearchQuery.toLowerCase();
+        return (
+          model.id.toLowerCase().includes(query) ||
+          model.name.toLowerCase().includes(query) ||
+          model.source.toLowerCase().includes(query) ||
+          (model.ownedBy && model.ownedBy.toLowerCase().includes(query))
+        );
+      }
+      return true;
+    });
+  }, [models, selectedTask, debouncedSearchQuery]);
+
+  // Get selected model info (memoized)
+  const selectedModelInfo = useMemo(() => models.find((m) => m.id === selectedModel), [models, selectedModel]);
 
   // Determine output type from task
   const getOutputType = (task: string): "text" | "image" | "audio" | "embedding" => {
@@ -569,8 +681,8 @@ export default function PlaygroundPage() {
           );
         }
 
-        const estimatedTokens = Math.ceil(fullResponse.length / 4);
-        recordUsage(estimatedTokens);
+        // Record USDC usage for the session (default = INFERENCE_PRICE_WEI = $0.005)
+        recordUsage();
       } else if (contentType.includes("image")) {
         // Image response
         const blob = await response.blob();
@@ -580,7 +692,7 @@ export default function PlaygroundPage() {
             m.id === assistantId ? { ...m, content: "Generated image:", imageUrl, type: "image" } : m
           )
         );
-        recordUsage(1000);
+        recordUsage();
       } else if (contentType.includes("audio")) {
         // Audio response
         const blob = await response.blob();
@@ -590,7 +702,17 @@ export default function PlaygroundPage() {
             m.id === assistantId ? { ...m, content: "Generated audio:", audioUrl, type: "audio" } : m
           )
         );
-        recordUsage(500);
+        recordUsage();
+      } else if (contentType.includes("video")) {
+        // Video response
+        const blob = await response.blob();
+        const videoUrl = URL.createObjectURL(blob);
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId ? { ...m, content: "Generated video:", videoUrl, type: "video" } : m
+          )
+        );
+        recordUsage();
       } else {
         // JSON response (embeddings, etc.)
         const data = await response.json();
@@ -599,7 +721,7 @@ export default function PlaygroundPage() {
             m.id === assistantId ? { ...m, content: JSON.stringify(data, null, 2), type: "embedding" } : m
           )
         );
-        recordUsage(100);
+        recordUsage();
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Unknown error";
@@ -659,6 +781,86 @@ export default function PlaygroundPage() {
       cleanupConversationFiles(uploadedCids).then(() => setUploadedCids([]));
     }
   }, [uploadedCids]);
+
+  // ==========================================================================
+  // Audio Recording Handlers
+  // ==========================================================================
+
+  // Check if recording is supported on mount
+  useEffect(() => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setRecordingSupported(false);
+    }
+  }, []);
+
+  const startRecording = useCallback(async () => {
+    if (!recordingSupported) {
+      setInferenceError("Audio recording not supported in this browser");
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+
+      const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      mediaRecorderRef.current = recorder;
+      audioChunksRef.current = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        // Stop all tracks
+        mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+        mediaStreamRef.current = null;
+
+        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        const audioFile = new File([audioBlob], `recording-${Date.now()}.webm`, { type: "audio/webm" });
+
+        try {
+          const preview = await fileToDataUrl(audioFile);
+          const newFile: AttachedFile = {
+            file: audioFile,
+            preview,
+            uploading: true,
+            type: "audio",
+          };
+
+          setAttachedFiles([newFile]);
+          setInferenceError(null);
+
+          // Upload to Pinata
+          const { cid, url } = await uploadConversationFile(audioFile, conversationIdRef.current);
+          setAttachedFiles((prev) =>
+            prev.map((f) => (f.file === audioFile ? { ...f, cid, url, uploading: false } : f))
+          );
+          setUploadedCids((prev) => [...prev, cid]);
+        } catch (err) {
+          console.error("Recording upload failed", err);
+          setAttachedFiles([]);
+          setInferenceError("Failed to upload recording");
+        }
+      };
+
+      recorder.start();
+      setIsRecording(true);
+      setInferenceError(null);
+    } catch (err) {
+      console.error("Failed to start recording:", err);
+      setInferenceError("Failed to access microphone. Please check permissions.");
+    }
+  }, [recordingSupported]);
+
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  }, [isRecording]);
 
   // ==========================================================================
   // Plugin Test Handlers
@@ -791,7 +993,7 @@ export default function PlaygroundPage() {
 
       // Record usage
       if (data.success) {
-        recordUsage(1000); // $0.001 per successful execution
+        recordUsage(); // $0.001 per successful execution
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Unknown error";
@@ -946,7 +1148,7 @@ export default function PlaygroundPage() {
 
       // Record usage
       if (data.success) {
-        recordUsage(1000); // $0.001 per successful execution
+        recordUsage(); // $0.001 per successful execution
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Unknown error";
@@ -1133,7 +1335,7 @@ export default function PlaygroundPage() {
 
       // Record usage
       if (data.success) {
-        recordUsage(2000); // $0.002 per successful Eliza execution
+        recordUsage(); // $0.002 per successful Eliza execution
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Unknown error";
@@ -1219,7 +1421,7 @@ export default function PlaygroundPage() {
                 {sessionActive ? formatBudget(budgetRemaining) : "$0.00"}
               </span>
             </div>
-            
+
             <div className="flex items-center gap-2">
               <Button
                 variant={sessionActive ? "outline" : "default"}
@@ -1339,73 +1541,99 @@ export default function PlaygroundPage() {
                 </SelectContent>
               </Select>
 
-              {/* Model Selector with search */}
-              <Select value={selectedModel} onValueChange={setSelectedModel}>
-                <SelectTrigger className="w-full sm:flex-1 lg:w-80 xl:w-96 bg-zinc-900 border-zinc-700 h-9">
-                  <SelectValue placeholder={modelsLoading ? "Loading..." : "Select model"} />
-                </SelectTrigger>
-                <SelectContent className="bg-zinc-900 border-zinc-700 max-h-96">
-                  {/* Search within dropdown */}
-                  <div className="p-2 border-b border-zinc-800">
-                    <Input
+              {/* Model Selector with search - Combobox pattern */}
+              <Popover open={modelDropdownOpen} onOpenChange={setModelDropdownOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={modelDropdownOpen}
+                    className="w-full sm:flex-1 lg:w-80 xl:w-96 bg-zinc-900 border-zinc-700 h-9 justify-between text-left font-normal"
+                  >
+                    <span className="truncate">
+                      {modelsLoading
+                        ? "Loading..."
+                        : selectedModelInfo?.name || "Select model..."}
+                    </span>
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[400px] p-0 bg-zinc-900 border-zinc-700" align="start">
+                  <Command className="bg-zinc-900" shouldFilter={false}>
+                    <CommandInput
                       placeholder="Search models..."
                       value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="bg-zinc-800 border-zinc-700 h-8 text-sm"
-                      onClick={(e) => e.stopPropagation()}
+                      onValueChange={setSearchQuery}
+                      className="h-9"
                     />
-                  </div>
-                  {modelsLoading ? (
-                    <div className="p-4 text-center text-zinc-500">
-                      <Loader2 className="h-4 w-4 animate-spin mx-auto mb-2" />
-                      Loading {models.length > 0 ? `${models.length}+` : ""} models...
-                    </div>
-                  ) : modelsError ? (
-                    <div className="p-4 text-center text-red-400">
-                      <AlertCircle className="h-4 w-4 mx-auto mb-2" />
-                      {modelsError}
-                    </div>
-                  ) : filteredModels.length === 0 ? (
-                    <div className="p-4 text-center text-zinc-500">
-                      {models.length === 0 ? "No models available" : `No models match "${searchQuery}"`}
-                    </div>
-                  ) : (
-                    filteredModels.slice(0, 100).map((model) => {
-                      const taskStyle = getTaskStyle(model.task);
-                      return (
-                        <SelectItem key={model.id} value={model.id}>
-                          <div className="flex items-center gap-2 w-full">
-                            <span className="truncate max-w-32 sm:max-w-40">{model.name}</span>
-                            {/* Task type badge with color - hide on very small */}
-                            {model.task && (
-                              <Badge
-                                variant="outline"
-                                className={cn(
-                                  "text-[10px] shrink-0 px-1.5 py-0 font-normal border hidden sm:flex",
-                                  taskStyle.bg,
-                                  taskStyle.text,
-                                  taskStyle.border
-                                )}
+                    <CommandList className="max-h-[300px]">
+                      {modelsLoading ? (
+                        <div className="p-4 text-center text-zinc-500">
+                          <Loader2 className="h-4 w-4 animate-spin mx-auto mb-2" />
+                          Loading {models.length > 0 ? `${models.length}+` : ""} models...
+                        </div>
+                      ) : modelsError ? (
+                        <div className="p-4 text-center text-red-400">
+                          <AlertCircle className="h-4 w-4 mx-auto mb-2" />
+                          {modelsError}
+                        </div>
+                      ) : filteredModels.length === 0 ? (
+                        <CommandEmpty>
+                          {models.length === 0 ? "No models available" : `No models match "${searchQuery}"`}
+                        </CommandEmpty>
+                      ) : (
+                        <CommandGroup>
+                          {filteredModels.slice(0, 100).map((model) => {
+                            const taskStyle = getTaskStyle(model.task);
+                            return (
+                              <CommandItem
+                                key={model.id}
+                                value={model.id}
+                                onSelect={() => {
+                                  setSelectedModel(model.id);
+                                  setModelDropdownOpen(false);
+                                }}
+                                className="flex items-center gap-2 cursor-pointer"
                               >
-                                {getTaskLabel(model.task).replace("To ", "→")}
-                              </Badge>
-                            )}
-                            {/* Source badge */}
-                            <Badge variant="outline" className="text-[10px] shrink-0 px-1.5 py-0 font-normal text-zinc-500 border-zinc-700">
-                              {model.source}
-                            </Badge>
-                          </div>
-                        </SelectItem>
-                      );
-                    })
-                  )}
-                  {filteredModels.length > 100 && (
-                    <div className="p-2 text-xs text-zinc-500 text-center border-t border-zinc-800">
-                      Showing 100 of {filteredModels.length} — use search to narrow down
-                    </div>
-                  )}
-                </SelectContent>
-              </Select>
+                                <Check
+                                  className={cn(
+                                    "h-4 w-4 shrink-0",
+                                    selectedModel === model.id ? "opacity-100" : "opacity-0"
+                                  )}
+                                />
+                                <span className="truncate max-w-32 sm:max-w-48">{model.name}</span>
+                                {/* Task type badge with color */}
+                                {model.task && (
+                                  <Badge
+                                    variant="outline"
+                                    className={cn(
+                                      "text-[10px] shrink-0 px-1.5 py-0 font-normal border hidden sm:flex",
+                                      taskStyle.bg,
+                                      taskStyle.text,
+                                      taskStyle.border
+                                    )}
+                                  >
+                                    {getTaskLabel(model.task).replace("To ", "→")}
+                                  </Badge>
+                                )}
+                                {/* Source badge */}
+                                <Badge variant="outline" className="text-[10px] shrink-0 px-1.5 py-0 font-normal text-zinc-500 border-zinc-700">
+                                  {model.source}
+                                </Badge>
+                              </CommandItem>
+                            );
+                          })}
+                        </CommandGroup>
+                      )}
+                      {filteredModels.length > 100 && (
+                        <div className="p-2 text-xs text-zinc-500 text-center border-t border-zinc-800">
+                          Showing 100 of {filteredModels.length} — use search to narrow down
+                        </div>
+                      )}
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
 
               <div className="flex items-center gap-2 sm:gap-3 shrink-0">
                 <Button
@@ -1698,63 +1926,7 @@ export default function PlaygroundPage() {
                   </div>
                 ) : (
                   messages.map((message) => (
-                    <div
-                      key={message.id}
-                      className={cn(
-                        "flex gap-3",
-                        message.role === "user" && "justify-end"
-                      )}
-                    >
-                      {message.role === "assistant" && (
-                        <div className="w-8 h-8 rounded-full bg-cyan-500/20 flex items-center justify-center flex-shrink-0">
-                          {message.type === "image" ? (
-                            <ImageIcon className="h-4 w-4 text-cyan-400" />
-                          ) : message.type === "audio" ? (
-                            <Music className="h-4 w-4 text-cyan-400" />
-                          ) : (
-                            <Bot className="h-4 w-4 text-cyan-400" />
-                          )}
-                        </div>
-                      )}
-                      <div
-                        className={cn(
-                          "max-w-[80%] rounded-lg px-4 py-3",
-                          message.role === "user"
-                            ? "bg-cyan-600 text-white"
-                            : "bg-zinc-800 text-zinc-100"
-                        )}
-                      >
-                        {/* Image result */}
-                        {message.imageUrl && (
-                          <img
-                            src={message.imageUrl}
-                            alt="Generated"
-                            className="rounded-lg max-w-full mb-2"
-                          />
-                        )}
-
-                        {/* Audio result */}
-                        {message.audioUrl && (
-                          <audio controls className="w-full mb-2">
-                            <source src={message.audioUrl} />
-                          </audio>
-                        )}
-
-                        {/* Text content */}
-                        {message.type === "embedding" ? (
-                          <pre className="text-xs overflow-auto max-h-64 font-mono">
-                            {message.content || "..."}
-                          </pre>
-                        ) : (
-                          <p className="whitespace-pre-wrap">{message.content || "..."}</p>
-                        )}
-                      </div>
-                      {message.role === "user" && (
-                        <div className="w-8 h-8 rounded-full bg-zinc-700 flex items-center justify-center flex-shrink-0">
-                          <User className="h-4 w-4 text-zinc-300" />
-                        </div>
-                      )}
-                    </div>
+                    <ChatMessageItem key={message.id} message={message} />
                   ))
                 )}
                 <div ref={messagesEndRef} />
@@ -1813,9 +1985,26 @@ export default function PlaygroundPage() {
                       attachedFiles.length > 0 && "text-cyan-400"
                     )}
                     title="Attach file"
-                    disabled={!sessionActive || streaming}
+                    disabled={!sessionActive || streaming || isRecording}
                   >
                     <Paperclip className="h-4 w-4" />
+                  </Button>
+
+                  {/* Microphone recording button */}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={isRecording ? stopRecording : startRecording}
+                    className={cn(
+                      "shrink-0 transition-colors",
+                      isRecording
+                        ? "text-red-500 hover:text-red-400 animate-pulse"
+                        : "text-zinc-400 hover:text-white"
+                    )}
+                    title={isRecording ? "Stop recording" : "Record audio"}
+                    disabled={!sessionActive || streaming || !recordingSupported}
+                  >
+                    {isRecording ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
                   </Button>
 
                   <Input
