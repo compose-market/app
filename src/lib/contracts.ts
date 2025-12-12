@@ -214,6 +214,13 @@ export const ManowarABI = [
     outputs: [{ name: "total", type: "uint256" }],
   },
   {
+    name: "tokenURI",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "tokenId", type: "uint256" }],
+    outputs: [{ name: "uri", type: "string" }],
+  },
+  {
     name: "getAgents",
     type: "function",
     stateMutability: "view",

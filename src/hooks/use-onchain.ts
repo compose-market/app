@@ -226,21 +226,28 @@ async function fetchManowarData(manowarId: number): Promise<OnchainManowar | nul
 }
 
 async function fetchManowarMetadata(manowar: OnchainManowar): Promise<OnchainManowar> {
-  if (!manowar.banner || !manowar.banner.startsWith("ipfs://")) {
-    return manowar;
-  }
-
   try {
-    const cid = manowar.banner.replace("ipfs://", "");
+    // Fetch metadata via tokenURI (standard ERC721)
+    const contract = getManowarContract();
+    const tokenUri = await readContract({
+      contract,
+      method: "function tokenURI(uint256 tokenId) view returns (string)",
+      params: [BigInt(manowar.id)],
+    }) as string;
 
-    // Validate CID format
-    if (!cid.startsWith("Qm") && !cid.startsWith("baf")) {
-      console.warn(`[use-onchain] Skipping invalid CID for manowar ${manowar.id}: ${cid}`);
+    if (!tokenUri) {
+      console.warn(`[use-onchain] No tokenURI for manowar ${manowar.id}`);
       return manowar;
     }
 
-    const url = getIpfsUrl(cid);
-    const response = await fetch(url);
+    // Handle IPFS URIs
+    let metadataUrl = tokenUri;
+    if (tokenUri.startsWith("ipfs://")) {
+      const cid = tokenUri.replace("ipfs://", "");
+      metadataUrl = getIpfsUrl(cid);
+    }
+
+    const response = await fetch(metadataUrl);
     if (!response.ok) throw new Error("Failed to fetch metadata");
     const metadata = await response.json() as ManowarMetadata;
 
@@ -451,4 +458,79 @@ export function useOnchainManowar(manowarId: number | null) {
     enabled: !!manowarId,
     staleTime: 30 * 1000,
   });
+}
+
+/**
+ * Find a manowar by its wallet address (stored in IPFS metadata)
+ * Iterates through all manowars and checks metadata for matching wallet
+ */
+async function fetchManowarByWalletAddress(walletAddress: string): Promise<OnchainManowar | null> {
+  try {
+    const contract = getManowarContract();
+
+    // Get total manowars count
+    const total = await readContract({
+      contract,
+      method: "function totalManowars() view returns (uint256)",
+      params: [],
+    }) as bigint;
+
+    const totalNum = Number(total);
+    const normalizedSearch = walletAddress.toLowerCase();
+
+    // Search through all manowars (most recent first for efficiency)
+    // Manowar IDs start at 1, not 0
+    for (let i = totalNum; i >= 1; i--) {
+      const manowar = await fetchManowarData(i);
+      if (!manowar) continue;
+
+      // Fetch metadata to get the wallet address (source of truth)
+      const manowarWithMeta = await fetchManowarMetadata(manowar);
+
+      if (manowarWithMeta.walletAddress && manowarWithMeta.walletAddress.toLowerCase() === normalizedSearch) {
+        return manowarWithMeta;
+      }
+    }
+
+    return null;
+  } catch (error) {
+    console.error(`Failed to find manowar by wallet ${walletAddress}:`, error);
+    return null;
+  }
+}
+
+/**
+ * Fetch a single manowar by wallet address
+ * This is the preferred method since wallet address is the canonical identifier
+ */
+export function useOnchainManowarByWallet(walletAddress: string | null) {
+  return useQuery({
+    queryKey: ["onchain-manowar-wallet", walletAddress?.toLowerCase()],
+    queryFn: async () => {
+      if (!walletAddress) return null;
+      return fetchManowarByWalletAddress(walletAddress);
+    },
+    enabled: !!walletAddress && walletAddress.startsWith("0x"),
+    staleTime: 30 * 1000,
+  });
+}
+
+/**
+ * Fetch a single manowar by either ID or wallet address
+ * Automatically detects the identifier type
+ */
+export function useOnchainManowarByIdentifier(identifier: string | null) {
+  // Determine if identifier is a wallet address (0x...) or numeric ID
+  // Wallet address = 0x + 40 hex chars = 42 total
+  const isWalletAddress = identifier?.startsWith("0x") && identifier.length === 42;
+  const numericId = !isWalletAddress && identifier ? parseInt(identifier) : null;
+  const walletAddress = isWalletAddress ? identifier : null;
+
+  const byIdQuery = useOnchainManowar(!isWalletAddress ? numericId : null);
+  const byWalletQuery = useOnchainManowarByWallet(isWalletAddress ? walletAddress : null);
+
+  if (isWalletAddress) {
+    return byWalletQuery;
+  }
+  return byIdQuery;
 }
