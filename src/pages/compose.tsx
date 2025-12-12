@@ -40,7 +40,7 @@ import { uploadManowarBanner, uploadManowarMetadata, getIpfsUri, getIpfsUrl, fil
 import { CHAIN_IDS, CHAIN_CONFIG, thirdwebClient, INFERENCE_PRICE_WEI, getPaymentTokenContract } from "@/lib/thirdweb";
 import { createNormalizedFetch } from "@/lib/payment";
 import { AVAILABLE_MODELS } from "@/lib/models";
-import { useSession } from "@/hooks/use-session";
+import { useSession } from "@/hooks/use-session.tsx";
 import {
   Dialog,
   DialogContent,
@@ -88,6 +88,7 @@ import {
 } from "@/hooks/use-registry";
 import type { ConnectorInfo, ConnectorTool, WorkflowStep } from "@/lib/services";
 import { executeRegistryTool } from "@/lib/services";
+import { WorkflowOutputPanel, type WorkflowExecutionResult } from "@/components/WorkflowOutput";
 import { type Agent, type AgentRegistryId, AGENT_REGISTRIES, formatInteractions, COMMON_TAGS } from "@/lib/agents";
 
 // =============================================================================
@@ -840,8 +841,13 @@ function AgentsPicker({
     return onchainAgents.map((a): Agent => {
       const avatarUri = a.metadata?.avatar;
       let avatarUrl: string | null = null;
-      if (avatarUri && avatarUri !== "none" && avatarUri.startsWith("ipfs://")) {
-        avatarUrl = getIpfsUrl(avatarUri.replace("ipfs://", ""));
+      if (avatarUri && avatarUri !== "none") {
+        // Handle both IPFS URIs (ipfs://) and gateway URLs (https://)
+        if (avatarUri.startsWith("ipfs://")) {
+          avatarUrl = getIpfsUrl(avatarUri.replace("ipfs://", ""));
+        } else if (avatarUri.startsWith("https://")) {
+          avatarUrl = avatarUri;
+        }
       }
       return {
         id: `manowar-${a.id}`,
@@ -966,6 +972,17 @@ function AgentPickerCard({
 
   const isManowar = agent.registry === "manowar";
 
+  // Resolve avatar URL - handle both IPFS URIs (ipfs://) and gateway URLs (https://)
+  // Same pattern as my-assets.tsx and agent.tsx
+  let resolvedAvatarUrl: string | null = null;
+  if (agent.avatarUrl) {
+    if (agent.avatarUrl.startsWith("ipfs://")) {
+      resolvedAvatarUrl = getIpfsUrl(agent.avatarUrl.replace("ipfs://", ""));
+    } else if (agent.avatarUrl.startsWith("https://")) {
+      resolvedAvatarUrl = agent.avatarUrl;
+    }
+  }
+
   return (
     <div
       role="button"
@@ -981,7 +998,7 @@ function AgentPickerCard({
     >
       <div className="flex items-start gap-2">
         <Avatar className={`w-8 h-8 border group-hover:border-fuchsia-500/50 ${isManowar ? "border-cyan-500/50" : "border-sidebar-border"}`}>
-          <AvatarImage src={agent.avatarUrl || undefined} alt={agent.name} />
+          <AvatarImage src={resolvedAvatarUrl || undefined} alt={agent.name} />
           <AvatarFallback className={`font-mono text-[10px] ${isManowar ? "bg-cyan-500/10 text-cyan-400" : "bg-fuchsia-500/10 text-fuchsia-400"}`}>
             {initials}
           </AvatarFallback>
@@ -1488,6 +1505,95 @@ function MintManowarDialog({
 
 
 // =============================================================================
+// Run Workflow Dialog - Capture user prompt for LangGraph supervisor
+// =============================================================================
+
+interface RunWorkflowDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  workflowName: string;
+  stepCount: number;
+  isRunning: boolean;
+  onRun: (prompt: string) => void;
+}
+
+function RunWorkflowDialog({
+  open,
+  onOpenChange,
+  workflowName,
+  stepCount,
+  isRunning,
+  onRun,
+}: RunWorkflowDialogProps) {
+  const [prompt, setPrompt] = useState("");
+
+  const handleSubmit = () => {
+    if (prompt.trim()) {
+      onRun(prompt.trim());
+      setPrompt("");
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="bg-card border-green-500/30 sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="font-display flex items-center gap-2">
+            <Play className="w-5 h-5 text-green-400" />
+            Run {workflowName || "Workflow"}
+          </DialogTitle>
+          <DialogDescription>
+            Enter a task or prompt for the workflow coordinator to execute.
+            The AI supervisor will decompose your request and delegate to the {stepCount} agent{stepCount !== 1 ? "s" : ""} in this workflow.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <Label className="text-xs font-mono text-muted-foreground">TASK / PROMPT</Label>
+            <Textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder="e.g., Research the top 5 AI tokens by market cap and generate a summary report..."
+              className="bg-background/50 font-mono border-sidebar-border resize-none text-sm"
+              rows={4}
+              autoFocus
+            />
+            <p className="text-[10px] text-muted-foreground">
+              Be specific about what you want the workflow to accomplish.
+            </p>
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isRunning}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSubmit}
+            disabled={!prompt.trim() || isRunning}
+            className="bg-green-500 hover:bg-green-600 text-white font-bold"
+          >
+            {isRunning ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Executing...
+              </>
+            ) : (
+              <>
+                <Play className="w-4 h-4 mr-2" />
+                Execute Workflow
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+
+// =============================================================================
 // Fullscreen Canvas Overlay
 // =============================================================================
 
@@ -1560,7 +1666,8 @@ function ComposeFlow() {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
-  const [reactFlowInstance, setReactFlowInstance] = useState<any>(null);
+  // Store ReactFlow instance in ref (not state) to avoid re-renders
+  const reactFlowInstanceRef = useRef<any>(null);
   const { toast } = useToast();
   const [, setLocation] = useLocation();
 
@@ -1580,12 +1687,33 @@ function ComposeFlow() {
   // Fullscreen canvas state
   const [isFullscreen, setIsFullscreen] = useState(false);
 
+  // Run workflow dialog state
+  const [showRunDialog, setShowRunDialog] = useState(false);
+
+  // Workflow output panel state
+  const [workflowResult, setWorkflowResult] = useState<WorkflowExecutionResult | null>(null);
+  const [showOutputPanel, setShowOutputPanel] = useState(false);
+
   // x402 Payment state
   const wallet = useActiveWallet();
   const { sessionActive, budgetRemaining } = useSession();
 
   // Fetch onchain agents for prices
   const { data: onchainAgents } = useOnchainAgents();
+
+  // Precompute onchain agent prices map for O(1) lookups (Fix 6)
+  const onchainPriceById = useMemo(() => {
+    const m = new Map<number, bigint>();
+    for (const a of onchainAgents ?? []) {
+      m.set(a.id, BigInt(Math.floor(parseFloat(a.licensePrice) * 1_000_000)));
+    }
+    return m;
+  }, [onchainAgents]);
+
+  // Memoized onInit callback for ReactFlow (Fix 5)
+  const onInit = useCallback((instance: any) => {
+    reactFlowInstanceRef.current = instance;
+  }, []);
 
   // Extract agent IDs and prices from workflow nodes
   const { workflowAgentIds, agentPrices } = useMemo(() => {
@@ -1617,16 +1745,14 @@ function ComposeFlow() {
         if (agentId && agentId > 0) {
           ids.push(agentId);
 
-          // Get price from agent.pricePerRequest (stored during manowar agent creation)
-          // or look up from onchain data as fallback
+          // Get price from precomputed map for O(1) lookup
           if (agent.pricePerRequest) {
             const priceWei = BigInt(Math.floor(parseFloat(agent.pricePerRequest) * 1_000_000));
             prices.set(agentId, priceWei);
           } else {
-            const onchainAgent = onchainAgents?.find((a) => a.id === agentId);
-            if (onchainAgent) {
-              const priceWei = BigInt(Math.floor(parseFloat(onchainAgent.licensePrice) * 1_000_000));
-              prices.set(agentId, priceWei);
+            const cachedPrice = onchainPriceById.get(agentId);
+            if (cachedPrice) {
+              prices.set(agentId, cachedPrice);
             }
           }
         }
@@ -1634,7 +1760,7 @@ function ComposeFlow() {
     });
 
     return { workflowAgentIds: ids, agentPrices: prices };
-  }, [nodes, onchainAgents]);
+  }, [nodes, onchainPriceById]);
 
 
   // Execution state
@@ -1664,6 +1790,101 @@ function ComposeFlow() {
     }, eds)),
     [setEdges],
   );
+
+  // Memoized onDrop handler (Fix 4 - avoids recreating on each render)
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    const rf = reactFlowInstanceRef.current;
+    if (!rf) return;
+
+    const pluginData = e.dataTransfer.getData("application/compose-plugin");
+    const agentData = e.dataTransfer.getData("application/compose-agent");
+    const position = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+
+    if (pluginData) {
+      const server = JSON.parse(pluginData);
+      const id = getNodeId();
+      const step: WorkflowStep = {
+        id,
+        name: server.name,
+        type: "connectorTool",
+        connectorId: server.registryId,
+        toolName: "execute",
+        inputTemplate: {},
+        saveAs: `steps.${server.slug || server.name.toLowerCase().replace(/\s+/g, "_")}`,
+      };
+      const newNode: Node = {
+        id,
+        type: "stepNode",
+        position,
+        data: { step, status: "pending" } as StepNodeData,
+      };
+      setNodes((nds) => [...nds, newNode]);
+      toast({ title: "Plugin Added", description: `Added "${server.name}" to canvas` });
+    } else if (agentData) {
+      const agent = JSON.parse(agentData);
+      const id = getNodeId();
+      const step: WorkflowStep = {
+        id,
+        name: agent.name,
+        type: "connectorTool",
+        connectorId: agent.registry,
+        toolName: agent.protocols?.[0]?.name || "default",
+        inputTemplate: { agentAddress: agent.address },
+        saveAs: `steps.${agent.name.toLowerCase().replace(/\s+/g, "_")}`,
+      };
+      const newNode: Node = {
+        id,
+        type: "agentNode",
+        position,
+        data: { agent, step, status: "pending" } as AgentNodeData & { step: WorkflowStep },
+      };
+      setNodes((nds) => [...nds, newNode]);
+      toast({ title: "Agent Added", description: `Added "${agent.name}" to canvas` });
+    }
+  }, [setNodes, toast]);
+
+  // Memoized onDragOver handler (Fix 4)
+  const onDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  }, []);
+
+  // Keyboard shortcuts for compose canvas
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Skip if user is typing in an input
+      if ((e.target as HTMLElement).tagName === "INPUT" ||
+        (e.target as HTMLElement).tagName === "TEXTAREA") return;
+
+      // Delete/Backspace - remove selected nodes
+      if (e.key === "Delete" || e.key === "Backspace") {
+        const selectedNodes = nodes.filter(n => n.selected);
+        if (selectedNodes.length > 0) {
+          e.preventDefault();
+          setNodes(nds => nds.filter(n => !n.selected));
+          setEdges(eds => eds.filter(e =>
+            !selectedNodes.some(n => n.id === e.source || n.id === e.target)
+          ));
+          toast({
+            title: "Deleted",
+            description: `Removed ${selectedNodes.length} step${selectedNodes.length > 1 ? "s" : ""}`
+          });
+        }
+      }
+
+      // Cmd/Ctrl+K - focus on search (find the input in the connector picker)
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        const searchInput = document.querySelector('[placeholder*="Search"]') as HTMLInputElement;
+        if (searchInput) searchInput.focus();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [nodes, setNodes, setEdges, toast]);
+
 
   // Add step from connector picker
   const handleAddStep = useCallback((connectorId: string, tool: ConnectorTool) => {
@@ -1802,7 +2023,7 @@ function ComposeFlow() {
   }, [handleAddAgentStep]);
 
   // Run workflow with x402 payment via Manowar backend
-  const handleRun = useCallback(async () => {
+  const handleRun = useCallback(async (userPrompt: string) => {
     if (currentWorkflow.steps.length === 0) {
       toast({
         title: "No Steps",
@@ -1822,17 +2043,22 @@ function ComposeFlow() {
       return;
     }
 
-    let input: Record<string, unknown> = {};
+    // Close the dialog
+    setShowRunDialog(false);
+
+    // Build input with user's prompt as the task for LangGraph supervisor
+    let additionalInput: Record<string, unknown> = {};
     try {
-      input = JSON.parse(inputJson);
+      additionalInput = JSON.parse(inputJson || "{}");
     } catch {
-      toast({
-        title: "Invalid Input",
-        description: "Input must be valid JSON",
-        variant: "destructive",
-      });
-      return;
+      // Ignore JSON parse errors for additional input
     }
+    const input: Record<string, unknown> = {
+      task: userPrompt,
+      prompt: userPrompt, // Alias for compatibility
+      message: userPrompt, // Alias for compatibility
+      ...additionalInput,
+    };
 
     // Reset node statuses
     setNodes((nds) => nds.map((n) => ({
@@ -1869,7 +2095,8 @@ function ComposeFlow() {
           steps: nodes.map((node) => {
             const nodeData = node.data as StepNodeData | (AgentNodeData & { step: WorkflowStep });
             const step = nodeData.step;
-            const agent = "agent" in nodeData ? nodeData.agent : undefined;
+            // Properly type the agent - it's from AgentNodeData which has agent: Agent type
+            const agent = "agent" in nodeData ? (nodeData as AgentNodeData).agent : undefined;
 
             // Determine step type from node type and data
             const isAgent = node.type === "agentNode" && agent;
@@ -1881,8 +2108,10 @@ function ComposeFlow() {
               type: stepType,
               connectorId: step.connectorId,
               toolName: step.toolName,
-              // For agents, pass agentAddress from inputTemplate
-              agentId: isAgent ? (step.inputTemplate?.agentAddress as string) : undefined,
+              // For agents, pass numeric agentId and wallet address
+              // Backend schema expects agentId as number, agentAddress as string
+              agentId: isAgent && agent?.onchainAgentId ? agent.onchainAgentId : undefined,
+              agentAddress: isAgent ? (step.inputTemplate?.agentAddress as string) : undefined,
               inputTemplate: step.inputTemplate || {},
               saveAs: step.saveAs || `step_${step.id}`,
             };
@@ -1932,6 +2161,16 @@ function ComposeFlow() {
           } as StepNodeData,
         };
       }));
+
+      // Store result and show output panel (cast steps status to proper union type)
+      setWorkflowResult({
+        ...result,
+        steps: result.steps.map(s => ({
+          ...s,
+          status: s.status as "pending" | "running" | "success" | "error"
+        }))
+      });
+      setShowOutputPanel(true);
 
       toast({
         title: result.success ? "Workflow Complete" : "Workflow Failed",
@@ -1992,9 +2231,9 @@ function ComposeFlow() {
         <div className="flex-1 relative rounded-t-sm border border-cyan-500/20 overflow-hidden shadow-2xl bg-black/40 min-h-[300px]">
           {/* Toolbar - responsive positioning */}
           <div className="absolute top-2 right-2 lg:top-4 lg:right-4 z-10 flex flex-wrap gap-1.5 lg:gap-2">
-            {/* Run Button */}
+            {/* Run Button - opens dialog to capture prompt */}
             <Button
-              onClick={handleRun}
+              onClick={() => setShowRunDialog(true)}
               disabled={isRunning || nodes.length === 0}
               className="bg-green-500 text-white hover:bg-green-600 font-bold font-mono shadow-lg text-xs lg:text-sm h-8 lg:h-9 px-2.5 lg:px-4"
             >
@@ -2083,62 +2322,10 @@ function ComposeFlow() {
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
                 onConnect={onConnect}
-                onInit={setReactFlowInstance}
+                onInit={onInit}
                 nodeTypes={nodeTypes}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  if (!reactFlowInstance) return;
-
-                  const pluginData = e.dataTransfer.getData("application/compose-plugin");
-                  const agentData = e.dataTransfer.getData("application/compose-agent");
-                  const position = reactFlowInstance.screenToFlowPosition({ x: e.clientX, y: e.clientY });
-
-                  if (pluginData) {
-                    const server = JSON.parse(pluginData);
-                    const id = getNodeId();
-                    const step: WorkflowStep = {
-                      id,
-                      name: server.name,
-                      type: "connectorTool",
-                      connectorId: server.registryId,
-                      toolName: "execute",
-                      inputTemplate: {},
-                      saveAs: `steps.${server.slug || server.name.toLowerCase().replace(/\s+/g, "_")}`,
-                    };
-                    const newNode: Node = {
-                      id,
-                      type: "stepNode",
-                      position,
-                      data: { step, status: "pending" } as StepNodeData,
-                    };
-                    setNodes((nds) => [...nds, newNode]);
-                    toast({ title: "Plugin Added", description: `Added "${server.name}" to canvas` });
-                  } else if (agentData) {
-                    const agent = JSON.parse(agentData);
-                    const id = getNodeId();
-                    const step: WorkflowStep = {
-                      id,
-                      name: agent.name,
-                      type: "connectorTool",
-                      connectorId: agent.registry,
-                      toolName: agent.protocols?.[0]?.name || "default",
-                      inputTemplate: { agentAddress: agent.address },
-                      saveAs: `steps.${agent.name.toLowerCase().replace(/\s+/g, "_")}`,
-                    };
-                    const newNode: Node = {
-                      id,
-                      type: "agentNode",
-                      position,
-                      data: { agent, step, status: "pending" } as AgentNodeData & { step: WorkflowStep },
-                    };
-                    setNodes((nds) => [...nds, newNode]);
-                    toast({ title: "Agent Added", description: `Added "${agent.name}" to canvas` });
-                  }
-                }}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  e.dataTransfer.dropEffect = "copy";
-                }}
+                onDrop={onDrop}
+                onDragOver={onDragOver}
                 fitView
                 proOptions={{ hideAttribution: true }}
                 className="bg-background"
@@ -2239,6 +2426,24 @@ function ComposeFlow() {
         workflowDescription={workflowDescription}
         agentIds={workflowAgentIds}
         agentPrices={agentPrices}
+      />
+
+      {/* Run Workflow Dialog - captures user prompt for LangGraph supervisor */}
+      <RunWorkflowDialog
+        open={showRunDialog}
+        onOpenChange={setShowRunDialog}
+        workflowName={workflowName || "Workflow"}
+        stepCount={nodes.length}
+        isRunning={isRunning}
+        onRun={handleRun}
+      />
+
+      {/* Workflow Output Panel */}
+      <WorkflowOutputPanel
+        open={showOutputPanel}
+        onOpenChange={setShowOutputPanel}
+        result={workflowResult}
+        workflowName={workflowName || "Workflow"}
       />
 
       {/* Warp Required Dialog */}
