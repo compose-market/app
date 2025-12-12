@@ -368,9 +368,16 @@ function ManowarAssetCard({ manowar }: { manowar: OnchainManowar }) {
 
   const explorerUrl = `${CHAIN_CONFIG[CHAIN_IDS.avalancheFuji].explorer}/token/${getContractAddress("Manowar")}?a=${manowar.id}`;
 
+  // Use wallet address for navigation (primary), fallback to numeric ID
+  const manowarPageUrl = manowar.walletAddress
+    ? `/manowar/${manowar.walletAddress}`
+    : `/manowar/${manowar.id}`;
+
   return (
-    <Card className="bg-background border-sidebar-border hover:border-fuchsia-500/50 transition-colors overflow-hidden">
-      {/* Banner */}
+    <Card
+      className="bg-background border-sidebar-border hover:border-fuchsia-500/50 transition-colors overflow-hidden cursor-pointer group"
+      onClick={() => window.location.href = manowarPageUrl}
+    >
       {bannerUrl ? (
         <div className="h-24 sm:h-32 bg-cover bg-center" style={{ backgroundImage: `url(${bannerUrl})` }} />
       ) : (
@@ -382,7 +389,7 @@ function ManowarAssetCard({ manowar }: { manowar: OnchainManowar }) {
       <CardContent className="p-4 sm:p-5 space-y-3 sm:space-y-4">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
-            <h3 className="font-display font-bold text-foreground text-sm sm:text-base truncate">
+            <h3 className="font-display font-bold text-foreground text-sm sm:text-base truncate group-hover:text-fuchsia-400 transition-colors">
               {manowar.title || `Workflow #${manowar.id}`}
             </h3>
             <p className="text-[10px] sm:text-xs font-mono text-muted-foreground">
@@ -394,6 +401,7 @@ function ManowarAssetCard({ manowar }: { manowar: OnchainManowar }) {
             target="_blank"
             rel="noopener noreferrer"
             className="p-1 text-muted-foreground hover:text-fuchsia-400 transition-colors shrink-0"
+            onClick={(e) => e.stopPropagation()}
           >
             <ExternalLink className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
           </a>

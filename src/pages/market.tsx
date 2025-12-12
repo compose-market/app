@@ -3,7 +3,7 @@
  * 
  * Browse and purchase ERC7401 workflow NFTs and submit agents for RFA bounties.
  */
-import { useState } from "react";
+import { useState, useDeferredValue } from "react";
 import * as React from "react";
 import { Link } from "wouter";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -42,6 +42,8 @@ import {
 
 export default function Market() {
   const [searchQuery, setSearchQuery] = useState("");
+  // Defer search filtering so typing stays responsive (Fix 8)
+  const deferredQuery = useDeferredValue(searchQuery);
 
   return (
     <div className="space-y-4 sm:space-y-6 lg:space-y-8">
@@ -72,15 +74,15 @@ export default function Market() {
 
       <Tabs defaultValue="manowars" className="w-full">
         <TabsList className="bg-sidebar-accent border border-sidebar-border p-1 mb-4 sm:mb-6 lg:mb-8 w-full sm:w-auto">
-          <TabsTrigger 
-            value="manowars" 
+          <TabsTrigger
+            value="manowars"
             className="flex-1 sm:flex-none data-[state=active]:bg-cyan-500 data-[state=active]:text-black font-bold font-mono tracking-wide px-3 sm:px-6 lg:px-8 text-xs sm:text-sm"
           >
             <Layers className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
             MANOWARS
           </TabsTrigger>
-          <TabsTrigger 
-            value="rfas" 
+          <TabsTrigger
+            value="rfas"
             className="flex-1 sm:flex-none data-[state=active]:bg-fuchsia-500 data-[state=active]:text-white font-bold font-mono tracking-wide px-3 sm:px-6 lg:px-8 text-xs sm:text-sm"
           >
             <FileQuestion className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
@@ -89,11 +91,11 @@ export default function Market() {
         </TabsList>
 
         <TabsContent value="manowars" className="mt-0">
-          <ManowarsTab searchQuery={searchQuery} />
+          <ManowarsTab searchQuery={deferredQuery} />
         </TabsContent>
 
         <TabsContent value="rfas" className="mt-0">
-          <RFAsTab searchQuery={searchQuery} />
+          <RFAsTab searchQuery={deferredQuery} />
         </TabsContent>
       </Tabs>
     </div>
@@ -106,26 +108,26 @@ export default function Market() {
 
 function ManowarsTab({ searchQuery }: { searchQuery: string }) {
   const [sort, setSort] = useState<"newest" | "price-low" | "price-high">("newest");
-  const { data: manowars, isLoading, error, refetch } = useOnchainManowars({ 
-    onlyComplete: true, 
-    includeRFA: false 
+  const { data: manowars, isLoading, error, refetch } = useOnchainManowars({
+    onlyComplete: true,
+    includeRFA: false
   });
 
   // Filter and sort
   const filteredManowars = React.useMemo(() => {
     if (!manowars) return [];
-    
+
     let filtered = manowars;
-    
+
     // Search filter
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
-      filtered = filtered.filter(m => 
-        m.title.toLowerCase().includes(q) || 
+      filtered = filtered.filter(m =>
+        m.title.toLowerCase().includes(q) ||
         m.description.toLowerCase().includes(q)
       );
     }
-    
+
     // Sort
     filtered = [...filtered].sort((a, b) => {
       switch (sort) {
@@ -138,7 +140,7 @@ function ManowarsTab({ searchQuery }: { searchQuery: string }) {
           return b.id - a.id;
       }
     });
-    
+
     return filtered;
   }, [manowars, searchQuery, sort]);
 
@@ -198,8 +200,8 @@ function ManowarsTab({ searchQuery }: { searchQuery: string }) {
         <div className="text-center py-20">
           <Box className="w-12 h-12 mx-auto text-red-400/50 mb-4" />
           <p className="text-red-400">{error.message}</p>
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             className="mt-4"
             onClick={() => refetch()}
           >
@@ -235,21 +237,34 @@ function ManowarsTab({ searchQuery }: { searchQuery: string }) {
   );
 }
 
-function ManowarCard({ manowar }: { manowar: OnchainManowar }) {
-  const bannerUrl = manowar.banner && manowar.banner.startsWith("ipfs://") 
+// Memoized card component to avoid re-renders when list changes (Fix 9)
+const ManowarCard = React.memo(function ManowarCard({ manowar }: { manowar: OnchainManowar }) {
+  const bannerUrl = manowar.banner && manowar.banner.startsWith("ipfs://")
     ? getIpfsUrl(manowar.banner.replace("ipfs://", ""))
     : null;
-  
+
   const unitsAvailable = manowar.units === 0 ? "∞" : `${manowar.units - manowar.unitsMinted}/${manowar.units}`;
 
+  // Use wallet address for navigation (primary), fallback to numeric ID
+  const manowarPageUrl = manowar.walletAddress
+    ? `/manowar/${manowar.walletAddress}`
+    : `/manowar/${manowar.id}`;
+
   return (
-    <Card className="glass-panel border-cyan-500/20 hover:border-cyan-500/60 transition-all duration-300 group overflow-hidden">
+    <Card
+      className="glass-panel border-cyan-500/20 hover:border-cyan-500/60 transition-all duration-300 group overflow-hidden cursor-pointer"
+      onClick={() => window.location.href = manowarPageUrl}
+    >
       {/* Banner */}
       <div className="h-28 sm:h-36 bg-gradient-to-br from-cyan-500/10 to-fuchsia-500/10 relative overflow-hidden">
         {bannerUrl ? (
-          <img 
-            src={bannerUrl} 
+          <img
+            src={bannerUrl}
             alt={manowar.title}
+            width={400}
+            height={144}
+            loading="lazy"
+            decoding="async"
             className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
           />
         ) : (
@@ -258,7 +273,7 @@ function ManowarCard({ manowar }: { manowar: OnchainManowar }) {
             <Layers className="w-10 h-10 sm:w-12 sm:h-12 text-cyan-500/30 absolute" />
           </div>
         )}
-        
+
         {/* Badges */}
         <div className="absolute top-2 right-2 flex gap-1">
           <Badge className="bg-cyan-500/20 text-cyan-400 border-cyan-500/30 text-[8px] sm:text-[10px]">
@@ -266,7 +281,7 @@ function ManowarCard({ manowar }: { manowar: OnchainManowar }) {
             ERC-7401
           </Badge>
         </div>
-        
+
         {/* Lease badge */}
         {manowar.leaseEnabled && (
           <div className="absolute top-2 left-2">
@@ -323,7 +338,7 @@ function ManowarCard({ manowar }: { manowar: OnchainManowar }) {
               </div>
             </div>
           )}
-          {manowar.coordinatorAgentId > 0 && (
+          {manowar.coordinatorModel && (
             <div className="p-1.5 sm:p-2 bg-background border border-sidebar-border/50 rounded">
               <p className="text-[8px] sm:text-[10px] text-muted-foreground uppercase">Coordinator</p>
               <div className="flex items-center gap-1">
@@ -336,23 +351,24 @@ function ManowarCard({ manowar }: { manowar: OnchainManowar }) {
       </CardContent>
 
       <CardFooter className="p-3 sm:p-4 pt-0 flex gap-2">
-        <Button 
+        <Button
           className="flex-1 bg-cyan-500 hover:bg-cyan-600 text-black font-bold font-mono text-[10px] sm:text-xs h-8 sm:h-9"
+          onClick={(e) => { e.stopPropagation(); /* TODO: Purchase */ }}
         >
           <DollarSign className="w-3 h-3 mr-1" />
           PURCHASE
         </Button>
-        <Button 
+        <Button
           variant="outline"
           className="border-sidebar-border hover:border-cyan-500/50 h-8 sm:h-9 w-8 sm:w-9"
-          onClick={() => window.open(`https://testnet.snowtrace.io/token/${import.meta.env.VITE_MANOWAR_CONTRACT}?a=${manowar.id}`, "_blank")}
+          onClick={(e) => { e.stopPropagation(); window.open(`https://testnet.snowtrace.io/token/${import.meta.env.VITE_MANOWAR_CONTRACT}?a=${manowar.id}`, "_blank"); }}
         >
           <ExternalLink className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
         </Button>
       </CardFooter>
     </Card>
   );
-}
+});
 
 // =============================================================================
 // RFAs Tab - Request-For-Agent Bounties
@@ -364,12 +380,12 @@ function RFAsTab({ searchQuery }: { searchQuery: string }) {
   // Filter
   const filteredRFAs = React.useMemo(() => {
     if (!rfaManowars) return [];
-    
+
     if (!searchQuery) return rfaManowars;
-    
+
     const q = searchQuery.toLowerCase();
-    return rfaManowars.filter(m => 
-      m.title.toLowerCase().includes(q) || 
+    return rfaManowars.filter(m =>
+      m.title.toLowerCase().includes(q) ||
       m.description.toLowerCase().includes(q)
     );
   }, [rfaManowars, searchQuery]);
@@ -423,8 +439,8 @@ function RFAsTab({ searchQuery }: { searchQuery: string }) {
         <div className="text-center py-20">
           <FileQuestion className="w-12 h-12 mx-auto text-red-400/50 mb-4" />
           <p className="text-red-400">{error.message}</p>
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             className="mt-4"
             onClick={() => refetch()}
           >
@@ -458,10 +474,11 @@ function RFAsTab({ searchQuery }: { searchQuery: string }) {
   );
 }
 
-function RFACard({ manowar }: { manowar: OnchainManowar }) {
+// Memoized RFA card component (Fix 9)
+const RFACard = React.memo(function RFACard({ manowar }: { manowar: OnchainManowar }) {
   // TODO: Fetch actual RFA data from RFA contract using manowar.rfaId
   // For now, showing manowar info with RFA indicator
-  
+
   return (
     <Card className="glass-panel border-fuchsia-500/30 hover:border-fuchsia-500/60 transition-all duration-300 group">
       <CardHeader className="p-3 sm:p-4">
@@ -517,13 +534,13 @@ function RFACard({ manowar }: { manowar: OnchainManowar }) {
       </CardContent>
 
       <CardFooter className="p-3 sm:p-4 pt-0 flex flex-col sm:flex-row gap-2">
-        <Button 
+        <Button
           className="flex-1 bg-fuchsia-500 hover:bg-fuchsia-600 text-white font-bold font-mono text-[10px] sm:text-xs h-8 sm:h-9"
         >
           <Award className="w-3 h-3 mr-1" />
           SUBMIT AGENT
         </Button>
-        <Button 
+        <Button
           variant="outline"
           className="border-sidebar-border hover:border-fuchsia-500/50 h-8 sm:h-9 text-[10px] sm:text-xs"
         >
@@ -532,4 +549,4 @@ function RFACard({ manowar }: { manowar: OnchainManowar }) {
       </CardFooter>
     </Card>
   );
-}
+});
