@@ -33,6 +33,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
 import { Cpu, DollarSign, ShieldCheck, Upload, ExternalLink, Sparkles, Plug, Search, X, ChevronRight, Loader2, Play, AlertCircle, CheckCircle2, Boxes, Brain, ArrowRightLeft, Plus, Globe } from "lucide-react";
 import { WarpAgentForm, type WarpAgentData } from "@/components/warp-form";
+import { ModelSelector } from "@/components/model-selector";
 import { AVAILABLE_MODELS, type AIModel } from "@/lib/models";
 import { useRegistryServers, useRegistrySearch, type RegistryServer, type ServerOrigin } from "@/hooks/use-registry";
 import {
@@ -194,8 +195,11 @@ export default function CreateAgent() {
 
   const isLoadingPlugins = pluginSearch.trim() ? isSearching : isLoadingDefault;
 
+  // Precompute selected plugin IDs for O(1) lookups (Fix 7)
+  const selectedIds = useMemo(() => new Set(selectedPlugins.map(p => p.id)), [selectedPlugins]);
+
   const addPlugin = (server: RegistryServer) => {
-    if (selectedPlugins.some(p => p.id === server.registryId)) return;
+    if (selectedIds.has(server.registryId)) return;
     setSelectedPlugins(prev => [...prev, {
       id: server.registryId,
       name: server.name,
@@ -794,37 +798,15 @@ export default function CreateAgent() {
                             </div>
                           ) : (
                             <div className="space-y-2">
-                              <Select onValueChange={field.onChange} value={field.value}>
-                                <FormControl>
-                                  <SelectTrigger className="bg-background/50 border-sidebar-border">
-                                    <SelectValue placeholder="Select a model" />
-                                  </SelectTrigger>
-                                </FormControl>
-                                <SelectContent>
-                                  {AVAILABLE_MODELS.filter((m, i, arr) =>
-                                    // Remove duplicate asi1-mini entries
-                                    arr.findIndex(x => x.id === m.id) === i
-                                  ).map((model) => (
-                                    <SelectItem key={model.id} value={model.id}>
-                                      {model.name}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                              <ModelSelector
+                                value={field.value}
+                                onChange={field.onChange}
+                                placeholder="Search 1300+ models..."
+                                showTaskFilter={true}
+                              />
                               <p className="text-[10px] text-muted-foreground">
                                 x402 pricing: ${(INFERENCE_PRICE_WEI / 1_000_000).toFixed(3)}/call
                               </p>
-                              <Link href="/models">
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  className="text-xs text-cyan-400 hover:text-cyan-300 p-0 h-auto"
-                                >
-                                  <ExternalLink className="w-3 h-3 mr-1" />
-                                  Browse HuggingFace models →
-                                </Button>
-                              </Link>
                             </div>
                           )}
                           <FormMessage />
