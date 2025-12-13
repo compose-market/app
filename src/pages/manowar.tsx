@@ -3,6 +3,8 @@
  * 
  * Provides interactive chat/execution interface for Manowar workflows.
  * Fetches Manowar data -> Coordinator Agent -> Executes chat via Coordinator.
+ * 
+ * Uses shared MultimodalCanvas component and hooks for the chat interface.
  */
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useParams } from "wouter";
@@ -16,55 +18,27 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { useSession } from "@/hooks/use-session.tsx";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { SessionBudgetDialog } from "@/components/session";
 import { useOnchainManowarByIdentifier, useOnchainAgent } from "@/hooks/use-onchain";
-import { getIpfsUrl, uploadConversationFile, fileToDataUrl } from "@/lib/pinata";
+import { getIpfsUrl, fileToDataUrl } from "@/lib/pinata";
+import { MultimodalCanvas } from "@/components/canvas";
+import { type ChatMessage } from "@/components/chat";
+import { useChat } from "@/hooks/use-chat";
+import { useFileAttachment, type AttachedFile } from "@/hooks/use-attachment";
+import { useAudioRecording } from "@/hooks/use-recording";
 import {
     ArrowLeft,
-    Copy,
-    ExternalLink,
-    Sparkles,
     DollarSign,
-    Package,
     Shield,
-    Zap,
-    Globe,
-    Code,
-    Link as LinkIcon,
-    CheckCircle,
-    Send,
-    Bot,
-    User,
     Loader2,
-    Layers,
-    MessageSquare,
     Play,
-    Share2,
-    Mic,
-    MicOff,
-    Video,
-    Image as ImageIcon,
-    Music,
-    Paperclip,
-    X,
+    Layers,
+    Bot,
 } from "lucide-react";
 
 const MCP_URL = (import.meta.env.VITE_MCP_URL || "https://mcp.compose.market").replace(/\/+$/, "");
-
-interface ChatMessage {
-    id: string;
-    role: "user" | "assistant";
-    content: string;
-    timestamp: number;
-    type?: "text" | "image" | "audio" | "video";
-    imageUrl?: string;
-    audioUrl?: string;
-    videoUrl?: string;
-}
 
 export default function ManowarPage() {
     const params = useParams<{ id: string }>();
@@ -84,41 +58,85 @@ export default function ManowarPage() {
     const wallet = useActiveWallet();
     const { sessionActive, budgetRemaining, recordUsage } = useSession();
 
-    // Chat state
+    // Chat state from shared hook
+    const chat = useChat();
+    const { messages, setMessages, messagesEndRef } = chat;
     const [showChat, setShowChat] = useState(false);
-    const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [inputValue, setInputValue] = useState("");
     const [sending, setSending] = useState(false);
     const [chatError, setChatError] = useState<string | null>(null);
-    const messagesEndRef = useRef<HTMLDivElement>(null);
 
     // Session dialog
     const [showSessionDialog, setShowSessionDialog] = useState(false);
 
-    // File attachment state
-    interface AttachedFile {
-        file: File;
-        cid?: string;
-        url?: string;
-        preview?: string;
-        uploading: boolean;
-        type: "image" | "audio";
-    }
-    const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
-    const fileInputRef = useRef<HTMLInputElement>(null);
-    const conversationIdRef = useRef<string>(`manowar-conv-${Date.now()}`);
+    // File attachment from shared hook
+    const manowarWallet = manowar?.walletAddress;
+    const fileAttachment = useFileAttachment({
+        conversationId: `manowar-${manowarWallet || 'unknown'}`,
+        onError: (err) => setChatError(err),
+    });
+    const { attachedFiles, fileInputRef, handleFileSelect, handleRemoveFile, isUploading } = fileAttachment;
 
-    // Audio recording state
-    const [isRecording, setIsRecording] = useState(false);
-    const [recordingSupported, setRecordingSupported] = useState(true);
-    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-    const audioChunksRef = useRef<Blob[]>([]);
-    const mediaStreamRef = useRef<MediaStream | null>(null);
+    // Audio recording from shared hook
+    const recording = useAudioRecording({
+        conversationId: `manowar-${manowarWallet || 'unknown'}`,
+        onRecordingComplete: (file) => {
+            fileAttachment.attachedFiles.length === 0 &&
+                fileAttachment.handleFileSelect({ target: { files: [file.file] } } as unknown as React.ChangeEvent<HTMLInputElement>);
+        },
+        onError: (err) => setChatError(err),
+    });
+    const { isRecording, recordingSupported, startRecording, stopRecording } = recording;
 
-    // Auto-scroll messages
+    // Note: Auto-scroll handled by useChat hook
+
+    // Auto-register manowar with backend if not registered (matching agent.tsx pattern)
+    const autoRegisterManowar = useCallback(async (): Promise<boolean> => {
+        if (!manowar || !manowar.walletAddress) return false;
+
+        try {
+            const response = await fetch(`${MCP_URL}/manowar/register`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    manowarId: manowar.id,
+                    walletAddress: manowar.walletAddress,
+                    dnaHash: manowar.dnaHash,
+                    title: manowar.title || `Manowar #${manowar.id}`,
+                    description: manowar.description || "",
+                    banner: manowar.banner,
+                    creator: manowar.creator,
+                    coordinatorAgentId: manowar.coordinatorAgentId,
+                    coordinatorModel: manowar.coordinatorModel,
+                    x402Price: manowar.x402Price,
+                    totalPrice: manowar.totalPrice,
+                }),
+            });
+
+            if (response.ok || response.status === 409) {
+                // 409 = already registered, which is fine
+                console.log(`[manowar] Auto-registered manowar ${manowar.walletAddress}`);
+                return true;
+            }
+
+            console.warn(`[manowar] Auto-registration failed:`, await response.text());
+            return false;
+        } catch (err) {
+            console.error(`[manowar] Auto-registration error:`, err);
+            return false;
+        }
+    }, [manowar]);
+
+    // Pre-register manowar when chat is opened (avoids 404 -> register race condition)
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, [messages]);
+        if (showChat && manowar?.walletAddress) {
+            autoRegisterManowar().then((ok) => {
+                if (!ok) {
+                    console.warn("[manowar] Pre-registration failed, will retry on 404");
+                }
+            });
+        }
+    }, [showChat, manowar?.walletAddress, autoRegisterManowar]);
 
     // Send chat message with x402 payment
     const handleSendMessage = useCallback(async () => {
@@ -143,7 +161,7 @@ export default function ManowarPage() {
 
         setMessages(prev => [...prev, userMessage]);
         setInputValue("");
-        setAttachedFiles([]); // Clear attachments after sending
+        fileAttachment.clearFiles(); // Clear attachments after sending
         setSending(true);
         setChatError(null);
 
@@ -310,81 +328,9 @@ export default function ManowarPage() {
         } finally {
             setSending(false);
         }
-    }, [inputValue, sending, manowar, wallet, toast, attachedFiles]);
+    }, [inputValue, sending, manowar, wallet, toast, attachedFiles, recordUsage]);
 
-    // Check recording support
-    useEffect(() => {
-        if (!navigator.mediaDevices?.getUserMedia) {
-            setRecordingSupported(false);
-        }
-    }, []);
-
-    // Recording handlers
-    const startRecording = useCallback(async () => {
-        if (!recordingSupported) {
-            setChatError("Audio recording not supported");
-            return;
-        }
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            mediaStreamRef.current = stream;
-            const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
-            mediaRecorderRef.current = recorder;
-            audioChunksRef.current = [];
-
-            recorder.ondataavailable = (e) => {
-                if (e.data.size > 0) audioChunksRef.current.push(e.data);
-            };
-
-            recorder.onstop = async () => {
-                mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
-                const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-                const audioFile = new File([audioBlob], `rec-${Date.now()}.webm`, { type: "audio/webm" });
-                try {
-                    const preview = await fileToDataUrl(audioFile);
-                    setAttachedFiles([{ file: audioFile, preview, uploading: true, type: "audio" }]);
-                    const { cid, url } = await uploadConversationFile(audioFile, conversationIdRef.current);
-                    setAttachedFiles((prev) => prev.map((f) => (f.file === audioFile ? { ...f, cid, url, uploading: false } : f)));
-                } catch {
-                    setAttachedFiles([]);
-                    setChatError("Failed to upload recording");
-                }
-            };
-
-            recorder.start();
-            setIsRecording(true);
-        } catch {
-            setChatError("Failed to access microphone");
-        }
-    }, [recordingSupported]);
-
-    const stopRecording = useCallback(() => {
-        if (mediaRecorderRef.current && isRecording) {
-            mediaRecorderRef.current.stop();
-            setIsRecording(false);
-        }
-    }, [isRecording]);
-
-    // File handlers
-    const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (e.target.files && e.target.files.length > 0) {
-            const file = e.target.files[0];
-            const type = file.type.startsWith("image/") ? "image" : "audio";
-            try {
-                const preview = await fileToDataUrl(file);
-                setAttachedFiles([{ file, preview, uploading: true, type: type as "image" | "audio" }]);
-                const { cid, url } = await uploadConversationFile(file, conversationIdRef.current);
-                setAttachedFiles((prev) => prev.map((f) => (f.file === file ? { ...f, cid, url, uploading: false } : f)));
-            } catch {
-                setAttachedFiles([]);
-                setChatError("Failed to upload file");
-            }
-        }
-    }, []);
-
-    const handleRemoveFile = useCallback((file: File) => {
-        setAttachedFiles((prev) => prev.filter((f) => f.file !== file));
-    }, []);
+    // Note: Recording and file handlers provided by hooks
     if (isLoading) {
         return (
             <div className="max-w-4xl mx-auto pb-20">
@@ -499,112 +445,33 @@ export default function ManowarPage() {
                         </Button>
                     )}
 
-                    {/* Chat Interface */}
+                    {/* Chat Interface - using shared MultimodalCanvas */}
                     {showChat && hasCoordinator && (
-                        <div className="border border-fuchsia-500/30 rounded-lg bg-background/50 overflow-hidden shadow-[0_0_30px_-5px_hsl(292_85%_55%/0.1)]">
-                            {/* Header */}
-                            <div className="p-3 border-b border-sidebar-border bg-fuchsia-500/5 flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                    <Layers className="w-4 h-4 text-fuchsia-400" />
-                                    <span className="text-sm font-mono text-fuchsia-400">Workflow Execution Console</span>
-                                </div>
-                                {!sessionActive && (
-                                    <Button size="sm" variant="outline" onClick={() => setShowSessionDialog(true)} className="text-xs">
-                                        <Zap className="w-3 h-3 mr-1" />
-                                        Start Session
-                                    </Button>
-                                )}
-                            </div>
-
-                            {/* Messages */}
-                            <ScrollArea className="h-96 p-4">
-                                {messages.length === 0 ? (
-                                    <div className="text-center text-muted-foreground text-sm py-16">
-                                        <Play className="w-12 h-12 mx-auto mb-4 opacity-50 text-fuchsia-400" />
-                                        <p>Ready to execute workflow.</p>
-                                        <p className="text-xs mt-2 text-muted-foreground/70">
-                                            Input will be sent to Coordinator <span className="text-cyan-400">{coordinatorAgent?.metadata?.name || manowar?.coordinatorModel || "Agent"}</span>
-                                        </p>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-4">
-                                        {messages.map((msg) => (
-                                            <div key={msg.id} className={`flex gap-3 ${msg.role === "user" ? "justify-end" : ""}`}>
-                                                {msg.role === "assistant" && (
-                                                    <Avatar className="w-8 h-8 shrink-0">
-                                                        <AvatarFallback className="bg-fuchsia-500/20 text-fuchsia-400 text-xs">
-                                                            {msg.type === "image" ? <ImageIcon className="w-4 h-4" /> :
-                                                                msg.type === "audio" ? <Music className="w-4 h-4" /> :
-                                                                    msg.type === "video" ? <Video className="w-4 h-4" /> :
-                                                                        <Bot className="w-4 h-4" />}
-                                                        </AvatarFallback>
-                                                    </Avatar>
-                                                )}
-                                                <div className={`max-w-[80%] p-3 rounded-lg ${msg.role === "user"
-                                                    ? "bg-cyan-500/20 text-cyan-100"
-                                                    : "bg-sidebar-accent text-foreground font-mono text-sm"
-                                                    }`}>
-                                                    {msg.imageUrl && <img src={msg.imageUrl} alt="Generated" className="rounded-lg max-w-full mb-2" />}
-                                                    {msg.audioUrl && <audio controls className="w-full mb-2"><source src={msg.audioUrl} /></audio>}
-                                                    {msg.videoUrl && <video controls className="rounded-lg max-w-full mb-2"><source src={msg.videoUrl} /></video>}
-                                                    <p className="whitespace-pre-wrap">{msg.content || <Loader2 className="w-4 h-4 animate-spin" />}</p>
-                                                </div>
-                                                {msg.role === "user" && (
-                                                    <Avatar className="w-8 h-8 shrink-0">
-                                                        <AvatarFallback className="bg-cyan-500/20 text-cyan-400 text-xs">
-                                                            <User className="w-4 h-4" />
-                                                        </AvatarFallback>
-                                                    </Avatar>
-                                                )}
-                                            </div>
-                                        ))}
-                                        <div ref={messagesEndRef} />
-                                    </div>
-                                )}
-                            </ScrollArea>
-
-                            {/* Input */}
-                            <div className="p-3 border-t border-sidebar-border">
-                                {chatError && (
-                                    <div className="text-xs text-red-400 mb-2 p-2 bg-red-500/10 rounded">{chatError}</div>
-                                )}
-                                {/* Attachment Preview */}
-                                {attachedFiles.length > 0 && (
-                                    <div className="flex flex-wrap gap-2 mb-2">
-                                        {attachedFiles.map((file, index) => (
-                                            <div key={index} className="relative group">
-                                                <div className="h-12 w-12 rounded-md overflow-hidden bg-zinc-900 border border-zinc-700 flex items-center justify-center">
-                                                    {file.type === "image" ? <img src={file.preview} alt="Preview" className="h-full w-full object-cover" /> : <Music className="h-6 w-6 text-zinc-500" />}
-                                                    {file.uploading && <div className="absolute inset-0 bg-black/50 flex items-center justify-center"><Loader2 className="h-4 w-4 animate-spin text-white" /></div>}
-                                                </div>
-                                                <button onClick={() => handleRemoveFile(file.file)} className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-zinc-800 border border-zinc-600 flex items-center justify-center text-zinc-400 hover:text-white"><X className="h-2.5 w-2.5" /></button>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                                <div className="flex gap-2">
-                                    <Button variant="ghost" size="icon" onClick={() => fileInputRef.current?.click()} disabled={sending || isRecording} className="text-zinc-400 hover:text-fuchsia-400 shrink-0 cursor-pointer" title="Attach file">
-                                        <Paperclip className="w-4 h-4" />
-                                    </Button>
-                                    <Button variant="ghost" size="icon" onClick={isRecording ? stopRecording : startRecording} disabled={sending || !recordingSupported} className={`shrink-0 transition-colors cursor-pointer ${isRecording ? "text-red-500 hover:text-red-400 animate-pulse" : "text-zinc-400 hover:text-fuchsia-400"}`} title={isRecording ? "Stop recording" : "Record audio"}>
-                                        {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                                    </Button>
-                                    <Textarea
-                                        placeholder="Enter workflow parameters or instruction..."
-                                        value={inputValue}
-                                        onChange={(e) => setInputValue(e.target.value)}
-                                        onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), handleSendMessage())}
-                                        rows={1}
-                                        className="resize-none flex-1 font-mono text-sm"
-                                        disabled={sending}
-                                    />
-                                    <Button onClick={handleSendMessage} disabled={sending || (!inputValue.trim() && attachedFiles.length === 0)} className="bg-fuchsia-500 hover:bg-fuchsia-600 text-white">
-                                        {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-                                    </Button>
-                                </div>
-                                <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept="image/*,audio/*" className="hidden" />
-                            </div>
-                        </div>
+                        <MultimodalCanvas
+                            variant="manowar"
+                            title="Workflow Execution Console"
+                            messages={messages}
+                            inputValue={inputValue}
+                            onInputChange={setInputValue}
+                            onSend={handleSendMessage}
+                            sending={sending}
+                            error={chatError}
+                            sessionActive={sessionActive}
+                            onStartSession={() => setShowSessionDialog(true)}
+                            attachedFiles={attachedFiles}
+                            onFileSelect={() => fileInputRef.current?.click()}
+                            onRemoveFile={handleRemoveFile}
+                            fileInputRef={fileInputRef}
+                            onFileInputChange={handleFileSelect}
+                            isRecording={isRecording}
+                            recordingSupported={recordingSupported}
+                            onStartRecording={startRecording}
+                            onStopRecording={stopRecording}
+                            messagesEndRef={messagesEndRef}
+                            height="h-96"
+                            emptyStateText="Ready to execute workflow."
+                            emptyStateSubtext={`Input will be sent to Coordinator ${coordinatorAgent?.metadata?.name || manowar?.coordinatorModel || "Agent"}`}
+                        />
                     )}
                 </CardContent>
             </Card>

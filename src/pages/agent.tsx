@@ -3,6 +3,8 @@
  * 
  * Shows agent info and provides interactive chat with x402 payments.
  * Includes knowledge upload and file attachments.
+ * 
+ * Uses shared MultimodalCanvas component and hooks for the chat interface.
  */
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useParams } from "wouter";
@@ -16,15 +18,19 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
 import { useOnchainAgentByIdentifier } from "@/hooks/use-onchain";
-import { getIpfsUrl, uploadConversationFile, fileToDataUrl } from "@/lib/pinata";
+import { getIpfsUrl, fileToDataUrl } from "@/lib/pinata";
+import { MultimodalCanvas } from "@/components/canvas";
+import { type ChatMessage } from "@/components/chat";
+import { useChat } from "@/hooks/use-chat";
+import { useFileAttachment, type AttachedFile } from "@/hooks/use-attachment";
+import { useAudioRecording } from "@/hooks/use-recording";
 import {
   Dialog,
   DialogContent,
@@ -46,39 +52,18 @@ import {
   Code,
   Link as LinkIcon,
   CheckCircle,
-  Send,
   Bot,
-  User,
   Loader2,
   BookOpen,
   Upload,
-  Paperclip,
-  X,
   MessageSquare,
-  Mic,
-  MicOff,
-  Video,
-  Image as ImageIcon,
-  Music,
   Plus,
   Link2,
   FileText,
-  Trash2,
-  RefreshCw,
+  X,
 } from "lucide-react";
 
 const MCP_URL = (import.meta.env.VITE_MCP_URL || "https://mcp.compose.market").replace(/\/+$/, "");
-
-interface ChatMessage {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  timestamp: number;
-  type?: "text" | "image" | "audio" | "video";
-  imageUrl?: string;
-  audioUrl?: string;
-  videoUrl?: string;
-}
 
 export default function AgentDetailPage() {
   const params = useParams<{ id: string }>();
@@ -89,22 +74,42 @@ export default function AgentDetailPage() {
   const wallet = useActiveWallet();
   const { sessionActive, budgetRemaining, recordUsage } = useSession();
 
-  // Chat state
+  // Build the A2A-compatible endpoint URL using wallet address (canonical identifier)
+  const agentWallet = agent?.walletAddress;
+
+  // Chat state from shared hook
+  const chat = useChat();
+  const { messages, setMessages, scrollContainerRef, messagesEndRef, isNearBottom,
+    streamedTextRef, currentAssistantIdRef, scheduleStreamUpdate, flushStreamContent } = chat;
   const [showChat, setShowChat] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [sending, setSending] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
   const [chatStatus, setChatStatus] = useState<"idle" | "paying" | "waiting" | "streaming">("idle");
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
-  // Streaming optimization refs (RAF batching for 60fps max)
-  const streamedTextRef = useRef("");
+  // File attachment from shared hook
+  const fileAttachment = useFileAttachment({
+    conversationId: `agent-${agentWallet || 'unknown'}`,
+    onError: (err) => setChatError(err),
+  });
+  const { attachedFiles, fileInputRef, handleFileSelect, handleRemoveFile, isUploading } = fileAttachment;
+
+  // Audio recording from shared hook
+  const recording = useAudioRecording({
+    conversationId: `agent-${agentWallet || 'unknown'}`,
+    onRecordingComplete: (file) => {
+      // When recording completes, add to attached files
+      fileAttachment.attachedFiles.length === 0 &&
+        fileAttachment.handleFileSelect({ target: { files: [file.file] } } as unknown as React.ChangeEvent<HTMLInputElement>);
+    },
+    onError: (err) => setChatError(err),
+  });
+  const { isRecording, recordingSupported, startRecording, stopRecording } = recording;
+
+  // Local RAF ref for streaming updates (used within handleSendMessage)
   const rafRef = useRef<number | null>(null);
-  const currentAssistantIdRef = useRef<string | null>(null);
 
-  // Knowledge upload state
+  // Knowledge upload state (agent-specific)
   const [showKnowledgeDialog, setShowKnowledgeDialog] = useState(false);
   const [knowledgeKey, setKnowledgeKey] = useState("");
   const [knowledgeContent, setKnowledgeContent] = useState("");
@@ -113,31 +118,9 @@ export default function AgentDetailPage() {
   const [newKnowledgeUrl, setNewKnowledgeUrl] = useState("");
   const knowledgeFileInputRef = useRef<HTMLInputElement>(null);
 
-  // File attachment state
-  interface AttachedFile {
-    file: File;
-    cid?: string;
-    url?: string;
-    preview?: string;
-    uploading: boolean;
-    type: "image" | "audio";
-  }
-  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const conversationIdRef = useRef<string>(`agent-conv-${Date.now()}`);
-
-  // Audio recording state
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordingSupported, setRecordingSupported] = useState(true);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
-
   // Session dialog
   const [showSessionDialog, setShowSessionDialog] = useState(false);
 
-  // Build the A2A-compatible endpoint URL using wallet address (canonical identifier)
-  const agentWallet = agent?.walletAddress;
   const apiEndpoint = agentWallet
     ? `https://api.compose.market/api/agent/${agentWallet}`
     : null;
@@ -147,17 +130,7 @@ export default function AgentDetailPage() {
     ? `https://api.compose.market/api/agent/${agentWallet}/invoke`
     : null;
 
-  // Stick-to-bottom scroll (only scroll if user is near bottom)
-  const isNearBottom = useCallback(() => {
-    const el = scrollContainerRef.current;
-    if (!el) return true;
-    return el.scrollHeight - el.scrollTop - el.clientHeight < 120;
-  }, []);
-
-  useEffect(() => {
-    if (!isNearBottom()) return;
-    messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
-  }, [messages, isNearBottom]);
+  // Note: Scroll behavior is handled by useChat hook via isNearBottom and messagesEndRef
 
   const copyEndpoint = () => {
     if (apiEndpoint) {
@@ -247,7 +220,7 @@ export default function AgentDetailPage() {
 
     setMessages(prev => [...prev, userMessage]);
     setInputValue("");
-    setAttachedFiles([]); // Clear attachment from input after sending
+    fileAttachment.clearFiles(); // Clear attachment from input after sending
     setSending(true);
     setChatError(null);
     setChatStatus("paying");
@@ -524,98 +497,8 @@ export default function AgentDetailPage() {
     }
   }, [agentWallet, knowledgeKey, knowledgeContent, toast]);
 
-  // ==========================================================================
-  // Recording Handlers
-  // ==========================================================================
-
-  useEffect(() => {
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setRecordingSupported(false);
-    }
-  }, []);
-
-  const startRecording = useCallback(async () => {
-    if (!recordingSupported) {
-      setChatError("Audio recording not supported in this browser");
-      return;
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaStreamRef.current = stream;
-
-      const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
-      mediaRecorderRef.current = recorder;
-      audioChunksRef.current = [];
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data);
-      };
-
-      recorder.onstop = async () => {
-        mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
-        mediaStreamRef.current = null;
-
-        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-        const audioFile = new File([audioBlob], `recording-${Date.now()}.webm`, { type: "audio/webm" });
-
-        try {
-          const preview = await fileToDataUrl(audioFile);
-          const newFile: AttachedFile = { file: audioFile, preview, uploading: true, type: "audio" };
-          setAttachedFiles([newFile]);
-
-          const { cid, url } = await uploadConversationFile(audioFile, conversationIdRef.current);
-          setAttachedFiles((prev) => prev.map((f) => (f.file === audioFile ? { ...f, cid, url, uploading: false } : f)));
-        } catch (err) {
-          console.error("Recording upload failed", err);
-          setAttachedFiles([]);
-          setChatError("Failed to upload recording");
-        }
-      };
-
-      recorder.start();
-      setIsRecording(true);
-      setChatError(null);
-    } catch (err) {
-      console.error("Failed to start recording:", err);
-      setChatError("Failed to access microphone");
-    }
-  }, [recordingSupported]);
-
-  const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-    }
-  }, [isRecording]);
-
-  // ==========================================================================
-  // File Attachment Handlers
-  // ==========================================================================
-
-  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      const file = e.target.files[0];
-      const type = file.type.startsWith("image/") ? "image" : "audio";
-
-      try {
-        const preview = await fileToDataUrl(file);
-        const newFile: AttachedFile = { file, preview, uploading: true, type: type as "image" | "audio" };
-        setAttachedFiles([newFile]);
-
-        const { cid, url } = await uploadConversationFile(file, conversationIdRef.current);
-        setAttachedFiles((prev) => prev.map((f) => (f.file === file ? { ...f, cid, url, uploading: false } : f)));
-      } catch (err) {
-        console.error("Upload failed", err);
-        setAttachedFiles([]);
-        setChatError("Failed to upload file");
-      }
-    }
-  }, []);
-
-  const handleRemoveFile = useCallback((file: File) => {
-    setAttachedFiles((prev) => prev.filter((f) => f.file !== file));
-  }, []);
+  // Note: Recording handlers provided by useAudioRecording hook
+  // Note: File attachment handlers provided by useFileAttachment hook
 
   // ==========================================================================
   // Knowledge File/URL Handlers
@@ -813,219 +696,45 @@ export default function AgentDetailPage() {
             </Button>
           </div>
 
-          {/* Chat Interface */}
+          {/* Chat Interface - using shared MultimodalCanvas */}
           {showChat && (
-            <div className="border border-cyan-500/30 rounded-lg bg-background/50 overflow-hidden">
-              {/* Chat Header */}
-              <div className="p-3 border-b border-sidebar-border bg-cyan-500/5 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Bot className="w-4 h-4 text-cyan-400" />
-                  <span className="text-sm font-mono text-cyan-400">Chat with {agent.metadata?.name || `Agent #${agent.id}`}</span>
-                </div>
-                {!sessionActive && (
-                  <Button size="sm" variant="outline" onClick={() => setShowSessionDialog(true)} className="text-xs">
-                    <Zap className="w-3 h-3 mr-1" />
-                    Start Session
-                  </Button>
-                )}
-              </div>
-
-              {/* Messages */}
-              <div ref={scrollContainerRef} className="h-64 p-4 overflow-y-auto">
-                {messages.length === 0 ? (
-                  <div className="text-center text-muted-foreground text-sm py-8">
-                    <Bot className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                    <p>Start a conversation with this agent.</p>
-                    <p className="text-xs mt-1">Requires x402 payment session.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {messages.map((msg) => (
-                      <div key={msg.id} className={`flex gap-3 ${msg.role === "user" ? "justify-end" : ""}`}>
-                        {msg.role === "assistant" && (
-                          <Avatar className="w-8 h-8 shrink-0">
-                            <AvatarFallback className="bg-cyan-500/20 text-cyan-400 text-xs">
-                              {msg.type === "image" ? <ImageIcon className="w-4 h-4" /> :
-                                msg.type === "audio" ? <Music className="w-4 h-4" /> :
-                                  msg.type === "video" ? <Video className="w-4 h-4" /> :
-                                    <Bot className="w-4 h-4" />}
-                            </AvatarFallback>
-                          </Avatar>
-                        )}
-                        <div className={`max-w-[80%] p-3 rounded-lg relative group ${msg.role === "user"
-                          ? "bg-fuchsia-500/20 text-fuchsia-100"
-                          : "bg-sidebar-accent text-foreground"
-                          }`}>
-                          {/* Per-message actions - appear on hover */}
-                          <div className="absolute -top-8 right-0 hidden group-hover:flex items-center gap-1 bg-card/90 backdrop-blur-sm border border-sidebar-border rounded-md p-1 shadow-lg">
-                            {/* Copy button */}
-                            <button
-                              onClick={() => {
-                                navigator.clipboard.writeText(msg.content);
-                                toast({ title: "Copied!", description: "Message copied to clipboard" });
-                              }}
-                              className="p-1 rounded hover:bg-sidebar-accent text-muted-foreground hover:text-foreground transition-colors"
-                              title="Copy message"
-                            >
-                              <Copy className="w-3.5 h-3.5" />
-                            </button>
-                            {/* Retry for user messages */}
-                            {msg.role === "user" && (
-                              <button
-                                onClick={() => {
-                                  setInputValue(msg.content);
-                                  toast({ title: "Retry", description: "Message loaded for re-sending" });
-                                }}
-                                className="p-1 rounded hover:bg-sidebar-accent text-muted-foreground hover:text-foreground transition-colors"
-                                title="Retry this message"
-                              >
-                                <RefreshCw className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                            {/* Delete button */}
-                            <button
-                              onClick={() => setMessages(prev => prev.filter(m => m.id !== msg.id))}
-                              className="p-1 rounded hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-colors"
-                              title="Delete message"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                          {/* Image content */}
-                          {msg.imageUrl && (
-                            <img src={msg.imageUrl} alt="Generated" className="rounded-lg max-w-full mb-2" />
-                          )}
-                          {/* Audio content */}
-                          {msg.audioUrl && (
-                            <audio controls className="w-full mb-2">
-                              <source src={msg.audioUrl} />
-                            </audio>
-                          )}
-                          {/* Video content */}
-                          {msg.videoUrl && (
-                            <video controls className="rounded-lg max-w-full mb-2">
-                              <source src={msg.videoUrl} />
-                            </video>
-                          )}
-                          {/* Text content */}
-                          <p className="text-sm whitespace-pre-wrap">{msg.content || <Loader2 className="w-4 h-4 animate-spin" />}</p>
-                        </div>
-                        {msg.role === "user" && (
-                          <Avatar className="w-8 h-8 shrink-0">
-                            <AvatarFallback className="bg-fuchsia-500/20 text-fuchsia-400 text-xs">
-                              <User className="w-4 h-4" />
-                            </AvatarFallback>
-                          </Avatar>
-                        )}
-                      </div>
-                    ))}
-                    <div ref={messagesEndRef} />
-                  </div>
-                )}
-              </div>
-
-              {/* Status Line */}
-              {chatStatus !== "idle" && (
-                <div className="px-3 py-2 border-t border-dashed border-sidebar-border bg-sidebar-accent/30 flex items-center gap-2 text-xs font-mono">
-                  <Loader2 className="w-3 h-3 animate-spin text-cyan-400" />
-                  <span className="text-muted-foreground">
-                    {chatStatus === "paying" && (
-                      <><span className="text-yellow-400">Paying...</span> Processing x402 payment</>)}
-                    {chatStatus === "waiting" && (
-                      <><span className="text-orange-400">Waiting...</span> Awaiting agent response</>)}
-                    {chatStatus === "streaming" && (
-                      <><span className="text-cyan-400">Streaming...</span> Receiving response</>)}
-                  </span>
-                </div>
-              )}
-
-              {/* Input */}
-              <div className="p-3 border-t border-sidebar-border">
-                {chatError && (
-                  <div className="text-xs text-red-400 mb-2 p-2 bg-red-500/10 rounded">{chatError}</div>
-                )}
-
-                {/* Attachment Preview */}
-                {attachedFiles.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mb-2">
-                    {attachedFiles.map((file, index) => (
-                      <div key={index} className="relative group">
-                        <div className="h-12 w-12 rounded-md overflow-hidden bg-zinc-900 border border-zinc-700 flex items-center justify-center">
-                          {file.type === "image" ? (
-                            <img src={file.preview} alt="Preview" className="h-full w-full object-cover" />
-                          ) : (
-                            <Music className="h-6 w-6 text-zinc-500" />
-                          )}
-                          {file.uploading && (
-                            <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                              <Loader2 className="h-4 w-4 animate-spin text-white" />
-                            </div>
-                          )}
-                        </div>
-                        <button
-                          onClick={() => handleRemoveFile(file.file)}
-                          className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-zinc-800 border border-zinc-600 flex items-center justify-center text-zinc-400 hover:text-white hover:bg-zinc-700"
-                        >
-                          <X className="h-2.5 w-2.5" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <div className="flex gap-2">
-                  {/* Paperclip attachment */}
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={sending || isRecording}
-                    className="text-zinc-400 hover:text-cyan-400 shrink-0 cursor-pointer"
-                    title="Attach file"
-                  >
-                    <Paperclip className="w-4 h-4" />
-                  </Button>
-
-                  {/* Microphone */}
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={isRecording ? stopRecording : startRecording}
-                    disabled={sending || !recordingSupported}
-                    className={`shrink-0 transition-colors cursor-pointer ${isRecording ? "text-red-500 hover:text-red-400 animate-pulse" : "text-zinc-400 hover:text-cyan-400"}`}
-                    title={isRecording ? "Stop recording" : "Record audio"}
-                  >
-                    {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                  </Button>
-
-                  <Textarea
-                    placeholder="Type your message..."
-                    value={inputValue}
-                    onChange={(e) => setInputValue(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), handleSendMessage())}
-                    rows={1}
-                    className="resize-none flex-1"
-                    disabled={sending}
-                  />
-                  <Button
-                    onClick={handleSendMessage}
-                    disabled={sending || (!inputValue.trim() && attachedFiles.length === 0)}
-                    className="bg-cyan-500 hover:bg-cyan-600 text-black"
-                  >
-                    {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                  </Button>
-                </div>
-
-                {/* Hidden file inputs */}
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={handleFileSelect}
-                  accept="image/*,audio/*"
-                  className="hidden"
-                />
-              </div>
-            </div>
+            <MultimodalCanvas
+              variant="agent"
+              title={`Chat with ${agent.metadata?.name || `Agent #${agent.id}`}`}
+              messages={messages}
+              inputValue={inputValue}
+              onInputChange={setInputValue}
+              onSend={handleSendMessage}
+              sending={sending}
+              status={chatStatus}
+              error={chatError}
+              sessionActive={sessionActive}
+              onStartSession={() => setShowSessionDialog(true)}
+              attachedFiles={attachedFiles}
+              onFileSelect={() => fileInputRef.current?.click()}
+              onRemoveFile={handleRemoveFile}
+              fileInputRef={fileInputRef}
+              onFileInputChange={handleFileSelect}
+              isRecording={isRecording}
+              recordingSupported={recordingSupported}
+              onStartRecording={startRecording}
+              onStopRecording={stopRecording}
+              scrollContainerRef={scrollContainerRef}
+              messagesEndRef={messagesEndRef}
+              showMessageActions
+              onCopyMessage={(content) => {
+                navigator.clipboard.writeText(content);
+                toast({ title: "Copied!", description: "Message copied to clipboard" });
+              }}
+              onRetryMessage={(content) => {
+                setInputValue(content);
+                toast({ title: "Retry", description: "Message loaded for re-sending" });
+              }}
+              onDeleteMessage={(id) => setMessages(prev => prev.filter(m => m.id !== id))}
+              height="h-96"
+              emptyStateText="Start a conversation with this agent."
+              emptyStateSubtext="Requires x402 payment session."
+            />
           )}
 
           {/* A2A Endpoints */}

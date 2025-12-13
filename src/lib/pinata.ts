@@ -247,6 +247,12 @@ export interface ManowarMetadata {
     name: string;
     role?: string;
   }>;
+  // Workflow graph edges (source -> target connections)
+  edges?: Array<{
+    source: number; // agentId or index
+    target: number; // agentId or index
+    label?: string; // optional edge description
+  }>;
   coordinator?: {
     agentId: number;
     model: string;

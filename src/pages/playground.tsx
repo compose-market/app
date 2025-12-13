@@ -54,8 +54,11 @@ import {
   Check,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ChatMessageItem } from "@/components/chat";
+import { MultimodalCanvas } from "@/components/canvas";
+import { useFileAttachment, type AttachedFile } from "@/hooks/use-attachment";
+import { useAudioRecording } from "@/hooks/use-recording";
 import {
-  uploadConversationFile,
   cleanupConversationFiles,
   getIpfsUrl,
   fileToDataUrl
@@ -288,83 +291,7 @@ function getTaskLabel(task?: string) {
   return task.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
 }
 
-// =============================================================================
-// Memoized Chat Message Component (prevents re-renders during streaming)
-// =============================================================================
-
-interface ChatMessageItemProps {
-  message: ChatMessage;
-}
-
-const ChatMessageItem = memo(function ChatMessageItem({ message }: ChatMessageItemProps) {
-  return (
-    <div
-      className={cn(
-        "flex gap-3",
-        message.role === "user" && "justify-end"
-      )}
-    >
-      {message.role === "assistant" && (
-        <div className="w-8 h-8 rounded-full bg-cyan-500/20 flex items-center justify-center flex-shrink-0">
-          {message.type === "image" ? (
-            <ImageIcon className="h-4 w-4 text-cyan-400" />
-          ) : message.type === "audio" ? (
-            <Music className="h-4 w-4 text-cyan-400" />
-          ) : message.type === "video" ? (
-            <Video className="h-4 w-4 text-cyan-400" />
-          ) : (
-            <Bot className="h-4 w-4 text-cyan-400" />
-          )}
-        </div>
-      )}
-      <div
-        className={cn(
-          "max-w-[80%] rounded-lg px-4 py-3",
-          message.role === "user"
-            ? "bg-cyan-600 text-white"
-            : "bg-zinc-800 text-zinc-100"
-        )}
-      >
-        {/* Image result */}
-        {message.imageUrl && (
-          <img
-            src={message.imageUrl}
-            alt="Generated"
-            className="rounded-lg max-w-full mb-2"
-          />
-        )}
-
-        {/* Audio result */}
-        {message.audioUrl && (
-          <audio controls className="w-full mb-2">
-            <source src={message.audioUrl} />
-          </audio>
-        )}
-
-        {/* Video result */}
-        {message.videoUrl && (
-          <video controls className="rounded-lg max-w-full mb-2">
-            <source src={message.videoUrl} />
-          </video>
-        )}
-
-        {/* Text content */}
-        {message.type === "embedding" ? (
-          <pre className="text-xs overflow-auto max-h-64 font-mono">
-            {message.content || "..."}
-          </pre>
-        ) : (
-          <p className="whitespace-pre-wrap">{message.content || "..."}</p>
-        )}
-      </div>
-      {message.role === "user" && (
-        <div className="w-8 h-8 rounded-full bg-zinc-700 flex items-center justify-center flex-shrink-0">
-          <User className="h-4 w-4 text-zinc-300" />
-        </div>
-      )}
-    </div>
-  );
-});
+// ChatMessageItem is imported from @/components/chat
 
 // =============================================================================
 // Main Component
@@ -443,26 +370,23 @@ export default function PlaygroundPage() {
   });
   const [selectedElizaAction, setSelectedElizaAction] = useState<string>("");
 
-  // File Attachment State
-  interface AttachedFile {
-    file: File;
-    cid?: string;  // Pinata CID once uploaded
-    url?: string;  // IPFS gateway URL
-    preview?: string;  // Local preview data URL
-    uploading: boolean;
-    type: "image" | "audio";
-  }
-  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
-  const [uploadedCids, setUploadedCids] = useState<string[]>([]); // Track for cleanup
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const conversationIdRef = useRef<string>(`conv-${Date.now()}`);
+  // File Attachment from shared hook
+  const fileAttachment = useFileAttachment({
+    conversationId: `playground-${Date.now()}`,
+    onError: (err) => setInferenceError(err),
+  });
+  const { attachedFiles, fileInputRef, handleFileSelect, handleRemoveFile, isUploading, uploadedCids, cleanupFiles } = fileAttachment;
 
-  // Audio recording state
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordingSupported, setRecordingSupported] = useState(true);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
+  // Audio recording from shared hook
+  const recording = useAudioRecording({
+    conversationId: `playground-${Date.now()}`,
+    onRecordingComplete: (file) => {
+      fileAttachment.attachedFiles.length === 0 &&
+        fileAttachment.handleFileSelect({ target: { files: [file.file] } } as unknown as React.ChangeEvent<HTMLInputElement>);
+    },
+    onError: (err) => setInferenceError(err),
+  });
+  const { isRecording, recordingSupported, startRecording, stopRecording } = recording;
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const resultsEndRef = useRef<HTMLDivElement>(null);
@@ -567,6 +491,17 @@ export default function PlaygroundPage() {
     if ((!inputValue.trim() && attachedFiles.length === 0) || streaming || !selectedModel) return;
 
     const attached = attachedFiles[0];
+
+    // Pre-compute attachment base64 data BEFORE clearing files
+    // This ensures we capture the file data before any state changes
+    let attachmentBase64: string | undefined;
+    let attachmentType: "image" | "audio" | undefined;
+    if (attached && attached.file) {
+      const base64Data = await fileToDataUrl(attached.file);
+      attachmentBase64 = base64Data.split(",")[1]; // Strip data:mime;base64,
+      attachmentType = attached.type;
+    }
+
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
       role: "user",
@@ -579,7 +514,7 @@ export default function PlaygroundPage() {
 
     setMessages((prev) => [...prev, userMessage]);
     setInputValue("");
-    setAttachedFiles([]); // Clear attachment from input after sending
+    fileAttachment.clearFiles(); // Clear attachment from input after sending
     setStreaming(true);
     setInferenceError(null);
 
@@ -617,20 +552,25 @@ export default function PlaygroundPage() {
       // Build request body based on output type and attachments
       let requestBody: Record<string, unknown>;
 
-      if (attached) {
-        // Handle attached file (image-to-image, ASR, etc.)
-        const base64Data = await fileToDataUrl(attached.file);
-        const base64Content = base64Data.split(",")[1]; // Strip data:mime;base64,
-
+      if (attachmentBase64) {
+        // Handle attached file with pre-computed base64 data
         if (modelTask === "image-to-image" || modelTask === "image-classification") {
           // Image-to-image requires 'image' and 'prompt'
-          requestBody = { image: base64Content, prompt: userMessage.content };
+          requestBody = { image: attachmentBase64, prompt: userMessage.content };
         } else if (modelTask === "automatic-speech-recognition") {
           // ASR requires 'audio'
-          requestBody = { audio: base64Content };
+          requestBody = { audio: attachmentBase64 };
+        } else if (outputType === "text") {
+          // Text generation with image attachment (multimodal)
+          // Include image in the messages for vision-capable models
+          requestBody = {
+            messages: [...messages, userMessage].map(({ role, content }) => ({ role, content })),
+            systemPrompt,
+            image: attachmentBase64, // Include base64 image for multimodal models
+          };
         } else {
           // Fallback generic
-          requestBody = { prompt: userMessage.content, image: base64Content };
+          requestBody = { prompt: userMessage.content, image: attachmentBase64 };
         }
       } else if (outputType === "image") {
         requestBody = { prompt: userMessage.content };
@@ -736,131 +676,18 @@ export default function PlaygroundPage() {
     }
   }, [inputValue, streaming, selectedModel, messages, systemPrompt, wallet, budgetRemaining, recordUsage, outputType]);
 
-
-  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      const file = e.target.files[0];
-      const type = file.type.startsWith("image/") ? "image" : "audio";
-
-      try {
-        const preview = await fileToDataUrl(file);
-
-        const newFile: AttachedFile = {
-          file,
-          preview,
-          uploading: true,
-          type: type as "image" | "audio"
-        };
-
-        setAttachedFiles([newFile]); // Replace (single file mode for now)
-        setInferenceError(null);
-
-        // Upload to Pinata
-        const { cid, url } = await uploadConversationFile(file, conversationIdRef.current);
-        setAttachedFiles(prev => prev.map(f => f.file === file ? { ...f, cid, url, uploading: false } : f));
-        setUploadedCids(prev => [...prev, cid]);
-      } catch (err) {
-        console.error("Upload failed", err);
-        setAttachedFiles([]);
-        setInferenceError("Failed to upload file");
-      }
-    }
-  }, []);
-
-  const handleRemoveFile = useCallback((file: File) => {
-    setAttachedFiles(prev => prev.filter(f => f.file !== file));
-  }, []);
+  // Note: handleFileSelect, handleRemoveFile, startRecording, stopRecording provided by hooks
 
   const handleClearChat = useCallback(() => {
     setMessages([]);
     setInferenceError(null);
-    setAttachedFiles([]);
+    fileAttachment.clearFiles();
 
-    // Cleanup Pinata files
+    // Cleanup Pinata files via hook
     if (uploadedCids.length > 0) {
-      cleanupConversationFiles(uploadedCids).then(() => setUploadedCids([]));
+      cleanupFiles();
     }
-  }, [uploadedCids]);
-
-  // ==========================================================================
-  // Audio Recording Handlers
-  // ==========================================================================
-
-  // Check if recording is supported on mount
-  useEffect(() => {
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setRecordingSupported(false);
-    }
-  }, []);
-
-  const startRecording = useCallback(async () => {
-    if (!recordingSupported) {
-      setInferenceError("Audio recording not supported in this browser");
-      return;
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaStreamRef.current = stream;
-
-      const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
-      mediaRecorderRef.current = recorder;
-      audioChunksRef.current = [];
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          audioChunksRef.current.push(e.data);
-        }
-      };
-
-      recorder.onstop = async () => {
-        // Stop all tracks
-        mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
-        mediaStreamRef.current = null;
-
-        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-        const audioFile = new File([audioBlob], `recording-${Date.now()}.webm`, { type: "audio/webm" });
-
-        try {
-          const preview = await fileToDataUrl(audioFile);
-          const newFile: AttachedFile = {
-            file: audioFile,
-            preview,
-            uploading: true,
-            type: "audio",
-          };
-
-          setAttachedFiles([newFile]);
-          setInferenceError(null);
-
-          // Upload to Pinata
-          const { cid, url } = await uploadConversationFile(audioFile, conversationIdRef.current);
-          setAttachedFiles((prev) =>
-            prev.map((f) => (f.file === audioFile ? { ...f, cid, url, uploading: false } : f))
-          );
-          setUploadedCids((prev) => [...prev, cid]);
-        } catch (err) {
-          console.error("Recording upload failed", err);
-          setAttachedFiles([]);
-          setInferenceError("Failed to upload recording");
-        }
-      };
-
-      recorder.start();
-      setIsRecording(true);
-      setInferenceError(null);
-    } catch (err) {
-      console.error("Failed to start recording:", err);
-      setInferenceError("Failed to access microphone. Please check permissions.");
-    }
-  }, [recordingSupported]);
-
-  const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-    }
-  }, [isRecording]);
+  }, [uploadedCids, cleanupFiles, fileAttachment]);
 
   // ==========================================================================
   // Plugin Test Handlers
@@ -1409,10 +1236,10 @@ export default function PlaygroundPage() {
   // ==========================================================================
 
   return (
-    <div className="flex min-h-[calc(100vh-4rem)] lg:h-[calc(100vh-4rem)] bg-zinc-950">
-      <div className="flex-1 flex flex-col">
+    <div className="flex h-[calc(100vh-4rem)] overflow-hidden bg-zinc-950">
+      <div className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="border-b border-zinc-800 p-3 lg:p-4">
+        <div className="shrink-0 border-b border-zinc-800 p-3 lg:p-4">
           {/* Mobile: Session controls row (shown first on mobile for prominence) */}
           <div className="flex sm:hidden items-center justify-between gap-2 mb-3 pb-3 border-b border-zinc-800">
             <div className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800">
@@ -1897,162 +1724,65 @@ export default function PlaygroundPage() {
           </CollapsibleContent>
         </Collapsible>
 
-        {/* Model Test: Canvas / Messages */}
+        {/* Model Test: Canvas / Messages - using shared MultimodalCanvas */}
         {activeTab === "model" && (
-          <>
-            <ScrollArea className="flex-1 p-4">
-              <div className="space-y-4 max-w-3xl mx-auto">
-                {messages.length === 0 ? (
-                  <div className="text-center py-20 text-zinc-500">
-                    {outputType === "image" ? (
-                      <ImageIcon className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                    ) : outputType === "audio" ? (
-                      <Music className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                    ) : (
-                      <Bot className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                    )}
-                    <p>
-                      {outputType === "image"
-                        ? "Describe an image to generate"
-                        : outputType === "audio"
-                          ? "Enter text to convert to audio"
-                          : `Start a conversation with ${selectedModelInfo?.name || "AI"}`}
-                    </p>
-                    <p className="text-sm mt-2">
-                      {sessionActive
-                        ? `Budget remaining: ${formatBudget(budgetRemaining)}`
-                        : "Start a session to begin"}
-                    </p>
-                  </div>
+          <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+            <MultimodalCanvas
+              variant="playground"
+              showHeader={false}
+              messages={messages}
+              inputValue={inputValue}
+              onInputChange={setInputValue}
+              onSend={handleSendMessage}
+              sending={streaming}
+              error={inferenceError}
+              sessionActive={sessionActive}
+              attachedFiles={attachedFiles}
+              onFileSelect={() => fileInputRef.current?.click()}
+              onRemoveFile={handleRemoveFile}
+              fileInputRef={fileInputRef}
+              onFileInputChange={handleFileSelect}
+              isRecording={isRecording}
+              recordingSupported={recordingSupported}
+              onStartRecording={startRecording}
+              onStopRecording={stopRecording}
+              onClearChat={handleClearChat}
+              messagesEndRef={messagesEndRef}
+              height="flex-1"
+              placeholder={
+                !sessionActive
+                  ? "Start a session first"
+                  : outputType === "image"
+                    ? "Describe the image you want to generate..."
+                    : outputType === "audio"
+                      ? "Enter text to convert to speech..."
+                      : attachedFiles.length > 0
+                        ? "Describe the uploaded file..."
+                        : "Type your message..."
+              }
+              emptyStateIcon={
+                outputType === "image" ? (
+                  <ImageIcon className="h-12 w-12 mx-auto mb-4 opacity-50 text-zinc-500" />
+                ) : outputType === "audio" ? (
+                  <Music className="h-12 w-12 mx-auto mb-4 opacity-50 text-zinc-500" />
                 ) : (
-                  messages.map((message) => (
-                    <ChatMessageItem key={message.id} message={message} />
-                  ))
-                )}
-                <div ref={messagesEndRef} />
-              </div>
-            </ScrollArea>
-
-            {/* Model Test: Input */}
-            <div className="border-t border-zinc-800 p-4">
-              <div className="max-w-3xl mx-auto space-y-2">
-
-                {/* Attachment Preview */}
-                {attachedFiles.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {attachedFiles.map((file, index) => (
-                      <div key={index} className="relative group">
-                        <div className="h-16 w-16 rounded-md overflow-hidden bg-zinc-900 border border-zinc-700 flex items-center justify-center">
-                          {file.type === "image" ? (
-                            <img src={file.preview} alt="Preview" className="h-full w-full object-cover" />
-                          ) : (
-                            <Music className="h-8 w-8 text-zinc-500" />
-                          )}
-                          {file.uploading && (
-                            <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                              <Loader2 className="h-4 w-4 animate-spin text-white" />
-                            </div>
-                          )}
-                        </div>
-                        <button
-                          onClick={() => handleRemoveFile(file.file)}
-                          className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-zinc-800 border border-zinc-600 flex items-center justify-center text-zinc-400 hover:text-white hover:bg-zinc-700 transition-colors"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <div className="flex gap-2">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={handleClearChat}
-                    className="text-zinc-400 hover:text-white shrink-0"
-                    title="Clear chat"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => fileInputRef.current?.click()}
-                    className={cn(
-                      "text-zinc-400 hover:text-white shrink-0",
-                      attachedFiles.length > 0 && "text-cyan-400"
-                    )}
-                    title="Attach file"
-                    disabled={!sessionActive || streaming || isRecording}
-                  >
-                    <Paperclip className="h-4 w-4" />
-                  </Button>
-
-                  {/* Microphone recording button */}
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={isRecording ? stopRecording : startRecording}
-                    className={cn(
-                      "shrink-0 transition-colors",
-                      isRecording
-                        ? "text-red-500 hover:text-red-400 animate-pulse"
-                        : "text-zinc-400 hover:text-white"
-                    )}
-                    title={isRecording ? "Stop recording" : "Record audio"}
-                    disabled={!sessionActive || streaming || !recordingSupported}
-                  >
-                    {isRecording ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-                  </Button>
-
-                  <Input
-                    value={inputValue}
-                    onChange={(e) => setInputValue(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSendMessage()}
-                    placeholder={
-                      !sessionActive
-                        ? "Start a session first"
-                        : outputType === "image"
-                          ? "Describe the image you want to generate..."
-                          : outputType === "audio"
-                            ? "Enter text to convert to speech..."
-                            : attachedFiles.length > 0
-                              ? "Describe the uploaded file..."
-                              : "Type your message..."
-                    }
-                    disabled={!sessionActive || streaming}
-                    className="bg-zinc-900 border-zinc-700"
-                  />
-                  <Button
-                    onClick={handleSendMessage}
-                    disabled={!sessionActive || streaming || (!inputValue.trim() && attachedFiles.length === 0) || !selectedModel || attachedFiles.some(f => f.uploading)}
-                  >
-                    {streaming ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Send className="h-4 w-4" />
-                    )}
-                  </Button>
-                </div>
-
-                {/* Hidden File Input */}
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  className="hidden"
-                  onChange={handleFileSelect}
-                  accept="image/*,audio/*"
-                />
-              </div>
-            </div>
-            {inferenceError && (
-              <p className="text-red-400 text-sm mt-2 text-center">
-                {inferenceError}
-              </p>
-            )}
-          </>
+                  <Bot className="h-12 w-12 mx-auto mb-4 opacity-50 text-zinc-500" />
+                )
+              }
+              emptyStateText={
+                outputType === "image"
+                  ? "Describe an image to generate"
+                  : outputType === "audio"
+                    ? "Enter text to convert to audio"
+                    : `Start a conversation with ${selectedModelInfo?.name || "AI"}`
+              }
+              emptyStateSubtext={
+                sessionActive
+                  ? `Budget remaining: ${formatBudget(budgetRemaining)}`
+                  : "Start a session to begin"
+              }
+            />
+          </div>
         )}
 
         {/* Plugins Test: Results Area */}

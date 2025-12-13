@@ -88,7 +88,7 @@ import {
 } from "@/hooks/use-registry";
 import type { ConnectorInfo, ConnectorTool, WorkflowStep } from "@/lib/services";
 import { executeRegistryTool } from "@/lib/services";
-import { WorkflowOutputPanel, type WorkflowExecutionResult } from "@/components/workflow-output";
+import { WorkflowOutputPanel, type WorkflowExecutionResult } from "@/components/output";
 import { type Agent, type AgentRegistryId, AGENT_REGISTRIES, formatInteractions, COMMON_TAGS } from "@/lib/agents";
 
 // =============================================================================
@@ -2116,6 +2116,12 @@ function ComposeFlow() {
               saveAs: step.saveAs || `step_${step.id}`,
             };
           }),
+          // Include edges for execution order/dependencies
+          edges: edges.map(e => ({
+            source: e.source,
+            target: e.target,
+            label: e.label,
+          })),
         },
         input,
       };
