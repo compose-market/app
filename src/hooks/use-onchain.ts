@@ -406,6 +406,9 @@ export function useOnchainManowars(options?: {
 
       let manowars = (await Promise.all(manowarPromises)).filter((m): m is OnchainManowar => m !== null);
 
+      // Fetch metadata for each manowar (to get walletAddress from IPFS)
+      manowars = await Promise.all(manowars.map(fetchManowarMetadata));
+
       // Filter based on options
       if (onlyComplete && !includeRFA) {
         manowars = manowars.filter(m => !m.hasActiveRfa);
