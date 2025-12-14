@@ -236,17 +236,14 @@ export interface ManowarMetadata {
   schemaVersion: string;
   title: string;
   description: string;
-  banner?: string; // IPFS URI
+  banner?: string; // Banner image IPFS URI
   image?: string;  // Standard NFT metadata field (gateway URL for explorer compatibility)
   // Identity - single source of truth derived at mint time
-  dnaHash?: string; // keccak256(contractAddress + agentIds + timestamp)
-  walletAddress?: string; // Derived wallet for x402 payments
-  walletTimestamp?: number; // Timestamp used in derivation
-  agents: Array<{
-    agentId: number;
-    name: string;
-    role?: string;
-  }>;
+  dnaHash: string;
+  walletAddress: string; // Derived wallet for x402 payments
+  walletTimestamp: number; // Timestamp used in derivation
+  // Nested agentCards - full agent metadata embedded
+  agents: AgentCard[];
   // Workflow graph edges (source -> target connections)
   edges?: Array<{
     source: number; // agentId or index
@@ -254,11 +251,10 @@ export interface ManowarMetadata {
     label?: string; // optional edge description
   }>;
   coordinator?: {
-    agentId: number;
-    model: string;
+    hasCoordinator: boolean;
+    model: string; // Only if hasCoordinator=true
   };
   pricing: {
-    x402Price: string;
     totalAgentPrice: string;
   };
   lease?: {

@@ -9,21 +9,22 @@ import { keccak256, encodePacked, type Address } from "viem";
 
 // =============================================================================
 // Deployed Contract Addresses (Avalanche Fuji)
+// Sourced from environment variables (VITE_ prefix for Vite/browser access)
 // =============================================================================
 
 export const CONTRACT_ADDRESSES = {
   [CHAIN_IDS.avalancheFuji]: {
-    AgentFactory: "0xc4b30Ad875F91AaD49191de8C609718c1895862C" as Address,
-    Clone: "0x94670C88C62A6EEA434B2d31F779F9F730F4aBd2" as Address,
-    Warp: "0x7eE6427907307f2869c09F0242c5652d1705A299" as Address,
-    Manowar: "0xB5Ae710864ac00cF559d759961c94f0084C42B01" as Address,
-    RFA: "0x67Fb2BE7CFE01469EC2060369f37A0Ca97d77f3A" as Address,
-    Lease: "0xE0748625bC00e88579fCFcF9c2A0DE38f5cDf8f6" as Address,
-    Royalties: "0xa5f3e5fE7bb86ec30af58cF2E3349863E60b9501" as Address,
-    Distributor: "0x876147C80C0e6dB470B3269823527A770e21f8eF" as Address,
-    Delegation: "0x2A77d7f96017FC5b3D082F2cc67d2ed5af4C5E40" as Address,
-    AgentManager: "0xa98e03541e56f4D070f537C9920781666f67434A" as Address,
-    Utils: "0xD799B181fDDEddE862F5CCeAa8eB9eCd464D1a33" as Address,
+    AgentFactory: (import.meta.env.VITE_AGENT_FACTORY_CONTRACT || "0xd136D89C05C521269Ba02D83dE26A75374e5d29B") as Address,
+    Clone: (import.meta.env.VITE_CLONE_CONTRACT || "0x750eF994FcEe4C1BEC61499A3eF65ECad1900468") as Address,
+    Warp: (import.meta.env.VITE_WARP_CONTRACT || "0xA01aD87A344381F1449c12a3c7575d9828e87128") as Address,
+    Manowar: (import.meta.env.VITE_MANOWAR_CONTRACT || "0xf2E37f4d33d9Bfba13f092097FeDC695413F00f4") as Address,
+    RFA: (import.meta.env.VITE_RFA_CONTRACT || "0xB79D30Dfcad93c4316d1996aEcA5da1fB218bCa7") as Address,
+    Lease: (import.meta.env.VITE_LEASE_CONTRACT || "0x6d0CC378F93D972D00CbC4e4DDBBD3Cb4E9B8354") as Address,
+    Royalties: (import.meta.env.VITE_ROYALTIES_CONTRACT || "0x1A67e2af24a28C26B8E760d6e7B21f41D7D23a5d") as Address,
+    Distributor: (import.meta.env.VITE_DISTRIBUTOR_CONTRACT || "0x0FAFe6E2925646a53Cd9F1bFF1C8a4259f41B5D5") as Address,
+    Delegation: (import.meta.env.VITE_DELEGATION_CONTRACT || "0xdbe73962269aF392B098159406ba786de4619e0E") as Address,
+    AgentManager: (import.meta.env.VITE_AGENT_MANAGER_CONTRACT || "0x7A20DBF6A2F7f7146eD7C6564404Ca8596A1282C") as Address,
+    Utils: (import.meta.env.VITE_UTILS_CONTRACT || "0x344FAa6a0B1E945aE423892C80490052EaF9dADb") as Address,
   },
 } as const;
 
@@ -191,15 +192,15 @@ export const ManowarABI = [
         { name: "title", type: "string" },
         { name: "description", type: "string" },
         { name: "banner", type: "string" },
+        { name: "manowarCardUri", type: "string" },
         { name: "totalPrice", type: "uint256" },
-        { name: "x402Price", type: "uint256" },
         { name: "units", type: "uint256" },
         { name: "unitsMinted", type: "uint256" },
         { name: "creator", type: "address" },
         { name: "leaseEnabled", type: "bool" },
         { name: "leaseDuration", type: "uint256" },
         { name: "leasePercent", type: "uint8" },
-        { name: "coordinatorAgentId", type: "uint256" },
+        { name: "hasCoordinator", type: "bool" },
         { name: "coordinatorModel", type: "string" },
         { name: "hasActiveRfa", type: "bool" },
         { name: "rfaId", type: "uint256" },
@@ -282,12 +283,12 @@ export const ManowarABI = [
           { name: "title", type: "string" },
           { name: "description", type: "string" },
           { name: "banner", type: "string" },
-          { name: "x402Price", type: "uint256" },
+          { name: "manowarCardUri", type: "string" },
           { name: "units", type: "uint256" },
           { name: "leaseEnabled", type: "bool" },
           { name: "leaseDuration", type: "uint256" },
           { name: "leasePercent", type: "uint8" },
-          { name: "coordinatorAgentId", type: "uint256" },
+          { name: "hasCoordinator", type: "bool" },
           { name: "coordinatorModel", type: "string" },
         ],
       },
@@ -311,7 +312,7 @@ export const ManowarABI = [
     stateMutability: "nonpayable",
     inputs: [
       { name: "manowarId", type: "uint256" },
-      { name: "coordinatorAgentId", type: "uint256" },
+      { name: "hasCoordinator", type: "bool" },
       { name: "model", type: "string" },
     ],
     outputs: [],
@@ -741,15 +742,15 @@ export interface ManowarData {
   title: string;
   description: string;
   banner: string;
+  manowarCardUri: string;
   totalPrice: bigint;
-  x402Price: bigint;
   units: bigint;
   unitsMinted: bigint;
   creator: Address;
   leaseEnabled: boolean;
   leaseDuration: bigint;
   leasePercent: number;
-  coordinatorAgentId: bigint;
+  hasCoordinator: boolean;
   coordinatorModel: string;
   hasActiveRfa: boolean;
   rfaId: bigint;
@@ -769,13 +770,55 @@ export interface MintManowarParams {
   title: string;
   description: string;
   banner: string;
-  x402Price: number; // USDC
+  manowarCardUri: string;
   units: number; // 0 = infinite
   leaseEnabled: boolean;
   leaseDuration: number; // days
   leasePercent: number; // 0-20
-  coordinatorAgentId: number;
+  hasCoordinator: boolean;
   coordinatorModel: string;
   agentIds: number[];
 }
+
+// =============================================================================
+// RFA (Request-For-Agent) Helpers
+// =============================================================================
+
+/**
+ * RFA Categories - based on actual MCP/GOAT registry categories
+ */
+export const RFA_CATEGORIES = [
+  { id: 'defi', label: 'DeFi', description: 'Trading, swaps, liquidity' },
+  { id: 'social', label: 'Social', description: 'Discord, Twitter, Telegram' },
+  { id: 'ai', label: 'AI', description: 'LLM, inference, embeddings' },
+  { id: 'blockchain', label: 'Blockchain', description: 'Web3, on-chain operations' },
+  { id: 'storage', label: 'Storage', description: 'IPFS, files' },
+  { id: 'productivity', label: 'Productivity', description: 'Tasks, automation' },
+  { id: 'network', label: 'Network', description: 'HTTP, APIs' },
+  { id: 'utility', label: 'Utility', description: 'General tools' },
+] as const;
+
+export type RFACategoryId = typeof RFA_CATEGORIES[number]['id'];
+
+/**
+ * Encode a skill/category string as bytes32 for the RFA contract
+ * Uses keccak256 hash of the lowercased skill string
+ */
+export function encodeSkillAsBytes32(skill: string): `0x${string}` {
+  return keccak256(
+    encodePacked(['string'], [skill.toLowerCase()])
+  );
+}
+
+/**
+ * RFA bounty constraints
+ */
+export const RFA_BOUNTY_LIMITS = {
+  MIN_BOUNTY: 0.10, // $0.10 USDC minimum
+  MAX_BOUNTY: 1.00, // $1.00 USDC maximum
+  DEFAULT_BOUNTY: 0.50, // $0.50 USDC default
+  BASIC_BOUNTY: 0.10, // Basic form completion bounty
+  README_BONUS_MAX: 0.90, // Maximum README bonus
+} as const;
+
 

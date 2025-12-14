@@ -412,12 +412,9 @@ function getConnectorBaseUrl(): string {
     return connectorUrl.replace(/\/$/, "");
   }
 
-  // Derive from API URL (connector is on a different subdomain)
-  const apiUrl = import.meta.env.VITE_API_URL;
-  if (apiUrl) {
-    return apiUrl
-      .replace(/\/api$/, "")
-      .replace("api.", "connector.");
+  // Production fallback: services.compose.market/connector
+  if (typeof window !== "undefined" && window.location.hostname !== "localhost") {
+    return "https://services.compose.market/connector";
   }
 
   return "http://localhost:4001";

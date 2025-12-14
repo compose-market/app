@@ -2,15 +2,15 @@
  * Backend Service API Client
  * 
  * Provides typed functions for interacting with:
- * - Connector Hub (https://connector.compose.market)
- * - Sandbox Service (https://sandbox.compose.market)
- * - Exporter Service (https://exporter.compose.market)
+ * - Connector Hub (https://services.compose.market/connector)
+ * - Sandbox Service (https://services.compose.market/sandbox)
+ * - Exporter Service (https://services.compose.market/exporter)
  */
 
 // Service URLs from environment or defaults
-const CONNECTOR_URL = import.meta.env.VITE_CONNECTOR_URL || "https://connector.compose.market";
-const SANDBOX_URL = import.meta.env.VITE_SANDBOX_URL || "https://sandbox.compose.market";
-const EXPORTER_URL = import.meta.env.VITE_EXPORTER_URL || "https://exporter.compose.market";
+const CONNECTOR_URL = import.meta.env.VITE_CONNECTOR_URL || "https://services.compose.market/connector";
+const SANDBOX_URL = import.meta.env.VITE_SANDBOX_URL || "https://services.compose.market/sandbox";
+const EXPORTER_URL = import.meta.env.VITE_EXPORTER_URL || "https://services.compose.market/exporter";
 
 // =============================================================================
 // Types
@@ -120,12 +120,12 @@ export async function callConnectorTool(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ toolName, args }),
   });
-  
+
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`Connector call failed: ${text}`);
   }
-  
+
   return res.json();
 }
 
@@ -156,7 +156,7 @@ export async function executeGoatPlugin(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ tool, args }),
   });
-  
+
   return res.json();
 }
 
@@ -173,7 +173,7 @@ export async function executeSpawnedServer(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ tool, args }),
   });
-  
+
   const data = await res.json();
   return {
     success: data.success ?? !data.error,
@@ -191,12 +191,12 @@ export async function fetchMcpServerTools(
   serverSlug: string
 ): Promise<{ name: string; description?: string; inputSchema?: Record<string, unknown> }[]> {
   const res = await fetch(`${CONNECTOR_URL}/mcp/servers/${encodeURIComponent(serverSlug)}/tools`);
-  
+
   if (!res.ok) {
     const data = await res.json().catch(() => ({ error: "Unknown error" }));
     throw new Error(data.error || `Failed to fetch tools: ${res.status}`);
   }
-  
+
   const data = await res.json();
   return data.tools || [];
 }
@@ -214,7 +214,7 @@ export async function executeMcpServer(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ tool, args }),
   });
-  
+
   const data = await res.json();
   return {
     success: data.success ?? !data.error,
@@ -261,7 +261,7 @@ export async function executeRemoteMcpServer(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ tool, args }),
   });
-  
+
   const data = await res.json();
   return {
     success: data.success ?? !data.error,
@@ -289,12 +289,12 @@ export async function executeRegistryTool(
     const pluginId = registryId.replace("goat:", "");
     return executeGoatPlugin(pluginId, tool, args);
   }
-  
+
   if (origin === "glama" || origin === "mcp") {
     // Use remote SSE proxy endpoint for MCP servers
     return executeRemoteMcpServer(slug, tool, args);
   }
-  
+
   if (origin === "internal") {
     // Internal connectors use the connector ID from entryPoint if available
     const actualConnectorId = connectorId || registryId.replace("internal:compose-", "");
@@ -306,7 +306,7 @@ export async function executeRegistryTool(
       content: result.content,
     };
   }
-  
+
   // Default: try spawned MCP server (verified npm packages only)
   return executeSpawnedServer(slug, tool, args);
 }
@@ -327,12 +327,12 @@ export async function runWorkflow(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ workflow, input }),
   });
-  
+
   if (!res.ok) {
     const data = await res.json().catch(() => ({ error: "Unknown error" }));
     throw new Error(data.error || `Workflow execution failed: ${res.status}`);
   }
-  
+
   return res.json();
 }
 
@@ -347,12 +347,12 @@ export async function validateWorkflow(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ workflow }),
   });
-  
+
   if (!res.ok) {
     const data = await res.json().catch(() => ({ error: "Unknown error" }));
     throw new Error(data.error || `Validation failed: ${res.status}`);
   }
-  
+
   return res.json();
 }
 
@@ -381,12 +381,12 @@ export async function exportWorkflow(options: ExportOptions): Promise<Blob> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(options),
   });
-  
+
   if (!res.ok) {
     const data = await res.json().catch(() => ({ error: "Unknown error" }));
     throw new Error(data.error || `Export failed: ${res.status}`);
   }
-  
+
   return res.blob();
 }
 
@@ -395,7 +395,7 @@ export async function exportWorkflow(options: ExportOptions): Promise<Blob> {
  */
 export async function downloadWorkflow(options: ExportOptions): Promise<void> {
   const blob = await exportWorkflow(options);
-  
+
   // Create download link
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -457,14 +457,14 @@ export async function checkAllServicesHealth(): Promise<{
     checkSandboxHealth(),
     checkExporterHealth(),
   ]);
-  
+
   return {
     connector,
     sandbox,
     exporter,
-    allHealthy: 
-      connector.status === "ok" && 
-      sandbox.status === "ok" && 
+    allHealthy:
+      connector.status === "ok" &&
+      sandbox.status === "ok" &&
       exporter.status === "ok",
   };
 }
