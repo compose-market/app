@@ -9,10 +9,10 @@ import { useQuery } from "@tanstack/react-query";
 /**
  * Build the registry base URL
  * 
- * In production: Uses CONNECTOR_SERVICE_URL from env
+ * In production: Uses VITE_CONNECTOR_URL from env (https://services.compose.market/connector)
  * In development: Falls back to localhost:4001
  * 
- * The registry is on the connector server, which is separate from the API (lambda).
+ * The registry is on the connector server under /registry path.
  */
 function getRegistryBaseUrl(): string {
   // Check for explicit connector URL first
@@ -20,16 +20,12 @@ function getRegistryBaseUrl(): string {
   if (connectorUrl) {
     return `${connectorUrl.replace(/\/$/, "")}/registry`;
   }
-  
-  const apiUrl = import.meta.env.VITE_API_URL;
-  if (apiUrl) {
-    // api.compose.market -> connector.compose.market
-    const connectorFromApi = apiUrl
-      .replace(/\/api$/, "")
-      .replace("api.", "connector.");
-    return `${connectorFromApi}/registry`;
+
+  // Production fallback: services.compose.market/connector
+  if (typeof window !== "undefined" && window.location.hostname !== "localhost") {
+    return "https://services.compose.market/connector/registry";
   }
-  
+
   // Development fallback
   return "http://localhost:4001/registry";
 }
@@ -118,14 +114,14 @@ async function fetchServers(options: ListServersOptions = {}): Promise<RegistryL
   if (options.available !== undefined) params.set("available", String(options.available));
   if (options.limit) params.set("limit", String(options.limit));
   if (options.offset) params.set("offset", String(options.offset));
-  
+
   const url = `${REGISTRY_BASE}/servers?${params}`;
   const res = await fetch(url);
-  
+
   if (!res.ok) {
     throw new Error(`Failed to fetch servers: ${res.status}`);
   }
-  
+
   return res.json();
 }
 
@@ -136,11 +132,11 @@ async function searchServers(query: string, limit = 50): Promise<RegistrySearchR
   const params = new URLSearchParams({ q: query, limit: String(limit) });
   const url = `${REGISTRY_BASE}/servers/search?${params}`;
   const res = await fetch(url);
-  
+
   if (!res.ok) {
     throw new Error(`Failed to search servers: ${res.status}`);
   }
-  
+
   return res.json();
 }
 
@@ -150,11 +146,11 @@ async function searchServers(query: string, limit = 50): Promise<RegistrySearchR
 async function fetchServer(registryId: string): Promise<RegistryServer> {
   const url = `${REGISTRY_BASE}/servers/${encodeURIComponent(registryId)}`;
   const res = await fetch(url);
-  
+
   if (!res.ok) {
     throw new Error(`Failed to fetch server: ${res.status}`);
   }
-  
+
   return res.json();
 }
 
@@ -164,11 +160,11 @@ async function fetchServer(registryId: string): Promise<RegistryServer> {
 async function fetchRegistryMeta(): Promise<RegistryMeta> {
   const url = `${REGISTRY_BASE}/meta`;
   const res = await fetch(url);
-  
+
   if (!res.ok) {
     throw new Error(`Failed to fetch registry metadata: ${res.status}`);
   }
-  
+
   return res.json();
 }
 
@@ -178,11 +174,11 @@ async function fetchRegistryMeta(): Promise<RegistryMeta> {
 async function fetchCategories(): Promise<string[]> {
   const url = `${REGISTRY_BASE}/categories`;
   const res = await fetch(url);
-  
+
   if (!res.ok) {
     throw new Error(`Failed to fetch categories: ${res.status}`);
   }
-  
+
   const data = await res.json();
   return data.categories;
 }
@@ -193,11 +189,11 @@ async function fetchCategories(): Promise<string[]> {
 async function fetchTags(): Promise<string[]> {
   const url = `${REGISTRY_BASE}/tags`;
   const res = await fetch(url);
-  
+
   if (!res.ok) {
     throw new Error(`Failed to fetch tags: ${res.status}`);
   }
-  
+
   const data = await res.json();
   return data.tags;
 }

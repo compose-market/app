@@ -8,6 +8,7 @@ import {
   getAgentFactoryContract,
   getManowarContract,
   getWarpContract,
+  getRFAContract,
   AgentFactoryABI,
   ManowarABI,
   WarpABI,
@@ -48,15 +49,15 @@ export interface OnchainManowar {
   title: string;
   description: string;
   banner: string;
+  manowarCardUri: string;
   totalPrice: string;
-  x402Price: string;
   units: number;
   unitsMinted: number;
   creator: string;
   leaseEnabled: boolean;
   leaseDuration: number;
   leasePercent: number;
-  coordinatorAgentId: number;
+  hasCoordinator: boolean;
   coordinatorModel: string;
   hasActiveRfa: boolean;
   rfaId: number;
@@ -197,7 +198,7 @@ async function fetchManowarData(manowarId: number): Promise<OnchainManowar | nul
     const contract = getManowarContract();
     const data = await readContract({
       contract,
-      method: "function getManowarData(uint256 manowarId) view returns ((string title, string description, string banner, uint256 totalPrice, uint256 x402Price, uint256 units, uint256 unitsMinted, address creator, bool leaseEnabled, uint256 leaseDuration, uint8 leasePercent, uint256 coordinatorAgentId, string coordinatorModel, bool hasActiveRfa, uint256 rfaId))",
+      method: "function getManowarData(uint256 manowarId) view returns ((string title, string description, string banner, string manowarCardUri, uint256 totalPrice, uint256 units, uint256 unitsMinted, address creator, bool leaseEnabled, uint256 leaseDuration, uint8 leasePercent, bool hasCoordinator, string coordinatorModel, bool hasActiveRfa, uint256 rfaId))",
       params: [BigInt(manowarId)],
     }) as ManowarData;
 
@@ -206,15 +207,15 @@ async function fetchManowarData(manowarId: number): Promise<OnchainManowar | nul
       title: data.title,
       description: data.description,
       banner: data.banner,
+      manowarCardUri: data.manowarCardUri,
       totalPrice: weiToUsdc(data.totalPrice),
-      x402Price: weiToUsdc(data.x402Price),
       units: Number(data.units),
       unitsMinted: Number(data.unitsMinted),
       creator: data.creator,
       leaseEnabled: data.leaseEnabled,
       leaseDuration: Number(data.leaseDuration),
       leasePercent: data.leasePercent,
-      coordinatorAgentId: Number(data.coordinatorAgentId),
+      hasCoordinator: data.hasCoordinator,
       coordinatorModel: data.coordinatorModel,
       hasActiveRfa: data.hasActiveRfa,
       rfaId: Number(data.rfaId),
@@ -537,3 +538,239 @@ export function useOnchainManowarByIdentifier(identifier: string | null) {
   }
   return byIdQuery;
 }
+
+// =============================================================================
+// RFA (Request-For-Agent) Types & Hooks
+// =============================================================================
+
+/** RFA status enum matching contract */
+export type RFAStatus = 'None' | 'Open' | 'Fulfilled' | 'Cancelled';
+
+/** On-chain RFA data */
+export interface OnchainRFA {
+  id: number;
+  manowarId: number;
+  title: string;
+  description: string;
+  requiredSkills: string[]; // bytes32[] decoded to strings
+  offerAmount: string; // USDC formatted (6 decimals)
+  offerAmountFormatted: string; // Display string like "$0.50"
+  publisher: string;
+  createdAt: number; // Unix timestamp
+  status: RFAStatus;
+  fulfilledByAgentId: number;
+  agentCreator: string;
+}
+
+/** RFA submission */
+export interface RFASubmission {
+  agentId: number;
+  creator: string;
+  submittedAt: number; // Unix timestamp
+}
+
+/** Contract RFA data structure */
+interface ContractRFAData {
+  manowarId: bigint;
+  title: string;
+  description: string;
+  requiredSkills: `0x${string}`[];
+  offerAmount: bigint;
+  publisher: string;
+  createdAt: bigint;
+  status: number;
+  fulfilledByAgentId: bigint;
+  agentCreator: string;
+}
+
+/** Contract submission structure */
+interface ContractSubmission {
+  agentId: bigint;
+  creator: string;
+  submittedAt: bigint;
+}
+
+/** Convert status number to enum */
+function parseRFAStatus(status: number): RFAStatus {
+  switch (status) {
+    case 1: return 'Open';
+    case 2: return 'Fulfilled';
+    case 3: return 'Cancelled';
+    default: return 'None';
+  }
+}
+
+/** Parse contract RFA data to typed structure */
+function parseRFAData(id: number, data: ContractRFAData): OnchainRFA {
+  const offerAmount = weiToUsdc(data.offerAmount);
+  const offerNum = parseFloat(offerAmount);
+
+  return {
+    id,
+    manowarId: Number(data.manowarId),
+    title: data.title,
+    description: data.description,
+    requiredSkills: data.requiredSkills.map(s => s), // Keep as hex for now
+    offerAmount,
+    offerAmountFormatted: offerNum < 0.01 ? `$${offerNum.toFixed(4)}` : `$${offerNum.toFixed(2)}`,
+    publisher: data.publisher,
+    createdAt: Number(data.createdAt),
+    status: parseRFAStatus(data.status),
+    fulfilledByAgentId: Number(data.fulfilledByAgentId),
+    agentCreator: data.agentCreator,
+  };
+}
+
+/** Fetch single RFA data by ID */
+async function fetchRFAData(rfaId: number): Promise<OnchainRFA | null> {
+  try {
+    const contract = getRFAContract();
+    const data = await readContract({
+      contract,
+      method: "function getRFAData(uint256 rfaId) view returns ((uint256 manowarId, string title, string description, bytes32[] requiredSkills, uint256 offerAmount, address publisher, uint256 createdAt, uint8 status, uint256 fulfilledByAgentId, address agentCreator))",
+      params: [BigInt(rfaId)],
+    }) as ContractRFAData;
+
+    return parseRFAData(rfaId, data);
+  } catch (error) {
+    console.error(`Failed to fetch RFA ${rfaId}:`, error);
+    return null;
+  }
+}
+
+/** Fetch submissions for an RFA */
+async function fetchRFASubmissions(rfaId: number): Promise<RFASubmission[]> {
+  try {
+    const contract = getRFAContract();
+    const submissions = await readContract({
+      contract,
+      method: "function getSubmissions(uint256 rfaId) view returns ((uint256 agentId, address creator, uint256 submittedAt)[])",
+      params: [BigInt(rfaId)],
+    }) as ContractSubmission[];
+
+    return submissions.map(s => ({
+      agentId: Number(s.agentId),
+      creator: s.creator,
+      submittedAt: Number(s.submittedAt),
+    }));
+  } catch (error) {
+    console.error(`Failed to fetch submissions for RFA ${rfaId}:`, error);
+    return [];
+  }
+}
+
+/**
+ * Fetch all open RFAs
+ */
+export function useOpenRFAs() {
+  return useQuery({
+    queryKey: ["rfa", "open"],
+    queryFn: async () => {
+      const contract = getRFAContract();
+
+      // Get all open RFA IDs
+      const rfaIds = await readContract({
+        contract,
+        method: "function getOpenRFAs() view returns (uint256[])",
+        params: [],
+      }) as bigint[];
+
+      if (rfaIds.length === 0) return [];
+
+      // Fetch data for each RFA
+      const rfaPromises = rfaIds.map(id => fetchRFAData(Number(id)));
+      const rfas = await Promise.all(rfaPromises);
+
+      return rfas.filter((r): r is OnchainRFA => r !== null);
+    },
+    staleTime: 30 * 1000,
+    retry: 2,
+  });
+}
+
+/**
+ * Fetch a single RFA by ID
+ */
+export function useRFAData(rfaId: number | null) {
+  return useQuery({
+    queryKey: ["rfa", "data", rfaId],
+    queryFn: async () => {
+      if (!rfaId) return null;
+      return fetchRFAData(rfaId);
+    },
+    enabled: !!rfaId && rfaId > 0,
+    staleTime: 30 * 1000,
+  });
+}
+
+/**
+ * Fetch submissions for an RFA
+ */
+export function useRFASubmissions(rfaId: number | null) {
+  return useQuery({
+    queryKey: ["rfa", "submissions", rfaId],
+    queryFn: async () => {
+      if (!rfaId) return [];
+      return fetchRFASubmissions(rfaId);
+    },
+    enabled: !!rfaId && rfaId > 0,
+    staleTime: 30 * 1000,
+  });
+}
+
+/**
+ * Fetch RFAs published by a specific address
+ */
+export function useRFAsByPublisher(publisher: string | undefined) {
+  return useQuery({
+    queryKey: ["rfa", "by-publisher", publisher?.toLowerCase()],
+    queryFn: async () => {
+      if (!publisher) return [];
+
+      const contract = getRFAContract();
+      const rfaIds = await readContract({
+        contract,
+        method: "function getRFAsByPublisher(address publisher) view returns (uint256[])",
+        params: [publisher as `0x${string}`],
+      }) as bigint[];
+
+      if (rfaIds.length === 0) return [];
+
+      const rfaPromises = rfaIds.map(id => fetchRFAData(Number(id)));
+      const rfas = await Promise.all(rfaPromises);
+
+      return rfas.filter((r): r is OnchainRFA => r !== null);
+    },
+    enabled: !!publisher,
+    staleTime: 30 * 1000,
+  });
+}
+
+/**
+ * Fetch RFAs for a specific Manowar
+ */
+export function useRFAsForManowar(manowarId: number | null) {
+  return useQuery({
+    queryKey: ["rfa", "by-manowar", manowarId],
+    queryFn: async () => {
+      if (!manowarId) return [];
+
+      const contract = getRFAContract();
+      const rfaIds = await readContract({
+        contract,
+        method: "function getRFAsForManowar(uint256 manowarId) view returns (uint256[])",
+        params: [BigInt(manowarId)],
+      }) as bigint[];
+
+      if (rfaIds.length === 0) return [];
+
+      const rfaPromises = rfaIds.map(id => fetchRFAData(Number(id)));
+      const rfas = await Promise.all(rfaPromises);
+
+      return rfas.filter((r): r is OnchainRFA => r !== null);
+    },
+    enabled: !!manowarId && manowarId > 0,
+    staleTime: 30 * 1000,
+  });
+}
+
