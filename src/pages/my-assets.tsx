@@ -20,13 +20,21 @@ import {
   Clock,
   Shield,
   ArrowRightLeft,
+  Award,
+  Target,
+  XCircle,
+  CheckCircle,
+  FileSearch,
+  Loader2,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { useActiveAccount } from "thirdweb/react";
-import { useAgentsByCreator, useManowarsByCreator, type OnchainAgent, type OnchainManowar } from "@/hooks/use-onchain";
+import { useActiveAccount, useSendTransaction } from "thirdweb/react";
+import { prepareContractCall } from "thirdweb";
+import { useAgentsByCreator, useManowarsByCreator, useRFAsByPublisher, type OnchainAgent, type OnchainManowar, type OnchainRFA } from "@/hooks/use-onchain";
 import { getIpfsUrl } from "@/lib/pinata";
 import { CHAIN_CONFIG, CHAIN_IDS } from "@/lib/thirdweb";
-import { getContractAddress } from "@/lib/contracts";
+import { getContractAddress, getRFAContract, RFA_BOUNTY_LIMITS } from "@/lib/contracts";
+import { RFADetails } from "@/components/RFADetails";
 
 export default function MyAssetsPage() {
   const { toast } = useToast();
@@ -35,6 +43,11 @@ export default function MyAssetsPage() {
 
   const { data: agents, isLoading: isLoadingAgents } = useAgentsByCreator(account?.address);
   const { data: manowars, isLoading: isLoadingManowars } = useManowarsByCreator(account?.address);
+  const { data: rfas, isLoading: isLoadingRFAs, refetch: refetchRFAs } = useRFAsByPublisher(account?.address);
+
+  // RFA detail dialog state
+  const [selectedRfaId, setSelectedRfaId] = useState<number | null>(null);
+  const [showRFADetails, setShowRFADetails] = useState(false);
 
   const copyAddress = (address: string) => {
     navigator.clipboard.writeText(address);
@@ -67,9 +80,11 @@ export default function MyAssetsPage() {
     );
   }
 
-  const isLoading = isLoadingAgents || isLoadingManowars;
+  const isLoading = isLoadingAgents || isLoadingManowars || isLoadingRFAs;
   const agentCount = agents?.length || 0;
   const manowarCount = manowars?.length || 0;
+  const rfaCount = rfas?.length || 0;
+  const openRfaCount = rfas?.filter(r => r.status === 'Open').length || 0;
 
   return (
     <div className="max-w-6xl mx-auto pb-20 px-1">
@@ -143,6 +158,13 @@ export default function MyAssetsPage() {
           >
             <Layers className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
             WORKFLOWS ({manowarCount})
+          </TabsTrigger>
+          <TabsTrigger
+            value="rfas"
+            className="flex-1 sm:flex-none font-mono data-[state=active]:bg-amber-500 data-[state=active]:text-black text-xs sm:text-sm px-3 sm:px-4"
+          >
+            <Award className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
+            RFAs ({openRfaCount})
           </TabsTrigger>
         </TabsList>
 
@@ -235,6 +257,68 @@ export default function MyAssetsPage() {
               </CardContent>
             </Card>
           )}
+        </TabsContent>
+
+        {/* RFAs Tab */}
+        <TabsContent value="rfas" className="space-y-4">
+          {isLoadingRFAs && (
+            <div className="grid grid-cols-1 gap-3 sm:gap-4">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <Card key={i} className="bg-background border-sidebar-border">
+                  <CardContent className="p-4 sm:p-5 space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 space-y-2">
+                        <Skeleton className="h-5 w-2/3" />
+                        <Skeleton className="h-3 w-full" />
+                      </div>
+                      <Skeleton className="h-8 w-24" />
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+
+          {!isLoadingRFAs && rfas && rfas.length > 0 && (
+            <div className="space-y-3">
+              {rfas.map((rfa) => (
+                <RFAAssetCard
+                  key={rfa.id}
+                  rfa={rfa}
+                  onViewDetails={() => {
+                    setSelectedRfaId(rfa.id);
+                    setShowRFADetails(true);
+                  }}
+                  onRefresh={refetchRFAs}
+                />
+              ))}
+            </div>
+          )}
+
+          {!isLoadingRFAs && (!rfas || rfas.length === 0) && (
+            <Card className="bg-background border-sidebar-border">
+              <CardContent className="p-8 sm:p-12 text-center space-y-3 sm:space-y-4">
+                <FileSearch className="w-12 h-12 sm:w-16 sm:h-16 mx-auto text-muted-foreground/50" />
+                <h3 className="text-base sm:text-lg font-display text-foreground">No RFAs Published</h3>
+                <p className="text-muted-foreground font-mono text-xs sm:text-sm max-w-md mx-auto">
+                  You haven't published any Request-For-Agent bounties yet. Create one from the Compose page.
+                </p>
+                <Link href="/compose">
+                  <Button className="bg-amber-500 text-black hover:bg-amber-400 font-bold font-mono text-sm">
+                    <Award className="w-4 h-4 mr-2" />
+                    GO TO COMPOSE
+                  </Button>
+                </Link>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* RFA Details Dialog */}
+          <RFADetails
+            rfaId={selectedRfaId}
+            open={showRFADetails}
+            onOpenChange={setShowRFADetails}
+          />
         </TabsContent>
       </Tabs>
     </div>
@@ -439,13 +523,13 @@ function ManowarAssetCard({ manowar }: { manowar: OnchainManowar }) {
         <div className="grid grid-cols-3 gap-1.5 sm:gap-3 text-[10px] sm:text-xs font-mono">
           <div className="text-center p-1.5 sm:p-2 rounded-sm bg-sidebar-accent">
             <DollarSign className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-green-400" />
-            <p className="text-foreground font-bold truncate">${manowar.x402Price}</p>
-            <p className="text-muted-foreground text-[8px] sm:text-[10px]">per use</p>
+            <p className="text-foreground font-bold truncate">${manowar.totalPrice}</p>
+            <p className="text-muted-foreground text-[8px] sm:text-[10px]">total cost</p>
           </div>
           <div className="text-center p-1.5 sm:p-2 rounded-sm bg-sidebar-accent">
-            <DollarSign className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-cyan-400" />
-            <p className="text-foreground font-bold truncate">${manowar.totalPrice}</p>
-            <p className="text-muted-foreground text-[8px] sm:text-[10px]">total</p>
+            <Layers className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-cyan-400" />
+            <p className="text-foreground font-bold">{manowar.agentIds?.length || 0}</p>
+            <p className="text-muted-foreground text-[8px] sm:text-[10px]">agents</p>
           </div>
           <div className="text-center p-1.5 sm:p-2 rounded-sm bg-sidebar-accent">
             <Zap className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-fuchsia-400" />
@@ -460,5 +544,151 @@ function ManowarAssetCard({ manowar }: { manowar: OnchainManowar }) {
   );
 }
 
+// RFA Asset Card Component
+function RFAAssetCard({
+  rfa,
+  onViewDetails,
+  onRefresh,
+}: {
+  rfa: OnchainRFA;
+  onViewDetails: () => void;
+  onRefresh: () => void;
+}) {
+  const { toast } = useToast();
+  const { mutateAsync: sendTransaction, isPending } = useSendTransaction();
+  const [isCancelling, setIsCancelling] = useState(false);
 
+  // Calculate bounty breakdown
+  const offerNum = parseFloat(rfa.offerAmount);
+  const basicBounty = RFA_BOUNTY_LIMITS.BASIC_BOUNTY;
+  const readmeBonus = Math.max(0, offerNum - basicBounty);
 
+  // Format dates
+  const createdDate = new Date(rfa.createdAt * 1000);
+
+  // Handle cancel
+  const handleCancel = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+
+    try {
+      setIsCancelling(true);
+
+      const contract = getRFAContract();
+      const tx = prepareContractCall({
+        contract,
+        method: "function cancelRFA(uint256 rfaId)",
+        params: [BigInt(rfa.id)],
+      });
+
+      await sendTransaction(tx);
+
+      toast({
+        title: "RFA Cancelled",
+        description: `Bounty of ${rfa.offerAmountFormatted} has been refunded to your wallet.`,
+      });
+
+      onRefresh();
+    } catch (error) {
+      console.error("Cancel error:", error);
+      toast({
+        title: "Failed to Cancel",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
+  const statusColor = {
+    Open: "border-green-500/30 text-green-400 bg-green-500/10",
+    Fulfilled: "border-cyan-500/30 text-cyan-400 bg-cyan-500/10",
+    Cancelled: "border-red-500/30 text-red-400 bg-red-500/10",
+    None: "border-gray-500/30 text-gray-400 bg-gray-500/10",
+  }[rfa.status];
+
+  return (
+    <Card
+      className="bg-background border-sidebar-border hover:border-amber-500/50 transition-colors cursor-pointer"
+      onClick={onViewDetails}
+    >
+      <CardContent className="p-4 sm:p-5 space-y-3">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1">
+              <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-[9px]">
+                <Target className="w-2 h-2 mr-1" />
+                RFA #{rfa.id}
+              </Badge>
+              <Badge variant="outline" className={`text-[9px] ${statusColor}`}>
+                {rfa.status === 'Open' && <Clock className="w-2 h-2 mr-1" />}
+                {rfa.status === 'Fulfilled' && <CheckCircle className="w-2 h-2 mr-1" />}
+                {rfa.status === 'Cancelled' && <XCircle className="w-2 h-2 mr-1" />}
+                {rfa.status}
+              </Badge>
+            </div>
+            <h3 className="font-display font-bold text-foreground truncate text-sm sm:text-base">
+              {rfa.title}
+            </h3>
+            <p className="text-[10px] sm:text-xs text-muted-foreground line-clamp-1 mt-0.5">
+              {rfa.description}
+            </p>
+          </div>
+
+          {/* Bounty Amount */}
+          <div className="text-right shrink-0">
+            <p className="text-[9px] text-muted-foreground uppercase">Bounty</p>
+            <p className="font-mono font-bold text-amber-400 text-lg">
+              {rfa.offerAmountFormatted}
+            </p>
+          </div>
+        </div>
+
+        {/* Meta Row */}
+        <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+          <span>For: Manowar #{rfa.manowarId}</span>
+          <span>{createdDate.toLocaleDateString()}</span>
+        </div>
+
+        {/* Actions */}
+        {rfa.status === 'Open' && (
+          <div className="flex items-center gap-2 pt-2 border-t border-sidebar-border">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onViewDetails}
+              className="flex-1 text-xs h-8"
+            >
+              <Bot className="w-3 h-3 mr-1" />
+              View Submissions
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleCancel}
+              disabled={isCancelling || isPending}
+              className="text-xs h-8 border-red-500/30 text-red-400 hover:bg-red-500/10"
+            >
+              {isCancelling ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <>
+                  <XCircle className="w-3 h-3 mr-1" />
+                  Cancel
+                </>
+              )}
+            </Button>
+          </div>
+        )}
+
+        {rfa.status === 'Fulfilled' && (
+          <div className="flex items-center gap-2 p-2 rounded-sm bg-cyan-500/5 border border-cyan-500/20 text-[10px]">
+            <CheckCircle className="w-3 h-3 text-cyan-400" />
+            <span className="text-cyan-400">Fulfilled by Agent #{rfa.fulfilledByAgentId}</span>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}

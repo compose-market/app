@@ -36,7 +36,7 @@ import { wrapFetchWithPayment } from "thirdweb/x402";
 import { prepareContractCall } from "thirdweb";
 import { getManowarContract, usdcToWei, computeExternalAgentHash, getWarpContract, getContractAddress, getAgentFactoryContract, formatUsdcPrice, weiToUsdc, computeManowarDnaHash, deriveManowarWalletAddress } from "@/lib/contracts";
 import { readContract } from "thirdweb";
-import { uploadManowarBanner, uploadManowarMetadata, getIpfsUri, getIpfsUrl, fileToDataUrl, isPinataConfigured, type ManowarMetadata } from "@/lib/pinata";
+import { uploadManowarBanner, uploadManowarMetadata, getIpfsUri, getIpfsUrl, fileToDataUrl, isPinataConfigured, fetchFromIpfs, type ManowarMetadata, type AgentCard } from "@/lib/pinata";
 import { CHAIN_IDS, CHAIN_CONFIG, thirdwebClient, INFERENCE_PRICE_WEI, getPaymentTokenContract } from "@/lib/thirdweb";
 import { createNormalizedFetch } from "@/lib/payment";
 import { AVAILABLE_MODELS } from "@/lib/models";
@@ -90,6 +90,7 @@ import type { ConnectorInfo, ConnectorTool, WorkflowStep } from "@/lib/services"
 import { executeRegistryTool } from "@/lib/services";
 import { WorkflowOutputPanel, type WorkflowExecutionResult } from "@/components/output";
 import { type Agent, type AgentRegistryId, AGENT_REGISTRIES, formatInteractions, COMMON_TAGS } from "@/lib/agents";
+import { RFAComponent } from "@/components/RFAComponent";
 
 // =============================================================================
 // Node Types - n8n-inspired design with protruding connectors
@@ -1145,21 +1146,41 @@ function MintManowarDialog({
       const dnaHash = computeManowarDnaHash(agentIds, mintTimestamp);
       const walletAddress = deriveManowarWalletAddress(dnaHash, mintTimestamp);
 
-      // 3. Build and upload metadata to IPFS
+      // 3. Fetch each agent's agentCard from IPFS and embed in manowarCard
+      const agentFactoryContract = getAgentFactoryContract();
+      const nestedAgentCards: AgentCard[] = [];
+
+      for (const agentId of agentIds) {
+        try {
+          const agentData = await readContract({
+            contract: agentFactoryContract,
+            method: "function getAgentData(uint256 agentId) view returns ((bytes32 dnaHash, uint256 licenses, uint256 licensesMinted, uint256 licensePrice, address creator, bool cloneable, bool isClone, uint256 parentAgentId, string agentCardUri))",
+            params: [BigInt(agentId)],
+          }) as { agentCardUri: string };
+
+          if (agentData.agentCardUri?.startsWith("ipfs://")) {
+            const cid = agentData.agentCardUri.replace("ipfs://", "");
+            const agentCard = await fetchFromIpfs<AgentCard>(cid);
+            nestedAgentCards.push(agentCard);
+          }
+        } catch (err) {
+          console.warn(`Failed to fetch agentCard for agent ${agentId}:`, err);
+        }
+      }
+
+      // 4. Build and upload manowarCard metadata to IPFS
       const metadata: ManowarMetadata = {
         schemaVersion: "1.0.0",
         title,
         description,
         banner: bannerImageUri,
         image: bannerImageUri ? getIpfsUrl(bannerImageUri.replace("ipfs://", "")) : undefined,
-        // Identity - single source of truth, derived once at mint time
         dnaHash,
         walletAddress,
         walletTimestamp: mintTimestamp,
-        agents: agentIds.map((id, idx) => ({ agentId: id, name: `Agent ${idx + 1}` })),
-        coordinator: coordinatorModel ? { agentId: 0, model: coordinatorModel } : undefined,
+        agents: nestedAgentCards,
+        coordinator: coordinatorModel ? { hasCoordinator: true, model: coordinatorModel } : undefined,
         pricing: {
-          x402Price: usdcToWei(parseFloat(x402Price)).toString(),
           totalAgentPrice: totalAgentPrice.toString(),
         },
         lease: leaseEnabled ? {
@@ -1172,28 +1193,28 @@ function MintManowarDialog({
       };
 
       const metadataCid = await uploadManowarMetadata(metadata);
-      const metadataUri = getIpfsUri(metadataCid);
+      const manowarCardUri = getIpfsUri(metadataCid);
 
-      // 3. Prepare USDC approval transaction (if agents have price)
+      // 5. Prepare USDC approval transaction (if agents have price)
       const manowarContract = getManowarContract();
       const usdcContract = getPaymentTokenContract();
       const manowarAddress = getContractAddress("Manowar");
 
-      // 4. Prepare mint transaction
+      // 6. Prepare mint transaction with new params
       const mintTransaction = prepareContractCall({
         contract: manowarContract,
-        method: "function mintManowar((string title, string description, string banner, uint256 x402Price, uint256 units, bool leaseEnabled, uint256 leaseDuration, uint8 leasePercent, uint256 coordinatorAgentId, string coordinatorModel) params, uint256[] agentIds) returns (uint256 manowarId)",
+        method: "function mintManowar((string title, string description, string banner, string manowarCardUri, uint256 units, bool leaseEnabled, uint256 leaseDuration, uint8 leasePercent, bool hasCoordinator, string coordinatorModel) params, uint256[] agentIds) returns (uint256 manowarId)",
         params: [
           {
             title,
             description,
-            banner: metadataUri,
-            x402Price: usdcToWei(parseFloat(x402Price)),
+            banner: bannerImageUri,
+            manowarCardUri,
             units: units ? BigInt(parseInt(units)) : BigInt(1),
             leaseEnabled,
             leaseDuration: BigInt(parseInt(leaseDuration) || 0),
             leasePercent: parseInt(leasePercent) || 0,
-            coordinatorAgentId: BigInt(0),
+            hasCoordinator: !!coordinatorModel,
             coordinatorModel: coordinatorModel || "",
           },
           agentIds.map(id => BigInt(id)),
@@ -1693,6 +1714,10 @@ function ComposeFlow() {
   // Workflow output panel state
   const [workflowResult, setWorkflowResult] = useState<WorkflowExecutionResult | null>(null);
   const [showOutputPanel, setShowOutputPanel] = useState(false);
+
+  // RFA dialog state
+  const [showRFADialog, setShowRFADialog] = useState(false);
+  const [pendingManowarId, setPendingManowarId] = useState<number | null>(null);
 
   // x402 Payment state
   const wallet = useActiveWallet();
@@ -2253,6 +2278,17 @@ function ComposeFlow() {
             </Button>
 
             {/* Expand Fullscreen Button */}
+            {/* Request Agent Button (RFA) */}
+            <Button
+              onClick={() => setShowRFADialog(true)}
+              variant="outline"
+              className="border-fuchsia-500/30 hover:border-fuchsia-500 hover:bg-fuchsia-500/10 text-xs lg:text-sm h-8 lg:h-9 px-2.5 lg:px-4"
+              title="Request a missing agent via bounty"
+            >
+              <Bot className="w-3.5 h-3.5 lg:w-4 lg:h-4 mr-1.5 lg:mr-2" />
+              <span className="hidden sm:inline">REQUEST</span>
+            </Button>
+
             <Button
               onClick={() => setIsFullscreen(true)}
               variant="outline"
@@ -2502,6 +2538,20 @@ function ComposeFlow() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* RFA Component Dialog */}
+      <RFAComponent
+        open={showRFADialog}
+        onOpenChange={setShowRFADialog}
+        manowarId={pendingManowarId || 0}
+        manowarTitle={workflowName || "New Workflow"}
+        onSuccess={(rfaId) => {
+          toast({
+            title: "Agent Request Published",
+            description: "Bounty hunters can now submit agents for your request.",
+          });
+        }}
+      />
 
 
     </div>

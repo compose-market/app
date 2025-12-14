@@ -47,12 +47,11 @@ export default function ManowarPage() {
     // Use identifier-based lookup (supports both wallet address and numeric ID)
     const { data: manowar, isLoading: manowarLoading, error: manowarError } = useOnchainManowarByIdentifier(manowarIdentifier);
 
-    // Coordinator exists if coordinatorModel is set (coordinatorAgentId=0 is valid - IDs start from 0)
-    const hasCoordinator = !!manowar?.coordinatorModel;
-    const coordinatorAgentId = hasCoordinator ? manowar?.coordinatorAgentId : null;
-    const { data: coordinatorAgent, isLoading: agentLoading } = useOnchainAgent(coordinatorAgentId ?? null);
+    // Coordinator exists if hasCoordinator is true
+    const hasCoordinator = !!manowar?.hasCoordinator;
+    const coordinatorAgent = null; // Coordinator is now model-based, not agent-based
 
-    const isLoading = manowarLoading || (hasCoordinator && coordinatorAgentId !== null && agentLoading);
+    const isLoading = manowarLoading;
 
     const { toast } = useToast();
     const wallet = useActiveWallet();
@@ -106,9 +105,8 @@ export default function ManowarPage() {
                     description: manowar.description || "",
                     banner: manowar.banner,
                     creator: manowar.creator,
-                    coordinatorAgentId: manowar.coordinatorAgentId,
+                    hasCoordinator: manowar.hasCoordinator,
                     coordinatorModel: manowar.coordinatorModel,
-                    x402Price: manowar.x402Price,
                     totalPrice: manowar.totalPrice,
                 }),
             });
@@ -411,19 +409,13 @@ export default function ManowarPage() {
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <div className="p-4 bg-background/50 border border-sidebar-border rounded-lg text-center">
                             <DollarSign className="w-5 h-5 text-green-400 mx-auto mb-2" />
-                            <p className="text-[10px] text-muted-foreground uppercase">Run Cost</p>
-                            <p className="font-mono text-lg text-green-400">${manowar.x402Price}</p>
+                            <p className="text-[10px] text-muted-foreground uppercase">Total Cost</p>
+                            <p className="font-mono text-lg text-green-400">${manowar.totalPrice}</p>
                         </div>
                         <div className="p-4 bg-background/50 border border-sidebar-border rounded-lg text-center">
                             <Bot className="w-5 h-5 text-cyan-400 mx-auto mb-2" />
                             <p className="text-[10px] text-muted-foreground uppercase">Coordinator</p>
-                            {coordinatorAgent ? (
-                                <Link href={`/agent/${coordinatorAgent.walletAddress}`}>
-                                    <p className="font-mono text-sm text-cyan-400 hover:underline cursor-pointer">
-                                        {coordinatorAgent.metadata?.name || `Agent #${coordinatorAgent.id}`}
-                                    </p>
-                                </Link>
-                            ) : hasCoordinator ? (
+                            {hasCoordinator ? (
                                 <p className="font-mono text-sm text-cyan-400">{manowar?.coordinatorModel}</p>
                             ) : (
                                 <p className="font-mono text-sm text-muted-foreground">None</p>
@@ -470,7 +462,7 @@ export default function ManowarPage() {
                             messagesEndRef={messagesEndRef}
                             height="h-96"
                             emptyStateText="Ready to execute workflow."
-                            emptyStateSubtext={`Input will be sent to Coordinator ${coordinatorAgent?.metadata?.name || manowar?.coordinatorModel || "Agent"}`}
+                            emptyStateSubtext={`Input will be sent to Coordinator ${manowar?.coordinatorModel || "Model"}`}
                         />
                     )}
                 </CardContent>

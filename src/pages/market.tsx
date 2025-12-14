@@ -19,8 +19,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useOnchainManowars, useManowarsWithRFA, useOnchainAgents, type OnchainManowar, type OnchainAgent } from "@/hooks/use-onchain";
+import { useOnchainManowars, useManowarsWithRFA, useOnchainAgents, useOpenRFAs, type OnchainManowar, type OnchainAgent, type OnchainRFA } from "@/hooks/use-onchain";
 import { getIpfsUrl } from "@/lib/pinata";
+import { RFA_CATEGORIES, RFA_BOUNTY_LIMITS } from "@/lib/contracts";
+import { RFADetails } from "@/components/RFADetails";
 import {
   Box,
   Layers,
@@ -389,20 +391,25 @@ const ManowarCard = React.memo(function ManowarCard({ manowar }: { manowar: Onch
 // =============================================================================
 
 function RFAsTab({ searchQuery }: { searchQuery: string }) {
-  const { data: rfaManowars, isLoading, error, refetch } = useManowarsWithRFA();
+  // Use real RFA data from the contract
+  const { data: rfas, isLoading, error, refetch } = useOpenRFAs();
+
+  // State for RFA detail dialog
+  const [selectedRfaId, setSelectedRfaId] = React.useState<number | null>(null);
+  const [showDetails, setShowDetails] = React.useState(false);
 
   // Filter
   const filteredRFAs = React.useMemo(() => {
-    if (!rfaManowars) return [];
+    if (!rfas) return [];
 
-    if (!searchQuery) return rfaManowars;
+    if (!searchQuery) return rfas;
 
     const q = searchQuery.toLowerCase();
-    return rfaManowars.filter(m =>
-      m.title.toLowerCase().includes(q) ||
-      m.description.toLowerCase().includes(q)
+    return rfas.filter(rfa =>
+      rfa.title.toLowerCase().includes(q) ||
+      rfa.description.toLowerCase().includes(q)
     );
-  }, [rfaManowars, searchQuery]);
+  }, [rfas, searchQuery]);
 
   return (
     <div className="space-y-4">
@@ -415,7 +422,7 @@ function RFAsTab({ searchQuery }: { searchQuery: string }) {
           </span>
         </div>
         <div className="flex items-center justify-between sm:justify-end gap-2">
-          {rfaManowars && (
+          {rfas && (
             <Badge variant="outline" className="font-mono text-[10px] sm:text-xs border-fuchsia-500/30 text-fuchsia-400">
               {filteredRFAs.length} active bounties
             </Badge>
@@ -466,8 +473,15 @@ function RFAsTab({ searchQuery }: { searchQuery: string }) {
       {/* RFAs Grid */}
       {!isLoading && filteredRFAs.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
-          {filteredRFAs.map((manowar) => (
-            <RFACard key={manowar.id} manowar={manowar} />
+          {filteredRFAs.map((rfa) => (
+            <RFACard
+              key={rfa.id}
+              rfa={rfa}
+              onViewDetails={() => {
+                setSelectedRfaId(rfa.id);
+                setShowDetails(true);
+              }}
+            />
           ))}
         </div>
       )}
@@ -484,14 +498,35 @@ function RFAsTab({ searchQuery }: { searchQuery: string }) {
           </p>
         </div>
       )}
+
+      {/* RFA Details Dialog */}
+      <RFADetails
+        rfaId={selectedRfaId}
+        open={showDetails}
+        onOpenChange={setShowDetails}
+      />
     </div>
   );
 }
 
-// Memoized RFA card component (Fix 9)
-const RFACard = React.memo(function RFACard({ manowar }: { manowar: OnchainManowar }) {
-  // TODO: Fetch actual RFA data from RFA contract using manowar.rfaId
-  // For now, showing manowar info with RFA indicator
+// Memoized RFA card component
+const RFACard = React.memo(function RFACard({
+  rfa,
+  onViewDetails
+}: {
+  rfa: OnchainRFA;
+  onViewDetails: () => void;
+}) {
+  // Get category info from skills (first skill hash)
+  const categoryId = rfa.requiredSkills.length > 0 ? rfa.requiredSkills[0] : null;
+
+  // Calculate bounty breakdown
+  const offerNum = parseFloat(rfa.offerAmount);
+  const basicBounty = RFA_BOUNTY_LIMITS.BASIC_BOUNTY;
+  const readmeBonus = Math.max(0, offerNum - basicBounty);
+
+  // Format creation date
+  const createdDate = new Date(rfa.createdAt * 1000);
 
   return (
     <Card className="glass-panel border-fuchsia-500/30 hover:border-fuchsia-500/60 transition-all duration-300 group">
@@ -501,18 +536,18 @@ const RFACard = React.memo(function RFACard({ manowar }: { manowar: OnchainManow
             <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-2">
               <Badge className="bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/30 text-[8px] sm:text-[10px]">
                 <Target className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
-                RFA #{manowar.rfaId}
+                RFA #{rfa.id}
               </Badge>
-              <Badge variant="outline" className="text-[8px] sm:text-[10px] border-amber-500/30 text-amber-400">
+              <Badge variant="outline" className="text-[8px] sm:text-[10px] border-green-500/30 text-green-400">
                 <Clock className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
-                Open
+                {rfa.status}
               </Badge>
             </div>
             <CardTitle className="text-base sm:text-lg font-display font-bold text-white group-hover:text-fuchsia-400 transition-colors truncate">
-              {manowar.title || `Manowar #${manowar.id}`}
+              {rfa.title}
             </CardTitle>
             <CardDescription className="mt-1 line-clamp-2 text-[10px] sm:text-xs">
-              {manowar.description || "Agent needed for this workflow"}
+              {rfa.description}
             </CardDescription>
           </div>
         </div>
@@ -527,7 +562,7 @@ const RFACard = React.memo(function RFACard({ manowar }: { manowar: OnchainManow
               <div className="flex items-center gap-1.5 sm:gap-2">
                 <Award className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-fuchsia-400 shrink-0" />
                 <span className="font-mono text-base sm:text-lg font-bold text-fuchsia-400">
-                  TBD USDC
+                  {rfa.offerAmountFormatted}
                 </span>
               </div>
             </div>
@@ -538,27 +573,34 @@ const RFACard = React.memo(function RFACard({ manowar }: { manowar: OnchainManow
               </Badge>
             </div>
           </div>
+          <div className="mt-2 pt-2 border-t border-sidebar-border/50 text-[9px] text-muted-foreground">
+            <span>Basic: ${basicBounty.toFixed(2)}</span>
+            <span className="mx-1">+</span>
+            <span className="text-cyan-400">README bonus: ${readmeBonus.toFixed(2)}</span>
+          </div>
         </div>
 
-        {/* Workflow Context */}
-        <div className="text-[10px] sm:text-xs text-muted-foreground">
-          <span className="text-muted-foreground/60">For workflow: </span>
-          <span className="text-cyan-400 font-mono">Manowar #{manowar.id}</span>
+        {/* Meta info */}
+        <div className="flex items-center justify-between text-[10px] sm:text-xs text-muted-foreground">
+          <span>For: Manowar #{rfa.manowarId}</span>
+          <span>{createdDate.toLocaleDateString()}</span>
         </div>
       </CardContent>
 
       <CardFooter className="p-3 sm:p-4 pt-0 flex flex-col sm:flex-row gap-2">
         <Button
+          onClick={onViewDetails}
           className="flex-1 bg-fuchsia-500 hover:bg-fuchsia-600 text-white font-bold font-mono text-[10px] sm:text-xs h-8 sm:h-9"
         >
           <Award className="w-3 h-3 mr-1" />
-          SUBMIT AGENT
+          VIEW & SUBMIT
         </Button>
         <Button
           variant="outline"
           className="border-sidebar-border hover:border-fuchsia-500/50 h-8 sm:h-9 text-[10px] sm:text-xs"
+          onClick={onViewDetails}
         >
-          VIEW DETAILS
+          Details
         </Button>
       </CardFooter>
     </Card>
