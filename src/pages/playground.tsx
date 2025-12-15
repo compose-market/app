@@ -214,10 +214,9 @@ interface McpToolsResponse {
 
 // Plugin source type - GOAT, MCP, Eliza
 type PluginSource = "goat" | "mcp" | "eliza";
-
 // Remove trailing slashes to prevent double-slash URL issues
 const API_BASE = (import.meta.env.VITE_API_URL || "https://api.compose.market").replace(/\/+$/, "");
-const CONNECTOR_URL = (import.meta.env.VITE_CONNECTOR_URL || "https://connector.compose.market").replace(/\/+$/, "");
+const CONNECTOR_URL = (import.meta.env.VITE_CONNECTOR_URL || "https://services.compose.market/connector").replace(/\/+$/, "");
 
 // Helper to generate default args from JSON schema
 function generateDefaultArgs(schema: Record<string, unknown>): Record<string, unknown> {
