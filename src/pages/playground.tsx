@@ -393,20 +393,21 @@ export default function PlaygroundPage() {
 
   // Fetch models on mount
   useEffect(() => {
-    fetchModels();
+    loadModels();
   }, []);
 
-  // NOTE: Plugin/MCP fetching is handled in the MCP Server Handlers section below
-
-  const fetchModels = async () => {
+  const loadModels = async () => {
     setModelsLoading(true);
     setModelsError(null);
     try {
-      const response = await fetch(`${API_BASE}/api/models`);
-      if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`);
-      const data = await response.json();
-      const modelList = data.models || [];
-      setModels(modelList);
+      const { fetchAvailableModels } = await import("@/lib/models");
+      const modelList = await fetchAvailableModels();
+
+      // Transform AIModel to local Model interface if needed, or update local interface
+      // The shapes are compatible enough for this usage:
+      // AIModel: { id, name, source, ownedBy, available, task, pricing, ... }
+      // Model: { id, name, source, ownedBy, available, task, pricing, ... }
+      setModels(modelList as unknown as Model[]);
 
       // Build task categories from model tasks
       const taskCounts: Record<string, number> = {};
@@ -549,40 +550,36 @@ export default function PlaygroundPage() {
         headers["x-session-budget-remaining"] = budgetRemaining.toString();
       }
 
-      // Build request body based on output type and attachments
+      // Build request body based on output type
+      // Always include attachments if present - let the model decide what to do with them
       let requestBody: Record<string, unknown>;
 
-      if (attachmentBase64) {
-        // Handle attached file with pre-computed base64 data
-        if (modelTask === "image-to-image" || modelTask === "image-classification") {
-          // Image-to-image requires 'image' and 'prompt'
-          requestBody = { image: attachmentBase64, prompt: userMessage.content };
-        } else if (modelTask === "automatic-speech-recognition") {
-          // ASR requires 'audio'
-          requestBody = { audio: attachmentBase64 };
-        } else if (outputType === "text") {
-          // Text generation with image attachment (multimodal)
-          // Include image in the messages for vision-capable models
-          requestBody = {
-            messages: [...messages, userMessage].map(({ role, content }) => ({ role, content })),
-            systemPrompt,
-            image: attachmentBase64, // Include base64 image for multimodal models
-          };
-        } else {
-          // Fallback generic
-          requestBody = { prompt: userMessage.content, image: attachmentBase64 };
-        }
-      } else if (outputType === "image") {
+      if (outputType === "image") {
+        // Text-to-image generation
         requestBody = { prompt: userMessage.content };
+        // If user attached an image, add it (for image-to-image scenarios)
+        if (attachmentBase64) {
+          requestBody.image = attachmentBase64;
+        }
       } else if (outputType === "audio") {
+        // Text-to-speech
         requestBody = { text: userMessage.content };
       } else if (outputType === "embedding") {
+        // Embeddings
         requestBody = { text: userMessage.content };
       } else {
+        // Text generation (default) - ALWAYS include attachments if present
         requestBody = {
           messages: [...messages, userMessage].map(({ role, content }) => ({ role, content })),
           systemPrompt,
         };
+
+        // Include any attachment - the model will handle it (or ignore it if not supported)
+        if (attachmentBase64 && attachmentType === "image") {
+          requestBody.image = attachmentBase64;
+        } else if (attachmentBase64 && attachmentType === "audio") {
+          requestBody.audio = attachmentBase64;
+        }
       }
 
       const response = await fetchWithPayment(`${API_BASE}/api/inference/${encodeURIComponent(selectedModel)}`, {
@@ -1466,7 +1463,7 @@ export default function PlaygroundPage() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={fetchModels}
+                  onClick={loadModels}
                   disabled={modelsLoading}
                   className="text-zinc-400 hover:text-white h-8 w-8 sm:h-9 sm:w-9"
                 >

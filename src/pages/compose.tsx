@@ -1374,7 +1374,7 @@ function MintManowarDialog({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No coordinator</SelectItem>
-                    {AVAILABLE_MODELS.filter((m, i, arr) => arr.findIndex(x => x.id === m.id) === i).map((model) => (
+                    {AVAILABLE_MODELS.filter((m: any, i: number, arr: any[]) => arr.findIndex((x: any) => x.id === m.id) === i).map((model) => (
                       <SelectItem key={model.id} value={model.id}>
                         {model.name}
                       </SelectItem>

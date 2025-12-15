@@ -7,55 +7,23 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { 
-  ArrowLeft, 
-  Search, 
-  Cpu, 
-  Layers, 
+import { fetchAvailableModels, type AIModel } from "@/lib/models";
+import {
+  ArrowLeft,
+  Search,
+  Cpu,
+  Layers,
   Sparkles,
   Check,
-  ExternalLink,
   Zap,
-  Filter
+  Filter,
+  Globe
 } from "lucide-react";
-
-interface HFModel {
-  id: string;
-  name: string;
-  task: string;
-  downloads: number;
-  likes: number;
-  private: boolean;
-  gated: false | "auto" | "manual";
-}
-
-interface HFTask {
-  id: string;
-  name: string;
-  description: string;
-}
-
-async function fetchHFModels(task?: string, search?: string): Promise<{ models: HFModel[]; total: number }> {
-  const params = new URLSearchParams();
-  if (task && task !== "all") params.set("task", task);
-  if (search) params.set("search", search);
-  params.set("limit", "100");
-  
-  const res = await fetch(`/api/hf/models?${params}`);
-  if (!res.ok) throw new Error("Failed to fetch models");
-  return res.json();
-}
-
-async function fetchHFTasks(): Promise<{ tasks: HFTask[] }> {
-  const res = await fetch("/api/hf/tasks");
-  if (!res.ok) throw new Error("Failed to fetch tasks");
-  return res.json();
-}
 
 export default function ModelsPage() {
   const [, setLocation] = useLocation();
   const [search, setSearch] = useState("");
-  const [selectedTask, setSelectedTask] = useState("text-generation");
+  const [selectedTask, setSelectedTask] = useState("all");
   const [debouncedSearch, setDebouncedSearch] = useState("");
 
   // Debounce search
@@ -64,27 +32,48 @@ export default function ModelsPage() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  const { data: tasksData } = useQuery({
-    queryKey: ["hf-tasks"],
-    queryFn: fetchHFTasks,
-    staleTime: 60 * 60 * 1000, // 1 hour
-  });
-
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["hf-models", selectedTask, debouncedSearch],
-    queryFn: () => fetchHFModels(selectedTask, debouncedSearch),
+  // Fetch all available models from our unified registry
+  const { data: models = [], isLoading, error } = useQuery({
+    queryKey: ["registry-models"],
+    queryFn: fetchAvailableModels,
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 
-  const handleSelectModel = (model: HFModel) => {
-    // Store selected model in sessionStorage and navigate back
-    // HuggingFace models use inference providers, pricing varies
+  // Extract unique tasks from models for filter
+  const tasks = useMemo(() => {
+    const taskSet = new Set<string>();
+    models.forEach(m => {
+      if (m.task) taskSet.add(m.task);
+    });
+    return Array.from(taskSet).sort();
+  }, [models]);
+
+  // Filter models locally
+  const filteredModels = useMemo(() => {
+    return models.filter(model => {
+      // Task filter
+      if (selectedTask !== "all" && model.task !== selectedTask) return false;
+
+      // Search filter
+      if (debouncedSearch) {
+        const q = debouncedSearch.toLowerCase();
+        return (
+          model.id.toLowerCase().includes(q) ||
+          model.name.toLowerCase().includes(q) ||
+          model.source.toLowerCase().includes(q)
+        );
+      }
+      return true;
+    });
+  }, [models, selectedTask, debouncedSearch]);
+
+  const handleSelectModel = (model: AIModel) => {
     sessionStorage.setItem("selectedHFModel", JSON.stringify({
       id: model.id,
       name: model.name,
-      provider: "huggingface",
-      priceMultiplier: 1.0, // Base multiplier, actual cost depends on provider
-      contextLength: 0, // Context varies by model
+      provider: model.source,
+      priceMultiplier: 1.0, // Should be calculated from pricing if needed
+      contextLength: model.contextLength || 0,
     }));
     setLocation("/create-agent");
   };
@@ -99,7 +88,7 @@ export default function ModelsPage() {
             Back to Agent Creation
           </Button>
         </Link>
-        
+
         <div className="flex items-center gap-4">
           <h1 className="text-2xl font-display font-bold text-white">
             <span className="text-cyan-500 mr-2">//</span>
@@ -108,7 +97,7 @@ export default function ModelsPage() {
           <div className="hidden md:flex h-px w-32 bg-gradient-to-r from-cyan-500 to-transparent"></div>
         </div>
         <p className="text-muted-foreground font-mono text-sm">
-          Browse inference-ready models from HuggingFace Inference Providers.
+          Browse deduplicated, inference-ready models from valid providers (ASI, Google, HF, etc).
         </p>
       </div>
 
@@ -123,7 +112,7 @@ export default function ModelsPage() {
             className="pl-10 bg-background/50 border-sidebar-border focus:border-cyan-500 font-mono"
           />
         </div>
-        
+
         <div className="flex gap-4">
           <Select value={selectedTask} onValueChange={setSelectedTask}>
             <SelectTrigger className="w-[220px] bg-background/50 border-sidebar-border">
@@ -132,9 +121,9 @@ export default function ModelsPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Tasks</SelectItem>
-              {tasksData?.tasks.map((task) => (
-                <SelectItem key={task.id} value={task.id}>
-                  {task.name}
+              {tasks.map((task) => (
+                <SelectItem key={task} value={task}>
+                  {task}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -143,15 +132,15 @@ export default function ModelsPage() {
       </div>
 
       {/* Stats Bar */}
-      {data && !isLoading && (
+      {models.length > 0 && (
         <div className="flex items-center gap-6 mb-6 text-sm font-mono text-muted-foreground">
           <div className="flex items-center gap-2">
             <Layers className="w-4 h-4 text-cyan-400" />
-            <span>{data.total} models found</span>
+            <span>{models.length} total models</span>
           </div>
           <div className="flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-fuchsia-400" />
-            <span>All inference-ready</span>
+            <span>{filteredModels.length} shown</span>
           </div>
         </div>
       )}
@@ -183,16 +172,16 @@ export default function ModelsPage() {
       )}
 
       {/* Models Grid */}
-      {data && !isLoading && (
+      {!isLoading && filteredModels.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {data.models.map((model) => (
+          {filteredModels.map((model) => (
             <ModelCard key={model.id} model={model} onSelect={handleSelectModel} />
           ))}
         </div>
       )}
 
       {/* Empty State */}
-      {data && data.models.length === 0 && !isLoading && (
+      {!isLoading && filteredModels.length === 0 && (
         <div className="text-center py-16 space-y-4">
           <Cpu className="w-16 h-16 mx-auto text-muted-foreground/50" />
           <p className="text-muted-foreground font-mono">No models found matching your criteria.</p>
@@ -200,7 +189,7 @@ export default function ModelsPage() {
             variant="outline"
             onClick={() => {
               setSearch("");
-              setSelectedTask("text-generation");
+              setSelectedTask("all");
             }}
             className="border-sidebar-border"
           >
@@ -212,9 +201,9 @@ export default function ModelsPage() {
   );
 }
 
-function ModelCard({ model, onSelect }: { model: HFModel; onSelect: (m: HFModel) => void }) {
+function ModelCard({ model, onSelect }: { model: AIModel; onSelect: (m: AIModel) => void }) {
   const [org, name] = model.id.includes("/") ? model.id.split("/") : ["", model.id];
-  
+
   return (
     <Card className="group bg-background border-sidebar-border hover:border-cyan-500/50 transition-all duration-300 corner-decoration overflow-hidden">
       <CardContent className="p-5 space-y-4">
@@ -224,29 +213,20 @@ function ModelCard({ model, onSelect }: { model: HFModel; onSelect: (m: HFModel)
             <h3 className="font-display font-bold text-foreground truncate group-hover:text-cyan-400 transition-colors">
               {model.name}
             </h3>
-            {org && (
-              <p className="text-xs font-mono text-muted-foreground truncate">{org}</p>
-            )}
+            <div className="flex items-center gap-1.5 mt-1">
+              <Globe className="w-3 h-3 text-muted-foreground" />
+              <p className="text-xs font-mono text-muted-foreground truncate">
+                {model.source} / {org || model.ownedBy}
+              </p>
+            </div>
           </div>
-          <a
-            href={`https://huggingface.co/${model.id}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="p-1.5 text-muted-foreground hover:text-cyan-400 transition-colors"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <ExternalLink className="w-4 h-4" />
-          </a>
         </div>
 
         {/* Badges */}
         <div className="flex flex-wrap gap-2">
-          <Badge variant="outline" className="text-xs font-mono border-cyan-500/30 text-cyan-400 bg-cyan-500/10">
-            {model.task}
-          </Badge>
-          {model.gated && (
-            <Badge variant="outline" className="text-xs font-mono border-yellow-500/30 text-yellow-400 bg-yellow-500/10">
-              gated
+          {model.task && (
+            <Badge variant="outline" className="text-xs font-mono border-cyan-500/30 text-cyan-400 bg-cyan-500/10">
+              {model.task}
             </Badge>
           )}
         </div>
@@ -255,11 +235,13 @@ function ModelCard({ model, onSelect }: { model: HFModel; onSelect: (m: HFModel)
         <div className="grid grid-cols-2 gap-3 text-xs font-mono">
           <div className="flex items-center gap-2 text-muted-foreground">
             <Zap className="w-3.5 h-3.5 text-green-400" />
-            <span>{formatDownloads(model.downloads)}</span>
+            <span>
+              {model.pricing ? `$${model.pricing.input}/M` : "Free/Included"}
+            </span>
           </div>
           <div className="flex items-center gap-2 text-muted-foreground">
             <Sparkles className="w-3.5 h-3.5 text-fuchsia-400" />
-            <span>{model.likes.toLocaleString()} likes</span>
+            <span>{model.contextLength ? `${Math.round(model.contextLength / 1000)}k ctx` : "Unknown ctx"}</span>
           </div>
         </div>
 
@@ -274,12 +256,5 @@ function ModelCard({ model, onSelect }: { model: HFModel; onSelect: (m: HFModel)
       </CardContent>
     </Card>
   );
-}
-
-// Format download count
-function formatDownloads(count: number): string {
-  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M DLs`;
-  if (count >= 1_000) return `${(count / 1_000).toFixed(0)}K DLs`;
-  return `${count} DLs`;
 }
 
