@@ -364,8 +364,8 @@ export default function CreateAgent() {
         name: values.name,
         description: values.description,
         skills,
-        avatar: avatarUrl || "none", // Gateway URL for explorer compatibility
-        image: avatarUrl || undefined, // Standard NFT metadata field
+        image: avatarUrl || "none", // Standard NFT metadata field (UI shows as "Avatar")
+        avatar: avatarUrl || "none", // Legacy field for backward compatibility
         dnaHash, // Store computed dnaHash (skills, chainId, model)
         walletAddress, // Derived from dnaHash + timestamp - single source of truth
         walletTimestamp: timestamp, // Backend needs this to derive the same private key
@@ -376,7 +376,7 @@ export default function CreateAgent() {
         licenses: values.licenses ? parseInt(values.licenses) : 0,
         cloneable: values.isCloneable,
         endpoint: values.endpoint || undefined, // Optional - x402 handles routing
-        protocols: [{ name: "x402", version: "1.0" }],
+        protocols: [{ name: "Manowar", version: "1.0" }],
         plugins: selectedPlugins.map(p => ({
           registryId: p.id,
           name: p.name,

@@ -93,10 +93,10 @@ function SubmissionItem({
         .slice(0, 2)
         .toUpperCase() || "AG";
 
-    const avatarUrl = agent?.metadata?.avatar
-        ? (agent.metadata.avatar.startsWith("ipfs://")
-            ? getIpfsUrl(agent.metadata.avatar.replace("ipfs://", ""))
-            : agent.metadata.avatar)
+    const avatarUrl = agent?.metadata?.image
+        ? (agent.metadata.image.startsWith("ipfs://")
+            ? getIpfsUrl(agent.metadata.image.replace("ipfs://", ""))
+            : agent.metadata.image)
         : null;
 
     const submittedDate = new Date(submission.submittedAt * 1000);
@@ -212,10 +212,10 @@ function SubmitAgentSection({
                 <div className="space-y-2">
                     {myAgents.map((agent) => {
                         const isSelected = selectedAgentId === agent.id;
-                        const avatarUrl = agent.metadata?.avatar
-                            ? (agent.metadata.avatar.startsWith("ipfs://")
-                                ? getIpfsUrl(agent.metadata.avatar.replace("ipfs://", ""))
-                                : agent.metadata.avatar)
+                        const avatarUrl = agent.metadata?.image
+                            ? (agent.metadata.image.startsWith("ipfs://")
+                                ? getIpfsUrl(agent.metadata.image.replace("ipfs://", ""))
+                                : agent.metadata.image)
                             : null;
 
                         return (
@@ -223,8 +223,8 @@ function SubmitAgentSection({
                                 key={agent.id}
                                 onClick={() => setSelectedAgentId(agent.id)}
                                 className={`w-full p-2 rounded-sm border transition-all text-left ${isSelected
-                                        ? "border-cyan-500 bg-cyan-500/10"
-                                        : "border-sidebar-border hover:border-cyan-500/50"
+                                    ? "border-cyan-500 bg-cyan-500/10"
+                                    : "border-sidebar-border hover:border-cyan-500/50"
                                     }`}
                             >
                                 <div className="flex items-center gap-2">

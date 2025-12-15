@@ -179,8 +179,8 @@ export interface AgentCard {
   name: string;
   description: string;
   skills: string[];
-  avatar?: string; // Gateway URL for app display
-  image?: string; // Standard NFT metadata field (gateway URL for explorer compatibility)
+  image?: string; // Standard NFT metadata field (gateway URL for display and explorer compatibility)
+  avatar?: string; // Legacy field for backward compatibility with explorers
   dnaHash: string;
   walletAddress: string; // Agent's derived wallet address - SINGLE SOURCE OF TRUTH
   walletTimestamp?: number; // Timestamp used in wallet derivation (backend needs this)
@@ -236,8 +236,7 @@ export interface ManowarMetadata {
   schemaVersion: string;
   title: string;
   description: string;
-  banner?: string; // Banner image IPFS URI
-  image?: string;  // Standard NFT metadata field (gateway URL for explorer compatibility)
+  image?: string;  // Standard NFT metadata field (gateway URL for display and explorer compatibility)
   // Identity - single source of truth derived at mint time
   dnaHash: string;
   walletAddress: string; // Derived wallet for x402 payments

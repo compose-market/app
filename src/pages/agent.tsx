@@ -571,11 +571,11 @@ export default function AgentDetailPage() {
   }
 
   // Handle both IPFS URIs (ipfs://) and gateway URLs (https://)
-  const avatarUrl = agent.metadata?.avatar && agent.metadata.avatar !== "none"
-    ? agent.metadata.avatar.startsWith("ipfs://")
-      ? getIpfsUrl(agent.metadata.avatar.replace("ipfs://", ""))
-      : agent.metadata.avatar.startsWith("https://")
-        ? agent.metadata.avatar
+  const avatarUrl = agent.metadata?.image && agent.metadata.image !== "none"
+    ? agent.metadata.image.startsWith("ipfs://")
+      ? getIpfsUrl(agent.metadata.image.replace("ipfs://", ""))
+      : agent.metadata.image.startsWith("https://")
+        ? agent.metadata.image
         : null
     : null;
 
@@ -660,7 +660,7 @@ export default function AgentDetailPage() {
             <div className="p-4 bg-background/50 border border-sidebar-border rounded-lg text-center">
               <Zap className="w-5 h-5 text-yellow-400 mx-auto mb-2" />
               <p className="text-[10px] text-muted-foreground uppercase">Protocol</p>
-              <p className="font-mono text-lg text-yellow-400">x402</p>
+              <p className="font-mono text-lg text-yellow-400">Manowar</p>
             </div>
             <div className="p-4 bg-background/50 border border-sidebar-border rounded-lg text-center">
               <Globe className="w-5 h-5 text-fuchsia-400 mx-auto mb-2" />

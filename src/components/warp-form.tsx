@@ -217,7 +217,8 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
         name: values.name,
         description: values.description,
         skills: agent.tags || [],
-        avatar: avatarUri,
+        image: avatarUri, // Standard NFT metadata field
+        avatar: avatarUri, // Legacy field for backward compatibility
         dnaHash: originalAgentHash, // Use the external hash as DNA
         walletAddress, // Derived from hash + timestamp - source of truth
         walletTimestamp: timestamp, // Backend needs this to derive private key
@@ -226,7 +227,7 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
         licensePrice: usdcToWei(parseFloat(values.licensePrice)).toString(),
         licenses: values.licenses ? parseInt(values.licenses) : 0,
         cloneable: false, // Warped agents are not cloneable by default
-        protocols: agent.protocols || [{ name: "x402", version: "1.0" }],
+        protocols: agent.protocols || [{ name: "manowar", version: "1.0" }],
         createdAt: new Date().toISOString(),
         creator: account?.address || "",
       };

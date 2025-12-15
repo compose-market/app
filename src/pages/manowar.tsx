@@ -103,7 +103,7 @@ export default function ManowarPage() {
                     dnaHash: manowar.dnaHash,
                     title: manowar.title || `Manowar #${manowar.id}`,
                     description: manowar.description || "",
-                    banner: manowar.banner,
+                    image: manowar.image,
                     creator: manowar.creator,
                     hasCoordinator: manowar.hasCoordinator,
                     coordinatorModel: manowar.coordinatorModel,
@@ -358,8 +358,8 @@ export default function ManowarPage() {
         );
     }
 
-    const bannerUrl = manowar.banner && manowar.banner.startsWith("ipfs://")
-        ? getIpfsUrl(manowar.banner.replace("ipfs://", ""))
+    const bannerUrl = manowar.image && manowar.image.startsWith("ipfs://")
+        ? getIpfsUrl(manowar.image.replace("ipfs://", ""))
         : null;
 
     return (

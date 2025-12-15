@@ -840,7 +840,7 @@ function AgentsPicker({
   const manowarAgents = useMemo((): Agent[] => {
     if (!onchainAgents) return [];
     return onchainAgents.map((a): Agent => {
-      const avatarUri = a.metadata?.avatar;
+      const avatarUri = a.metadata?.image;
       let avatarUrl: string | null = null;
       if (avatarUri && avatarUri !== "none") {
         // Handle both IPFS URIs (ipfs://) and gateway URLs (https://)
@@ -857,7 +857,7 @@ function AgentsPicker({
         name: a.metadata?.name || `Agent #${a.id}`,
         description: a.metadata?.description || "",
         registry: "manowar" as AgentRegistryId,
-        protocols: a.metadata?.protocols || [{ name: "x402", version: "1.0" }],
+        protocols: a.metadata?.protocols || [{ name: "Manowar", version: "1.0" }],
         avatarUrl,
         totalInteractions: 0,
         recentInteractions: 0,
@@ -1173,7 +1173,6 @@ function MintManowarDialog({
         schemaVersion: "1.0.0",
         title,
         description,
-        banner: bannerImageUri,
         image: bannerImageUri ? getIpfsUrl(bannerImageUri.replace("ipfs://", "")) : undefined,
         dnaHash,
         walletAddress,
@@ -1208,7 +1207,7 @@ function MintManowarDialog({
           {
             title,
             description,
-            banner: bannerImageUri,
+            banner: bannerImageUri, // Contract uses 'banner' field name
             manowarCardUri,
             units: units ? BigInt(parseInt(units)) : BigInt(1),
             leaseEnabled,

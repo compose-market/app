@@ -87,7 +87,7 @@ export default function AgentsPage() {
         return true;
       })
       .map((a): ExtendedAgent => {
-        const avatarUri = a.metadata?.avatar;
+        const avatarUri = a.metadata?.image;
         let avatarUrl: string | null = null;
         if (avatarUri && avatarUri !== "none" && avatarUri.startsWith("ipfs://")) {
           avatarUrl = getIpfsUrl(avatarUri.replace("ipfs://", ""));
@@ -99,7 +99,7 @@ export default function AgentsPage() {
           name: a.metadata?.name || `Agent #${a.id}`,
           description: a.metadata?.description || "",
           registry: "manowar" as AgentRegistryId,
-          protocols: a.metadata?.protocols || [{ name: "x402", version: "1.0" }],
+          protocols: a.metadata?.protocols || [{ name: "Manowar", version: "1.0" }],
           avatarUrl,
           totalInteractions: 0, // On-chain agents don't track this yet
           recentInteractions: 0,
@@ -211,10 +211,10 @@ export default function AgentsPage() {
                   <Label
                     htmlFor={`registry-${registryId}`}
                     className={`text-xs sm:text-sm font-mono cursor-pointer ${!isEnabled
-                        ? "text-muted-foreground/50 cursor-not-allowed"
-                        : isSelected
-                          ? "text-fuchsia-400"
-                          : "text-muted-foreground hover:text-foreground"
+                      ? "text-muted-foreground/50 cursor-not-allowed"
+                      : isSelected
+                        ? "text-fuchsia-400"
+                        : "text-muted-foreground hover:text-foreground"
                       }`}
                   >
                     {registry.name}

@@ -255,8 +255,8 @@ function ManowarsTab({ searchQuery }: { searchQuery: string }) {
 
 // Memoized card component to avoid re-renders when list changes (Fix 9)
 const ManowarCard = React.memo(function ManowarCard({ manowar }: { manowar: OnchainManowar }) {
-  const bannerUrl = manowar.banner && manowar.banner.startsWith("ipfs://")
-    ? getIpfsUrl(manowar.banner.replace("ipfs://", ""))
+  const bannerUrl = manowar.image && manowar.image.startsWith("ipfs://")
+    ? getIpfsUrl(manowar.image.replace("ipfs://", ""))
     : null;
 
   const unitsAvailable = manowar.units === 0 ? "∞" : `${manowar.units - manowar.unitsMinted}/${manowar.units}`;
@@ -742,11 +742,11 @@ const AgentCard = React.memo(function AgentCard({ agent }: { agent: OnchainAgent
 
   // Handle avatar URL
   let avatarUrl: string | null = null;
-  if (metadata?.avatar && metadata.avatar !== "none") {
-    if (metadata.avatar.startsWith("ipfs://")) {
-      avatarUrl = getIpfsUrl(metadata.avatar.replace("ipfs://", ""));
-    } else if (metadata.avatar.startsWith("https://")) {
-      avatarUrl = metadata.avatar;
+  if (metadata?.image && metadata.image !== "none") {
+    if (metadata.image.startsWith("ipfs://")) {
+      avatarUrl = getIpfsUrl(metadata.image.replace("ipfs://", ""));
+    } else if (metadata.image.startsWith("https://")) {
+      avatarUrl = metadata.image;
     }
   }
 

@@ -48,7 +48,7 @@ export interface OnchainManowar {
   id: number;
   title: string;
   description: string;
-  banner: string;
+  image: string; // Standard NFT metadata field (gateway URL)
   manowarCardUri: string;
   totalPrice: string;
   units: number;
@@ -206,7 +206,7 @@ async function fetchManowarData(manowarId: number): Promise<OnchainManowar | nul
       id: manowarId,
       title: data.title,
       description: data.description,
-      banner: data.banner,
+      image: data.banner, // Contract still uses 'banner' field name
       manowarCardUri: data.manowarCardUri,
       totalPrice: weiToUsdc(data.totalPrice),
       units: Number(data.units),

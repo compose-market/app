@@ -331,12 +331,12 @@ function AgentAssetCard({ agent }: { agent: OnchainAgent }) {
   const description = metadata?.description || "No description available";
 
   let avatarUrl: string | null = null;
-  if (metadata?.avatar && metadata.avatar !== "none") {
-    // Handle both gateway URLs (https://) and IPFS URIs (ipfs://)
-    if (metadata.avatar.startsWith("ipfs://")) {
-      avatarUrl = getIpfsUrl(metadata.avatar.replace("ipfs://", ""));
-    } else if (metadata.avatar.startsWith("https://")) {
-      avatarUrl = metadata.avatar;
+  if (metadata?.image && metadata.image !== "none") {
+    // Convert IPFS URI to gateway URL if needed
+    if (metadata.image.startsWith("ipfs://")) {
+      avatarUrl = getIpfsUrl(metadata.image.replace("ipfs://", ""));
+    } else if (metadata.image.startsWith("https://")) {
+      avatarUrl = metadata.image;
     }
   }
 
@@ -446,8 +446,8 @@ function AgentAssetCard({ agent }: { agent: OnchainAgent }) {
 
 function ManowarAssetCard({ manowar }: { manowar: OnchainManowar }) {
   let bannerUrl: string | null = null;
-  if (manowar.banner && manowar.banner.startsWith("ipfs://")) {
-    bannerUrl = getIpfsUrl(manowar.banner.replace("ipfs://", ""));
+  if (manowar.image && manowar.image.startsWith("ipfs://")) {
+    bannerUrl = getIpfsUrl(manowar.image.replace("ipfs://", ""));
   }
 
   const explorerUrl = `${CHAIN_CONFIG[CHAIN_IDS.avalancheFuji].explorer}/token/${getContractAddress("Manowar")}?a=${manowar.id}`;
