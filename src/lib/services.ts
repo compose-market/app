@@ -245,7 +245,7 @@ export async function fetchRemoteMcpServerTools(serverSlug: string): Promise<Con
 }
 
 // Alias for backwards compatibility
-export const fetchGlamaServerTools = fetchRemoteMcpServerTools;
+export const fetchMCPServerTools = fetchRemoteMcpServerTools;
 
 /**
  * Execute an MCP server tool (spawns on-demand via MCP spawner)
@@ -290,7 +290,7 @@ export async function executeRegistryTool(
     return executeGoatPlugin(pluginId, tool, args);
   }
 
-  if (origin === "glama" || origin === "mcp") {
+  if (origin === "mcp" || origin === "mcp") {
     // Use remote SSE proxy endpoint for MCP servers
     return executeRemoteMcpServer(slug, tool, args);
   }
