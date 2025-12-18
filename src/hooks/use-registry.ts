@@ -33,7 +33,7 @@ function getRegistryBaseUrl(): string {
 const REGISTRY_BASE = getRegistryBaseUrl();
 
 /** Server origin types */
-export type ServerOrigin = "glama" | "internal" | "goat" | "eliza";
+export type ServerOrigin = "mcp" | "internal" | "goat" | "eliza";
 
 /** Record type: agent (autonomous AI agents) or plugin (tools/connectors) */
 export type RecordType = "agent" | "plugin";
@@ -84,7 +84,7 @@ export interface RegistrySearchResponse {
 /** Registry metadata */
 export interface RegistryMeta {
   totalServers: number;
-  glamaServers: number;
+  mcpServers: number;
   internalServers: number;
   goatServers: number;
   elizaServers: number;
@@ -277,7 +277,7 @@ export function useRegistryTags() {
 /** Origin color mapping */
 export const ORIGIN_COLORS: Record<ServerOrigin, string> = {
   internal: "cyan",
-  glama: "purple",
+  mcp: "purple",
   goat: "green",
   eliza: "fuchsia",
 };
@@ -304,7 +304,7 @@ export function getOriginLabel(origin: ServerOrigin): string {
   switch (origin) {
     case "internal":
       return "Compose";
-    case "glama":
+    case "mcp":
       return "MCP";
     case "goat":
       return "GOAT";
