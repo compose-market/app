@@ -344,7 +344,7 @@ function ConnectorPicker({
   const getOriginBadge = (origin: string) => {
     switch (origin) {
       case "internal": return <Badge variant="default" className="text-[8px] h-4 px-1">Compose</Badge>;
-      case "glama": return <Badge variant="secondary" className="text-[8px] h-4 px-1">MCP</Badge>;
+      case "mcp": return <Badge variant="secondary" className="text-[8px] h-4 px-1">MCP</Badge>;
       case "goat": return <Badge variant="outline" className="text-[8px] h-4 px-1 border-green-500/50 text-green-400">GOAT</Badge>;
       case "eliza": return <Badge variant="outline" className="text-[8px] h-4 px-1 border-fuchsia-500/50 text-fuchsia-400">Eliza</Badge>;
       default: return null;
@@ -529,7 +529,7 @@ function ConnectorDetailDialog({
   const [dynamicTools, setDynamicTools] = useState<Array<{ name: string; description?: string }>>([]);
   const [loadingTools, setLoadingTools] = useState(false);
 
-  // Fetch tools dynamically for Glama servers that don't have pre-cached tools
+  // Fetch tools dynamically for MCP servers that don't have pre-cached tools
   useEffect(() => {
     if (!server || !open) return;
 
@@ -539,7 +539,7 @@ function ConnectorDetailDialog({
     setDynamicTools([]);
 
     // Only fetch dynamically for MCP servers without pre-cached tools
-    if (server.origin === "glama" && (!server.tools || server.tools.length === 0)) {
+    if (server.origin === "mcp" && (!server.tools || server.tools.length === 0)) {
       setLoadingTools(true);
       import("@/lib/services").then(({ fetchMcpServerTools }) => {
         fetchMcpServerTools(server.slug)
@@ -2158,7 +2158,7 @@ function ComposeFlow() {
       }
 
       // Execute workflow via Manowar backend with x402 payment
-      const response = await fetchWithPayment("https://mcp.compose.market/manowar/execute", {
+      const response = await fetchWithPayment("https://manowar.compose.market/manowar/execute", {
         method: "POST",
         headers,
         body: JSON.stringify(workflowPayload),

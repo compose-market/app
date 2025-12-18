@@ -1,7 +1,7 @@
 /**
  * MCP Registry Browser
  * 
- * Browse and search MCP servers from Glama + Compose internal tools.
+ * Browse and search MCP servers from official registry + Compose internal tools.
  * Includes test console for GOAT plugins.
  */
 import { useState, useMemo } from "react";
@@ -340,8 +340,8 @@ function ServerDetailDialog({
 
           {/* Actions */}
           <div className="flex gap-2 pt-4 border-t border-sidebar-border">
-            {/* Show test button for GOAT plugins, Eliza plugins (executable) OR MCP servers (glama origin) */}
-            {(isExecutable || server.origin === "glama" || isEliza) && (
+            {/* Show test button for GOAT plugins, Eliza plugins (executable) OR MCP servers */}
+            {(isExecutable || server.origin === "mcp" || isEliza) && (
               <Button
                 onClick={handleTestPlugin}
                 className={cn(
@@ -361,7 +361,7 @@ function ServerDetailDialog({
               onClick={handleAddToWorkflow}
               className={cn(
                 "bg-cyan-500 hover:bg-cyan-600 text-black font-bold",
-                !(isExecutable || server.origin === "glama" || isEliza) && "flex-1"
+                !(isExecutable || server.origin === "mcp" || isEliza) && "flex-1"
               )}
             >
               <Plus className="w-4 h-4 mr-2" />
@@ -396,7 +396,7 @@ function ServerDetailDialog({
 
 export default function RegistryPage() {
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedOrigin, setSelectedOrigin] = useState<"all" | "glama" | "internal" | "goat" | "eliza">("all");
+  const [selectedOrigin, setSelectedOrigin] = useState<"all" | "mcp" | "internal" | "goat" | "eliza">("all");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [selectedServer, setSelectedServer] = useState<RegistryServer | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -483,7 +483,7 @@ export default function RegistryPage() {
               <SelectContent>
                 <SelectItem value="all">All Sources</SelectItem>
                 <SelectItem value="internal">Compose</SelectItem>
-                <SelectItem value="glama">MCP (Glama)</SelectItem>
+                <SelectItem value="mcp">MCP Tools</SelectItem>
                 <SelectItem value="goat">GOAT SDK</SelectItem>
                 <SelectItem value="eliza">ElizaOS</SelectItem>
               </SelectContent>

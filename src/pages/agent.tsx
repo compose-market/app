@@ -64,6 +64,7 @@ import {
 } from "lucide-react";
 
 const MCP_URL = (import.meta.env.VITE_MCP_URL || "https://mcp.compose.market").replace(/\/+$/, "");
+const MANOWAR_URL = (import.meta.env.VITE_MANOWAR_URL || "https://manowar.compose.market").replace(/\/+$/, "");
 
 export default function AgentDetailPage() {
   const params = useParams<{ id: string }>();
@@ -156,7 +157,7 @@ export default function AgentDetailPage() {
         console.log(`[agent] No walletTimestamp in metadata - agent will work without signing capability`);
       }
 
-      const response = await fetch(`${MCP_URL}/agent/register`, {
+      const response = await fetch(`${MANOWAR_URL}/agent/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -167,7 +168,7 @@ export default function AgentDetailPage() {
           description: metadata?.description || "",
           agentCardUri: agent.agentCardUri,
           creator: agent.creator,
-          model: metadata?.model || "gpt-4o-mini",
+          model: metadata?.model,
           plugins: metadata?.plugins?.map(p => p.registryId) || [],
         }),
       });
@@ -288,7 +289,7 @@ export default function AgentDetailPage() {
           }
         }
 
-        return fetchWithPayment(`${MCP_URL}/agent/${agentWallet}/chat`, {
+        return fetchWithPayment(`${MANOWAR_URL}/agent/${agentWallet}/chat`, {
           method: "POST",
           headers,
           body: JSON.stringify(requestBody),
@@ -466,7 +467,7 @@ export default function AgentDetailPage() {
 
     setUploadingKnowledge(true);
     try {
-      const response = await fetch(`${MCP_URL}/agent/${agentWallet}/knowledge`, {
+      const response = await fetch(`${MANOWAR_URL}/agent/${agentWallet}/knowledge`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

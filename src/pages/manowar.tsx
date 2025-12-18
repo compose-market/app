@@ -38,7 +38,7 @@ import {
     Bot,
 } from "lucide-react";
 
-const MCP_URL = (import.meta.env.VITE_MCP_URL || "https://mcp.compose.market").replace(/\/+$/, "");
+const MANOWAR_URL = (import.meta.env.VITE_MANOWAR_URL || "https://manowar.compose.market").replace(/\/+$/, "");
 
 export default function ManowarPage() {
     const params = useParams<{ id: string }>();
@@ -94,7 +94,7 @@ export default function ManowarPage() {
         if (!manowar || !manowar.walletAddress) return false;
 
         try {
-            const response = await fetch(`${MCP_URL}/manowar/register`, {
+            const response = await fetch(`${MANOWAR_URL}/manowar/register`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -214,7 +214,7 @@ export default function ManowarPage() {
 
                 // Use the /manowar/:id/chat endpoint - prefer wallet address for routing
                 const manowarIdentifier = manowar.walletAddress || manowar.id.toString();
-                return fetchWithPayment(`${MCP_URL}/manowar/${manowarIdentifier}/chat`, {
+                return fetchWithPayment(`${MANOWAR_URL}/manowar/${manowarIdentifier}/chat`, {
                     method: "POST",
                     headers,
                     body: JSON.stringify(requestBody),

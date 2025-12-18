@@ -59,6 +59,7 @@ import { prepareContractCall } from "thirdweb";
 import { accountAbstraction } from "@/lib/thirdweb";
 
 const MCP_URL = (import.meta.env.VITE_MCP_URL || "https://mcp.compose.market").replace(/\/+$/, "");
+const MANOWAR_URL = (import.meta.env.VITE_MANOWAR_URL || "https://manowar.compose.market").replace(/\/+$/, "");
 
 interface SelectedHFModel {
   id: string;
@@ -189,7 +190,7 @@ export default function CreateAgent() {
   );
 
   const { data: defaultPlugins, isLoading: isLoadingDefault } = useRegistryServers({
-    origin: "goat,eliza,glama",
+    origin: "goat,eliza,mcp",
     limit: 30,
   });
 
@@ -218,7 +219,7 @@ export default function CreateAgent() {
     switch (origin) {
       case "goat": return "border-green-500/50 text-green-400 bg-green-500/10";
       case "eliza": return "border-fuchsia-500/50 text-fuchsia-400 bg-fuchsia-500/10";
-      case "glama": return "border-cyan-500/50 text-cyan-400 bg-cyan-500/10";
+      case "mcp": return "border-cyan-500/50 text-cyan-400 bg-cyan-500/10";
       default: return "border-slate-500/50 text-slate-400 bg-slate-500/10";
     }
   };
@@ -227,7 +228,7 @@ export default function CreateAgent() {
     switch (origin) {
       case "goat": return "GOAT";
       case "eliza": return "Eliza";
-      case "glama": return "MCP";
+      case "mcp": return "MCP";
       case "internal": return "Internal";
       default: return origin;
     }
@@ -255,11 +256,11 @@ export default function CreateAgent() {
     if (!servers) return [];
 
     // ElizaOS framework: show Eliza + GOAT plugins
-    // LangChain framework: show GOAT + Glama plugins (MCP compatible)
+    // LangChain framework: show GOAT + MCP plugins (MCP compatible)
     if (selectedFramework === "eliza") {
       return servers.filter(s => s.origin === "goat" || s.origin === "eliza");
     }
-    return servers.filter(s => s.origin === "goat" || s.origin === "glama");
+    return servers.filter(s => s.origin === "goat" || s.origin === "mcp");
   }, [pluginSearch, searchData?.servers, defaultPlugins?.servers, selectedFramework]);
 
   // Confirmation dialog state
@@ -450,7 +451,7 @@ export default function CreateAgent() {
       try {
         // Register with backend to spin up agent runtime
         // Backend uses wallet address as the primary identifier
-        const response = await fetch(`${MCP_URL}/agent/register`, {
+        const response = await fetch(`${MANOWAR_URL}/agent/register`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -472,7 +473,7 @@ export default function CreateAgent() {
             description: (
               <div className="space-y-1 text-xs">
                 <p>Wallet: <code className="text-cyan-400">{walletAddress.slice(0, 10)}...{walletAddress.slice(-8)}</code></p>
-                <p>Chat: <code className="text-cyan-400">{MCP_URL}/agent/{walletAddress}/chat</code></p>
+                <p>Chat: <code className="text-cyan-400">{MANOWAR_URL}/agent/{walletAddress}/chat</code></p>
               </div>
             ),
           });
@@ -868,12 +869,12 @@ export default function CreateAgent() {
                                 onClick={() => {
                                   field.onChange(fw.id);
                                   // Clear incompatible plugins when switching frameworks
-                                  // GOAT works with both, Eliza plugins only with Eliza, Glama (MCP) only with LangChain
+                                  // GOAT works with both, Eliza plugins only with Eliza, MCP only with LangChain
                                   if (fw.id !== selectedFramework) {
                                     setSelectedPlugins(prev =>
                                       prev.filter(p => p.origin === "goat" ||
                                         (fw.id === "eliza" && p.origin === "eliza") ||
-                                        (fw.id === "langchain" && p.origin === "glama")
+                                        (fw.id === "langchain" && p.origin === "mcp")
                                       )
                                     );
                                   }
@@ -918,7 +919,7 @@ export default function CreateAgent() {
                     <Plug className="w-5 h-5" />
                     PLUGINS & CAPABILITIES
                     <Badge variant="outline" className="ml-2 text-[10px] border-sidebar-border">
-                      {selectedFramework === "eliza" ? "ElizaOS + GOAT" : "MCP (Glama) + GOAT"}
+                      {selectedFramework === "eliza" ? "ElizaOS + GOAT" : "MCP + GOAT"}
                     </Badge>
                   </CardTitle>
                 </CardHeader>
@@ -950,7 +951,7 @@ export default function CreateAgent() {
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                       <Input
-                        placeholder={`Search ${selectedFramework === "eliza" ? "ElizaOS, GOAT" : "MCP (Glama), GOAT"} plugins...`}
+                        placeholder={`Search ${selectedFramework === "eliza" ? "ElizaOS, GOAT" : "MCP, GOAT"} plugins...`}
                         value={pluginSearch}
                         onChange={(e) => {
                           setPluginSearch(e.target.value);
