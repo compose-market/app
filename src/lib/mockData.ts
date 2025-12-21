@@ -48,7 +48,7 @@ export const MOCK_AGENTS: Agent[] = [
     reputation: 85,
     imageUrl: "/attached_assets/generated_images/3d_agent_icon.png",
     owner: "0x3bD...7f1",
-    model: "GPT-4o",
+    model: "asi1-mini",
     isCloneable: false
   },
   {

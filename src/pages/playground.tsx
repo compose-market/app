@@ -793,10 +793,20 @@ export default function PlaygroundPage() {
       }
 
       // Execute via connector
-      const response = await fetchWithPayment(`${CONNECTOR_URL}/plugins/${encodeURIComponent(selectedPlugin)}/execute`, {
+      let url = `${CONNECTOR_URL}/plugins/${encodeURIComponent(selectedPlugin)}/execute`;
+      let body = { tool: selectedTool, args };
+
+      if (pluginSource === 'mcp') {
+        // Use MCP specific route via connector
+        // Connector exposes: POST /mcp/servers/:slug/call -> MCP /mcp/servers/:slug/tools/:tool
+        url = `${CONNECTOR_URL}/mcp/servers/${encodeURIComponent(selectedPlugin)}/call`;
+        body = { tool: selectedTool, args: args };
+      }
+
+      const response = await fetchWithPayment(url, {
         method: "POST",
         headers,
-        body: JSON.stringify({ tool: selectedTool, args }),
+        body: JSON.stringify(body),
       });
 
       const data = await response.json();
@@ -949,8 +959,8 @@ export default function PlaygroundPage() {
         headers["x-session-budget-remaining"] = budgetRemaining.toString();
       }
 
-      // Execute via connector MCP proxy
-      const response = await fetchWithPayment(`${CONNECTOR_URL}/mcp/servers/${encodeURIComponent(selectedMcpServer)}/call`, {
+      // Execute via Lambda -> MCP proxy (Lambda handles x402 payment, proxies to MCP server)
+      const response = await fetchWithPayment(`${API_BASE}/api/mcp/servers/${encodeURIComponent(selectedMcpServer)}/call`, {
         method: "POST",
         headers,
         body: JSON.stringify({ tool: selectedTool, args }),
