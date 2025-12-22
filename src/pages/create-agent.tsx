@@ -88,18 +88,18 @@ interface Framework {
 
 const FRAMEWORKS: Framework[] = [
   {
-    id: "eliza",
-    name: "ElizaOS",
-    description: "Agent framework with 200+ plugins for blockchain, social, AI",
-    color: "fuchsia",
-    features: ["Memory", "RAG", "Natural Language Actions", "200+ Plugins"],
-  },
-  {
     id: "langchain",
     name: "LangChain",
     description: "LLM framework with LangGraph for stateful agents",
     color: "orange",
     features: ["Memory", "RAG", "Tool Calling", "State Graphs"],
+  },
+  {
+    id: "eliza",
+    name: "ElizaOS",
+    description: "Agent framework with 200+ plugins for blockchain, social, AI",
+    color: "fuchsia",
+    features: ["Memory", "RAG", "Natural Language Actions", "200+ Plugins"],
   },
 ];
 
@@ -200,6 +200,7 @@ export default function CreateAgent() {
   const selectedIds = useMemo(() => new Set(selectedPlugins.map(p => p.id)), [selectedPlugins]);
 
   const addPlugin = (server: RegistryServer) => {
+    // registryId is already normalized by backend (use-registry.ts -> connector)
     if (selectedIds.has(server.registryId)) return;
     setSelectedPlugins(prev => [...prev, {
       id: server.registryId,
@@ -1267,8 +1268,8 @@ export default function CreateAgent() {
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Framework</span>
-                <span className={`font-mono ${pendingValues.framework === "eliza" ? "text-fuchsia-400" : "text-orange-400"}`}>
-                  {pendingValues.framework === "eliza" ? "ElizaOS" : "LangChain"}
+                <span className={`font-mono ${pendingValues.framework === "langchain" ? "text-orange-400" : "text-fuchsia-400"}`}>
+                  {pendingValues.framework === "langchain" ? "LangChain" : "ElizaOS"}
                 </span>
               </div>
               <div className="flex justify-between text-sm">
