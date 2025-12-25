@@ -58,6 +58,7 @@ import { ChatMessageItem } from "@/components/chat";
 import { MultimodalCanvas } from "@/components/canvas";
 import { useFileAttachment, type AttachedFile } from "@/hooks/use-attachment";
 import { useAudioRecording } from "@/hooks/use-recording";
+import { useRegistryServers, type RegistryServer } from "@/hooks/use-registry";
 import {
   cleanupConversationFiles,
   getIpfsUrl,
@@ -216,6 +217,7 @@ interface McpToolsResponse {
 type PluginSource = "goat" | "mcp" | "eliza";
 // Remove trailing slashes to prevent double-slash URL issues
 const API_BASE = (import.meta.env.VITE_API_URL || "https://api.compose.market").replace(/\/+$/, "");
+// CONNECTOR_URL used for tool fetching (metadata, not execution)
 const CONNECTOR_URL = (import.meta.env.VITE_CONNECTOR_URL || "https://services.compose.market/connector").replace(/\/+$/, "");
 
 // Helper to generate default args from JSON schema
@@ -350,8 +352,12 @@ export default function PlaygroundPage() {
     return source !== "mcp" ? params.get("plugin") || "" : "";
   });
 
-  // MCP Servers State
-  const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
+  // MCP Servers State - fetched from centralized registry
+  const { data: mcpRegistryData, isLoading: mcpLoading } = useRegistryServers({
+    origin: 'mcp',
+    available: true
+  });
+  const mcpServers = mcpRegistryData?.servers ?? [];
   const [mcpTools, setMcpTools] = useState<McpTool[]>([]);
   const [selectedMcpServer, setSelectedMcpServer] = useState<string>(() => {
     const params = new URLSearchParams(window.location.search);
@@ -797,9 +803,9 @@ export default function PlaygroundPage() {
       let body = { tool: selectedTool, args };
 
       if (pluginSource === 'mcp') {
-        // Use MCP specific route via connector
-        // Connector exposes: POST /mcp/servers/:slug/call -> MCP /mcp/servers/:slug/tools/:tool
-        url = `${CONNECTOR_URL}/mcp/servers/${encodeURIComponent(selectedPlugin)}/call`;
+        // Route MCP execution through Lambda (API_BASE) for x402 payment handling
+        // Lambda route: POST /api/mcp/servers/:slug/call -> MCP Server
+        url = `${API_BASE}/api/mcp/servers/${encodeURIComponent(selectedPlugin)}/call`;
         body = { tool: selectedTool, args: args };
       }
 
@@ -849,27 +855,13 @@ export default function PlaygroundPage() {
   // MCP Server Handlers
   // ==========================================================================
 
-  const fetchMcpServers = async () => {
-    setPluginsLoading(true);
-    try {
-      const response = await fetch(`${CONNECTOR_URL}/mcp/servers`);
-      if (!response.ok) throw new Error(`Failed to fetch MCP servers: ${response.status}`);
-      const data: McpServersResponse = await response.json();
-      // Filter to only available servers
-      const availableServers = data.servers.filter(s => s.available);
-      setMcpServers(availableServers);
-
-      // Auto-select first server if none selected
-      if (!selectedMcpServer && availableServers.length > 0) {
-        setSelectedMcpServer(availableServers[0].slug);
-      }
-    } catch (err) {
-      console.error("Failed to fetch MCP servers:", err);
-      setPluginError(err instanceof Error ? err.message : "Failed to connect to MCP server");
-    } finally {
-      setPluginsLoading(false);
+  // MCP servers are now fetched via useRegistryServers hook above
+  // Auto-select first server when servers load
+  useEffect(() => {
+    if (!selectedMcpServer && mcpServers.length > 0) {
+      setSelectedMcpServer(mcpServers[0].slug);
     }
-  };
+  }, [mcpServers, selectedMcpServer]);
 
   const fetchMcpTools = async (slug: string) => {
     setPluginsLoading(true);
@@ -1199,17 +1191,17 @@ export default function PlaygroundPage() {
   }, []);
 
   // Fetch plugins/servers based on source when tab is active
+  // Note: MCP servers are auto-fetched via useRegistryServers hook
   useEffect(() => {
     if (activeTab === "plugins") {
       if (pluginSource === "goat" && !goatStatus) {
         fetchPluginStatus();
-      } else if (pluginSource === "mcp" && mcpServers.length === 0) {
-        fetchMcpServers();
       } else if (pluginSource === "eliza" && elizaPlugins.length === 0) {
         fetchElizaPlugins();
       }
+      // MCP servers auto-loaded via hook - no manual fetch needed
     }
-  }, [activeTab, pluginSource, goatStatus, mcpServers.length, elizaPlugins.length]);
+  }, [activeTab, pluginSource, goatStatus, elizaPlugins.length]);
 
   // Fetch tools when MCP server is selected
   useEffect(() => {
@@ -1579,27 +1571,72 @@ export default function PlaygroundPage() {
               {/* MCP Server selector - shown when source is mcp */}
               {pluginSource === "mcp" && (
                 <>
-                  <Select value={selectedMcpServer} onValueChange={handleMcpServerChange} disabled={mcpServers.length === 0}>
-                    <SelectTrigger className="w-full sm:w-40 lg:w-52 bg-zinc-900 border-zinc-700 h-9">
-                      <SelectValue placeholder={pluginsLoading ? "Loading..." : "Select server"} />
-                    </SelectTrigger>
-                    <SelectContent className="bg-zinc-900 border-zinc-700 max-h-80">
-                      {mcpServers.length === 0 ? (
-                        <div className="p-2 text-zinc-500 text-sm">No MCP servers available</div>
-                      ) : (
-                        mcpServers.map((server, idx) => (
-                          <SelectItem key={`${idx}-${server.slug}`} value={server.slug}>
-                            <div className="flex items-center gap-2">
-                              <span className="font-mono text-xs truncate max-w-24 sm:max-w-40">{server.label || server.slug}</span>
-                              {server.remote && (
-                                <Badge variant="outline" className="text-[9px] px-1 py-0 border-cyan-500/50 text-cyan-400 hidden sm:flex">remote</Badge>
-                              )}
+                  {/* MCP Server selector with search - Combobox pattern */}
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        role="combobox"
+                        className="w-full sm:w-40 lg:w-52 bg-zinc-900 border-zinc-700 h-9 justify-between text-left font-normal"
+                      >
+                        <span className="truncate font-mono text-xs">
+                          {mcpLoading
+                            ? "Loading..."
+                            : selectedMcpServer
+                              ? mcpServers.find(s => s.slug === selectedMcpServer)?.name || selectedMcpServer
+                              : "Select server..."}
+                        </span>
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[300px] p-0 bg-zinc-900 border-zinc-700" align="start">
+                      <Command className="bg-zinc-900">
+                        <CommandInput
+                          placeholder="Search servers..."
+                          className="h-9"
+                        />
+                        <CommandList className="max-h-[300px]">
+                          {mcpLoading ? (
+                            <div className="p-4 text-center text-zinc-500">
+                              <Loader2 className="h-4 w-4 animate-spin mx-auto mb-2" />
+                              Loading servers...
                             </div>
-                          </SelectItem>
-                        ))
-                      )}
-                    </SelectContent>
-                  </Select>
+                          ) : mcpServers.length === 0 ? (
+                            <CommandEmpty>No servers found</CommandEmpty>
+                          ) : (
+                            <CommandGroup>
+                              {mcpServers.map((server) => (
+                                <CommandItem
+                                  key={server.slug}
+                                  value={`${server.name} ${server.slug} ${server.description || ""}`}
+                                  onSelect={() => {
+                                    handleMcpServerChange(server.slug);
+                                  }}
+                                  className="cursor-pointer"
+                                >
+                                  <div className="flex items-center gap-2 w-full">
+                                    <Check
+                                      className={cn(
+                                        "h-4 w-4 shrink-0",
+                                        selectedMcpServer === server.slug ? "opacity-100" : "opacity-0"
+                                      )}
+                                    />
+                                    <div className="flex flex-col min-w-0 flex-1">
+                                      <span className="font-mono text-xs truncate">{server.name || server.slug}</span>
+                                      <span className="text-[10px] text-zinc-500 truncate">{server.description || "No description"}</span>
+                                    </div>
+                                    {server.transport === 'http' && (
+                                      <Badge variant="outline" className="text-[9px] px-1 py-0 border-cyan-500/50 text-cyan-400 shrink-0">remote</Badge>
+                                    )}
+                                  </div>
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          )}
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
 
                   {/* MCP Tool selector */}
                   <Select value={selectedTool} onValueChange={handleMcpToolSelect} disabled={mcpTools.length === 0}>
@@ -1626,7 +1663,7 @@ export default function PlaygroundPage() {
                   <div className="flex items-center gap-2 text-[10px] sm:text-xs shrink-0">
                     <div className={cn("w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full", mcpServers.length > 0 ? "bg-purple-500" : "bg-zinc-500")} />
                     <span className="text-zinc-500">
-                      {mcpServers.length > 0 ? `${mcpServers.length} servers` : "Loading..."}
+                      {mcpServers.length > 0 ? `${mcpServers.length.toLocaleString()} servers` : "Loading..."}
                     </span>
                   </div>
                 </>
@@ -1691,11 +1728,12 @@ export default function PlaygroundPage() {
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={pluginSource === "goat" ? fetchPluginStatus : pluginSource === "mcp" ? fetchMcpServers : fetchElizaPlugins}
-                disabled={pluginsLoading}
+                onClick={pluginSource === "goat" ? fetchPluginStatus : pluginSource === "eliza" ? fetchElizaPlugins : undefined}
+                disabled={pluginsLoading || mcpLoading || pluginSource === "mcp"}
                 className="text-zinc-400 hover:text-white shrink-0 h-8 w-8 sm:h-9 sm:w-9"
+                title={pluginSource === "mcp" ? "MCP servers auto-refresh" : "Refresh"}
               >
-                <RefreshCw className={cn("h-3.5 w-3.5 sm:h-4 sm:w-4", pluginsLoading && "animate-spin")} />
+                <RefreshCw className={cn("h-3.5 w-3.5 sm:h-4 sm:w-4", (pluginsLoading || mcpLoading) && "animate-spin")} />
               </Button>
             </div>
           )}
@@ -1839,32 +1877,13 @@ export default function PlaygroundPage() {
                     )}
 
                     {pluginSource === "mcp" && mcpServers.length > 0 && (
-                      <div className="mt-6 text-left max-w-2xl mx-auto">
-                        <p className="text-xs text-zinc-600 uppercase tracking-wider mb-3">
-                          {mcpServers.length} MCP Servers Available
+                      <div className="mt-6 text-left max-w-md mx-auto">
+                        <p className="text-xs text-zinc-600 uppercase tracking-wider mb-3 text-center">
+                          {mcpServers.length.toLocaleString()} MCP Servers Available
                         </p>
-                        <div className="grid grid-cols-2 gap-2 text-xs">
-                          {mcpServers.slice(0, 8).map((server) => (
-                            <button
-                              key={server.slug}
-                              onClick={() => handleMcpServerChange(server.slug)}
-                              className={cn(
-                                "bg-zinc-900 rounded-lg p-3 border text-left transition-colors",
-                                selectedMcpServer === server.slug
-                                  ? "border-purple-500/50 bg-purple-950/20"
-                                  : "border-zinc-800 hover:border-zinc-700"
-                              )}
-                            >
-                              <div className="flex items-center justify-between mb-1">
-                                <span className="text-purple-400 font-mono text-xs">{server.label || server.slug}</span>
-                                {server.remote && (
-                                  <Badge variant="outline" className="text-[9px] border-cyan-500/50 text-cyan-400">remote</Badge>
-                                )}
-                              </div>
-                              <p className="text-zinc-500 text-[10px] line-clamp-2">{server.description || "No description"}</p>
-                            </button>
-                          ))}
-                        </div>
+                        <p className="text-zinc-500 text-sm text-center">
+                          Use the <span className="text-purple-400 font-mono">Select server</span> dropdown above to search and select from all available servers.
+                        </p>
                       </div>
                     )}
 
@@ -2106,6 +2125,6 @@ export default function PlaygroundPage() {
         onOpenChange={setShowSessionDialog}
         showTrigger={false}
       />
-    </div>
+    </div >
   );
 }

@@ -2,7 +2,7 @@
  * ModelSelector Component
  * 
  * Reusable model selector with task filtering and search.
- * Used in create-agent and warp-form pages.
+ * Uses the centralized useModels hook for data fetching.
  */
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
@@ -11,27 +11,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Search, ChevronDown, Sparkles, X, Loader2 } from "lucide-react";
-
-const API_URL = import.meta.env.VITE_API_URL || "https://api.compose.market";
+import { Search, ChevronDown, X, Loader2, RefreshCw } from "lucide-react";
+import { useModels } from "@/hooks/use-model";
 
 // =============================================================================
 // Types
 // =============================================================================
-
-interface Model {
-    id: string;
-    name: string;
-    task?: string;
-    source?: string;
-    ownedBy?: string;
-}
-
-interface TaskCategory {
-    id: string;
-    label: string;
-    count: number;
-}
 
 interface ModelSelectorProps {
     value: string;
@@ -39,6 +24,7 @@ interface ModelSelectorProps {
     placeholder?: string;
     disabled?: boolean;
     showTaskFilter?: boolean;
+    showRefresh?: boolean;
     className?: string;
 }
 
@@ -63,55 +49,23 @@ export function ModelSelector({
     placeholder = "Select a model...",
     disabled = false,
     showTaskFilter = true,
+    showRefresh = false,
     className,
 }: ModelSelectorProps) {
     const [open, setOpen] = useState(false);
-    const [models, setModels] = useState<Model[]>([]);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-
     const [searchQuery, setSearchQuery] = useState("");
     const [debouncedSearch, setDebouncedSearch] = useState("");
     const [selectedTask, setSelectedTask] = useState("all");
-    const [taskCategories, setTaskCategories] = useState<TaskCategory[]>([]);
 
-    // Fetch models on mount
-    useEffect(() => {
-        const fetchModels = async () => {
-            setLoading(true);
-            setError(null);
-            try {
-                const response = await fetch(`${API_URL}/api/registry/models/available`);
-                if (!response.ok) throw new Error("Failed to fetch models");
-
-                const data = await response.json() as { models: Model[] };
-                const modelList = data.models || [];
-                setModels(modelList);
-
-                // Build task categories
-                const taskCounts = new Map<string, number>();
-                for (const model of modelList) {
-                    const task = model.task || "other";
-                    taskCounts.set(task, (taskCounts.get(task) || 0) + 1);
-                }
-
-                const categories: TaskCategory[] = Array.from(taskCounts.entries())
-                    .map(([task, count]) => ({ id: task, label: formatTaskLabel(task), count }))
-                    .sort((a, b) => b.count - a.count);
-
-                setTaskCategories([
-                    { id: "all", label: "All Tasks", count: modelList.length },
-                    ...categories,
-                ]);
-            } catch (err) {
-                setError(err instanceof Error ? err.message : "Failed to load models");
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        fetchModels();
-    }, []);
+    // Use centralized models hook
+    const {
+        models,
+        isLoading,
+        isRefetching,
+        error,
+        refetch,
+        taskCategories
+    } = useModels();
 
     // Debounce search
     useEffect(() => {
@@ -148,6 +102,11 @@ export function ModelSelector({
         setSearchQuery("");
     }, [onChange]);
 
+    const handleRefresh = useCallback(async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        await refetch();
+    }, [refetch]);
+
     return (
         <Popover open={open} onOpenChange={setOpen}>
             <PopoverTrigger asChild>
@@ -155,10 +114,10 @@ export function ModelSelector({
                     variant="outline"
                     role="combobox"
                     aria-expanded={open}
-                    disabled={disabled || loading}
+                    disabled={disabled || isLoading}
                     className={`w-full justify-between bg-background/50 border-sidebar-border hover:border-cyan-500/50 ${className}`}
                 >
-                    {loading ? (
+                    {isLoading ? (
                         <span className="flex items-center gap-2 text-muted-foreground">
                             <Loader2 className="w-4 h-4 animate-spin" />
                             Loading models...
@@ -180,22 +139,36 @@ export function ModelSelector({
             </PopoverTrigger>
             <PopoverContent className="w-[400px] p-0" align="start">
                 <div className="p-2 border-b border-sidebar-border space-y-2">
-                    {/* Search */}
-                    <div className="relative">
-                        <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                        <Input
-                            placeholder="Search models..."
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            className="pl-8 h-8 text-sm bg-background/50 border-sidebar-border"
-                        />
-                        {searchQuery && (
-                            <button
-                                onClick={() => setSearchQuery("")}
-                                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    {/* Search + Refresh */}
+                    <div className="flex gap-2">
+                        <div className="relative flex-1">
+                            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                            <Input
+                                placeholder="Search models..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="pl-8 h-8 text-sm bg-background/50 border-sidebar-border"
+                            />
+                            {searchQuery && (
+                                <button
+                                    onClick={() => setSearchQuery("")}
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                >
+                                    <X className="w-3 h-3" />
+                                </button>
+                            )}
+                        </div>
+                        {showRefresh && (
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={handleRefresh}
+                                disabled={isRefetching}
+                                className="h-8 w-8 shrink-0"
+                                title="Refresh models"
                             >
-                                <X className="w-3 h-3" />
-                            </button>
+                                <RefreshCw className={`w-4 h-4 ${isRefetching ? "animate-spin" : ""}`} />
+                            </Button>
                         )}
                     </div>
 
@@ -219,7 +192,7 @@ export function ModelSelector({
                 {/* Model List */}
                 <ScrollArea className="h-[300px]">
                     {error ? (
-                        <div className="p-4 text-center text-sm text-destructive">{error}</div>
+                        <div className="p-4 text-center text-sm text-destructive">{error.message}</div>
                     ) : filteredModels.length === 0 ? (
                         <div className="p-4 text-center text-sm text-muted-foreground">
                             {models.length === 0 ? "No models available" : "No models match your search"}
@@ -235,11 +208,18 @@ export function ModelSelector({
                                 >
                                     <div className="flex items-center justify-between gap-2">
                                         <span className="font-mono text-sm truncate">{model.name}</span>
-                                        {model.task && (
-                                            <Badge variant="outline" className="text-[9px] shrink-0 border-sidebar-border">
-                                                {formatTaskLabel(model.task)}
-                                            </Badge>
-                                        )}
+                                        <div className="flex items-center gap-1 shrink-0">
+                                            {model.source && (
+                                                <Badge variant="secondary" className="text-[8px] px-1">
+                                                    {model.source}
+                                                </Badge>
+                                            )}
+                                            {model.task && (
+                                                <Badge variant="outline" className="text-[9px] border-sidebar-border">
+                                                    {formatTaskLabel(model.task)}
+                                                </Badge>
+                                            )}
+                                        </div>
                                     </div>
                                     <p className="text-[10px] text-muted-foreground truncate mt-0.5">
                                         {model.id}

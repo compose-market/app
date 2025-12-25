@@ -11,8 +11,10 @@
  * - asi-one: Uses ASI_ONE_API_KEY
  * - asi-cloud: Uses ASI_INFERENCE_API_KEY
  * - huggingface: Uses HUGGING_FACE_INFERENCE_TOKEN via Router
+ * - openrouter: Uses OPENROUTER_API_KEY
+ * - aiml: Uses AIML_API_KEY
  */
-export type ModelProvider = "openai" | "anthropic" | "google" | "asi-one" | "asi-cloud" | "huggingface";
+export type ModelProvider = "openai" | "anthropic" | "google" | "asi-one" | "asi-cloud" | "huggingface" | "openrouter" | "aiml";
 
 export interface ProviderPricing {
   provider: string;
@@ -98,6 +100,10 @@ export function getApiKeyEnvName(provider: string): string {
       return "ASI_INFERENCE_API_KEY";
     case "huggingface":
       return "HUGGING_FACE_INFERENCE_TOKEN";
+    case "openrouter":
+      return "OPENROUTER_API_KEY";
+    case "aiml":
+      return "AIML_API_KEY";
     default:
       return "ASI_INFERENCE_API_KEY";
   }

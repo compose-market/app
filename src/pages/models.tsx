@@ -1,5 +1,4 @@
 import { useState, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,7 +6,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { fetchAvailableModels, type AIModel } from "@/lib/models";
+import { useModels } from "@/hooks/use-model";
+import type { AIModel } from "@/lib/models";
 import {
   ArrowLeft,
   Search,
@@ -17,7 +17,8 @@ import {
   Check,
   Zap,
   Filter,
-  Globe
+  Globe,
+  RefreshCw
 } from "lucide-react";
 
 export default function ModelsPage() {
@@ -32,40 +33,24 @@ export default function ModelsPage() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  // Fetch all available models from our unified registry
-  const { data: models = [], isLoading, error } = useQuery({
-    queryKey: ["registry-models"],
-    queryFn: fetchAvailableModels,
-    staleTime: 5 * 60 * 1000, // 5 minutes
-  });
+  // Use the centralized useModels hook with search/task filtering
+  const {
+    models,
+    filteredModels,
+    isLoading,
+    isRefetching,
+    error,
+    refetch,
+    taskCategories
+  } = useModels({ search: debouncedSearch, task: selectedTask === "all" ? undefined : selectedTask });
 
-  // Extract unique tasks from models for filter
+  // Extract unique tasks from models for filter (using taskCategories from hook)
   const tasks = useMemo(() => {
-    const taskSet = new Set<string>();
-    models.forEach(m => {
-      if (m.task) taskSet.add(m.task);
-    });
-    return Array.from(taskSet).sort();
-  }, [models]);
+    return taskCategories.map(tc => tc.id).sort();
+  }, [taskCategories]);
 
-  // Filter models locally
-  const filteredModels = useMemo(() => {
-    return models.filter(model => {
-      // Task filter
-      if (selectedTask !== "all" && model.task !== selectedTask) return false;
-
-      // Search filter
-      if (debouncedSearch) {
-        const q = debouncedSearch.toLowerCase();
-        return (
-          model.id.toLowerCase().includes(q) ||
-          model.name.toLowerCase().includes(q) ||
-          model.source.toLowerCase().includes(q)
-        );
-      }
-      return true;
-    });
-  }, [models, selectedTask, debouncedSearch]);
+  // Hook already filters by task and search - use filteredModels directly
+  // Pass empty options to fetch all, filtering is done via hook options above
 
   const handleSelectModel = (model: AIModel) => {
     sessionStorage.setItem("selectedHFModel", JSON.stringify({
@@ -128,6 +113,17 @@ export default function ModelsPage() {
               ))}
             </SelectContent>
           </Select>
+
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => refetch()}
+            disabled={isRefetching}
+            className="border-sidebar-border hover:border-cyan-500"
+            title="Refresh models"
+          >
+            <RefreshCw className={`w-4 h-4 ${isRefetching ? 'animate-spin text-cyan-400' : 'text-muted-foreground'}`} />
+          </Button>
         </div>
       </div>
 
