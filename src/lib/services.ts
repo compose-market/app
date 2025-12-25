@@ -11,6 +11,8 @@
 const CONNECTOR_URL = import.meta.env.VITE_CONNECTOR_URL || "https://services.compose.market/connector";
 const SANDBOX_URL = import.meta.env.VITE_SANDBOX_URL || "https://services.compose.market/sandbox";
 const EXPORTER_URL = import.meta.env.VITE_EXPORTER_URL || "https://services.compose.market/exporter";
+// API Gateway URL for x402 payment-gated routes
+const API_BASE = (import.meta.env.VITE_API_URL || "https://api.compose.market").replace(/\/+$/, "");
 
 // =============================================================================
 // Types
@@ -203,13 +205,15 @@ export async function fetchMcpServerTools(
 
 /**
  * Execute a spawned MCP server tool
+ * Routes through Lambda (API_BASE) for x402 payment handling
  */
 export async function executeMcpServer(
   serverSlug: string,
   tool: string,
   args: Record<string, unknown>
 ): Promise<PluginExecutionResult> {
-  const res = await fetch(`${CONNECTOR_URL}/mcp/servers/${encodeURIComponent(serverSlug)}/call`, {
+  // Route through Lambda for x402 payment
+  const res = await fetch(`${API_BASE}/api/mcp/servers/${encodeURIComponent(serverSlug)}/call`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ tool, args }),
@@ -249,14 +253,15 @@ export const fetchMCPServerTools = fetchRemoteMcpServerTools;
 
 /**
  * Execute an MCP server tool (spawns on-demand via MCP spawner)
+ * Routes through Lambda (API_BASE) for x402 payment handling
  */
 export async function executeRemoteMcpServer(
   serverSlug: string,
   tool: string,
   args: Record<string, unknown>
 ): Promise<PluginExecutionResult> {
-  // Route through connector which proxies to MCP spawner
-  const res = await fetch(`${CONNECTOR_URL}/mcp/servers/${encodeURIComponent(serverSlug)}/call`, {
+  // Route through Lambda for x402 payment
+  const res = await fetch(`${API_BASE}/api/mcp/servers/${encodeURIComponent(serverSlug)}/call`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ tool, args }),

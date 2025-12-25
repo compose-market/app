@@ -44,11 +44,107 @@ import {
   RefreshCw,
   Play,
   Zap,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+const ITEMS_PER_PAGE = 50;
+
 // Note: Executability is now determined by the `executable` field from the backend
 // Plugin testing is now consolidated in the Playground page (/playground?tab=plugins)
+
+// =============================================================================
+// Pagination Component
+// =============================================================================
+
+function Pagination({
+  currentPage,
+  totalPages,
+  onPageChange,
+}: {
+  currentPage: number;
+  totalPages: number;
+  onPageChange: (page: number) => void;
+}) {
+  if (totalPages <= 1) return null;
+
+  const getVisiblePages = () => {
+    const pages: (number | "ellipsis")[] = [];
+
+    // Always show first page
+    pages.push(1);
+
+    if (currentPage > 3) {
+      pages.push("ellipsis");
+    }
+
+    // Show pages around current
+    for (let i = Math.max(2, currentPage - 1); i <= Math.min(totalPages - 1, currentPage + 1); i++) {
+      if (!pages.includes(i)) {
+        pages.push(i);
+      }
+    }
+
+    if (currentPage < totalPages - 2) {
+      pages.push("ellipsis");
+    }
+
+    // Always show last page
+    if (totalPages > 1 && !pages.includes(totalPages)) {
+      pages.push(totalPages);
+    }
+
+    return pages;
+  };
+
+  const visiblePages = getVisiblePages();
+
+  return (
+    <div className="flex items-center justify-center gap-1 mt-6">
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => onPageChange(currentPage - 1)}
+        disabled={currentPage === 1}
+        className="border-sidebar-border h-8 w-8 p-0"
+      >
+        <ChevronLeft className="w-4 h-4" />
+      </Button>
+
+      {visiblePages.map((page, i) => (
+        page === "ellipsis" ? (
+          <span key={`ellipsis-${i}`} className="text-muted-foreground px-2">...</span>
+        ) : (
+          <Button
+            key={page}
+            variant={currentPage === page ? "default" : "outline"}
+            size="sm"
+            onClick={() => onPageChange(page)}
+            className={cn(
+              "h-8 min-w-8 px-2",
+              currentPage === page
+                ? "bg-cyan-500 text-black hover:bg-cyan-600"
+                : "border-sidebar-border"
+            )}
+          >
+            {page}
+          </Button>
+        )
+      ))}
+
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => onPageChange(currentPage + 1)}
+        disabled={currentPage === totalPages}
+        className="border-sidebar-border h-8 w-8 p-0"
+      >
+        <ChevronRight className="w-4 h-4" />
+      </Button>
+    </div>
+  );
+}
 
 // =============================================================================
 // Server Card Component
@@ -400,35 +496,50 @@ export default function RegistryPage() {
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [selectedServer, setSelectedServer] = useState<RegistryServer | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
 
-  // Data fetching
+  // Data fetching - no limits, fetch all
   const { data: meta } = useRegistryMeta();
   const { data: categories } = useRegistryCategories();
 
   const { data: serversData, isLoading: loadingServers, refetch } = useRegistryServers({
     origin: selectedOrigin === "all" ? undefined : selectedOrigin,
     category: selectedCategory === "all" ? undefined : selectedCategory,
-    limit: 100,
   });
 
-  const { data: searchData, isLoading: loadingSearch } = useRegistrySearch(
-    searchQuery,
-    50
-  );
+  const { data: searchData, isLoading: loadingSearch } = useRegistrySearch(searchQuery);
+
+  // Reset page when filters change
+  const handleFilterChange = (setter: (v: any) => void) => (value: any) => {
+    setter(value);
+    setCurrentPage(1);
+  };
 
   // Determine which servers to show
-  const displayServers = useMemo(() => {
+  const allServers = useMemo(() => {
     if (searchQuery.length > 0 && searchData) {
       return searchData.servers;
     }
     return serversData?.servers || [];
   }, [searchQuery, searchData, serversData]);
 
+  // Paginate servers
+  const totalPages = Math.ceil(allServers.length / ITEMS_PER_PAGE);
+  const displayServers = useMemo(() => {
+    const start = (currentPage - 1) * ITEMS_PER_PAGE;
+    return allServers.slice(start, start + ITEMS_PER_PAGE);
+  }, [allServers, currentPage]);
+
   const isLoading = searchQuery.length > 0 ? loadingSearch : loadingServers;
 
   const handleSelectServer = (server: RegistryServer) => {
     setSelectedServer(server);
     setDetailOpen(true);
+  };
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   return (
@@ -448,7 +559,7 @@ export default function RegistryPage() {
             {meta && (
               <Badge variant="outline" className="font-mono text-xs">
                 <Database className="w-3 h-3 mr-1" />
-                {meta.totalServers} servers
+                {meta.totalServers.toLocaleString()} servers
               </Badge>
             )}
             <Button
@@ -469,13 +580,16 @@ export default function RegistryPage() {
             <Input
               placeholder="Search servers by name, description, or tags..."
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setCurrentPage(1);
+              }}
               className="pl-10 bg-background/50 border-sidebar-border font-mono"
             />
           </div>
 
           <div className="flex gap-2">
-            <Select value={selectedOrigin} onValueChange={(v) => setSelectedOrigin(v as typeof selectedOrigin)}>
+            <Select value={selectedOrigin} onValueChange={handleFilterChange(setSelectedOrigin)}>
               <SelectTrigger className="w-[140px] bg-background/50 border-sidebar-border">
                 <Filter className="w-3 h-3 mr-2 text-muted-foreground" />
                 <SelectValue placeholder="Origin" />
@@ -489,7 +603,7 @@ export default function RegistryPage() {
               </SelectContent>
             </Select>
 
-            <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+            <Select value={selectedCategory} onValueChange={handleFilterChange(setSelectedCategory)}>
               <SelectTrigger className="w-[140px] bg-background/50 border-sidebar-border">
                 <SelectValue placeholder="Category" />
               </SelectTrigger>
@@ -511,7 +625,7 @@ export default function RegistryPage() {
         <div className="flex items-center justify-center py-20">
           <Loader2 className="w-8 h-8 animate-spin text-cyan-400" />
         </div>
-      ) : displayServers.length === 0 ? (
+      ) : allServers.length === 0 ? (
         <div className="text-center py-20">
           <Server className="w-12 h-12 mx-auto text-muted-foreground/30 mb-4" />
           <p className="text-muted-foreground">
@@ -523,9 +637,14 @@ export default function RegistryPage() {
           <div className="mb-4 flex items-center justify-between">
             <p className="text-sm text-muted-foreground">
               {searchQuery ? (
-                <>Found <span className="text-cyan-400 font-mono">{displayServers.length}</span> servers matching "{searchQuery}"</>
+                <>Found <span className="text-cyan-400 font-mono">{allServers.length.toLocaleString()}</span> servers matching "{searchQuery}"</>
               ) : (
-                <>Showing <span className="text-cyan-400 font-mono">{displayServers.length}</span> servers</>
+                <>Showing <span className="text-cyan-400 font-mono">{displayServers.length}</span> of <span className="text-cyan-400 font-mono">{allServers.length.toLocaleString()}</span> servers</>
+              )}
+              {totalPages > 1 && (
+                <span className="ml-2 text-muted-foreground/70">
+                  (Page {currentPage} of {totalPages})
+                </span>
               )}
             </p>
           </div>
@@ -539,6 +658,12 @@ export default function RegistryPage() {
               />
             ))}
           </div>
+
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            onPageChange={handlePageChange}
+          />
         </>
       )}
 

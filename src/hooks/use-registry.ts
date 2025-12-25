@@ -40,30 +40,58 @@ export type RecordType = "agent" | "plugin";
 
 /** Unified server record from the registry */
 export interface RegistryServer {
+  /** Unique registry ID: "mcp:{slug}", "goat:{slug}", etc */
   registryId: string;
+  /** Primary origin: mcp, internal, goat, or eliza */
   origin: ServerOrigin;
   /** Type classification: agent or plugin (for internal filtering) */
   type: RecordType;
+  /** All sources that provide this plugin (for deduped entries) */
+  sources?: ServerOrigin[];
+  /** Canonical key used for deduplication */
+  canonicalKey?: string;
+  /** Human-readable name */
   name: string;
+  /** Namespace (author/org) */
   namespace: string;
+  /** URL-safe slug */
   slug: string;
+  /** Description */
   description: string;
+  /** Capability attributes */
   attributes: string[];
+  /** Repository URL */
   repoUrl?: string;
+  /** UI/directory URL */
   uiUrl?: string;
+  /** Category for filtering */
   category?: string;
+  /** Tags for search */
   tags: string[];
+  /** Tool count */
   toolCount: number;
+  /** Tools metadata */
   tools?: Array<{
     name: string;
     description?: string;
     inputSchema?: Record<string, unknown>;
   }>;
+  /** Whether this server is available (all env vars present) */
   available: boolean;
+  /** Whether this plugin has live execution capability */
   executable?: boolean;
-  /** Connector ID for internal servers (maps to /connectors/:id) */
+  /** Connector ID for internal servers */
   connectorId?: string;
+  /** Missing environment variables */
   missingEnv?: string[];
+  /** Alternative registry IDs from other sources */
+  alternateIds?: string[];
+  /** Transport type: stdio, http, or docker */
+  transport?: "stdio" | "http" | "docker";
+  /** Docker image name (if containerized) */
+  image?: string;
+  /** Remote URL (if HTTP/SSE server) */
+  remoteUrl?: string;
 }
 
 /** Registry list response */
@@ -128,8 +156,9 @@ async function fetchServers(options: ListServersOptions = {}): Promise<RegistryL
 /**
  * Search servers in the registry
  */
-async function searchServers(query: string, limit = 50): Promise<RegistrySearchResponse> {
-  const params = new URLSearchParams({ q: query, limit: String(limit) });
+async function searchServers(query: string, limit?: number): Promise<RegistrySearchResponse> {
+  const params = new URLSearchParams({ q: query });
+  if (limit !== undefined) params.set("limit", String(limit));
   const url = `${REGISTRY_BASE}/servers/search?${params}`;
   const res = await fetch(url);
 
@@ -216,7 +245,7 @@ export function useRegistryServers(options: ListServersOptions = {}) {
 /**
  * Hook for searching servers
  */
-export function useRegistrySearch(query: string, limit = 50) {
+export function useRegistrySearch(query: string, limit?: number) {
   return useQuery({
     queryKey: ["registry", "search", query, limit],
     queryFn: () => searchServers(query, limit),
