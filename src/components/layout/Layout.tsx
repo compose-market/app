@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
-import { Sidebar } from "./Sidebar";
+import { Sidebar, useSidebarCollapsed } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { Menu, X, Home, Box, Layers, PlusCircle, Sparkles, Activity } from "lucide-react";
 import { ComposeLogo } from "@/components/brand/Logo";
@@ -28,6 +28,29 @@ export function Layout({ children }: LayoutProps) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [location] = useLocation();
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  // Listen for sidebar collapse state changes
+  useEffect(() => {
+    const checkCollapsed = () => {
+      setSidebarCollapsed(localStorage.getItem("sidebar_collapsed") === "true");
+    };
+    checkCollapsed();
+
+    // Custom event for same-tab updates
+    const handleCustomEvent = () => checkCollapsed();
+    window.addEventListener("sidebarCollapsedChange", handleCustomEvent);
+    window.addEventListener("storage", checkCollapsed);
+
+    // Poll for changes (fallback for same-tab updates)
+    const interval = setInterval(checkCollapsed, 100);
+
+    return () => {
+      window.removeEventListener("sidebarCollapsedChange", handleCustomEvent);
+      window.removeEventListener("storage", checkCollapsed);
+      clearInterval(interval);
+    };
+  }, []);
 
   // Close menu when route changes
   useEffect(() => {
@@ -61,14 +84,14 @@ export function Layout({ children }: LayoutProps) {
   return (
     <div className="min-h-screen bg-background text-foreground font-sans selection:bg-fuchsia-500/30 selection:text-fuchsia-200 overflow-x-hidden">
       {/* Background Grid Layer with Parallax */}
-      <div 
-        className="fixed inset-0 bg-grid-pattern pointer-events-none z-0" 
+      <div
+        className="fixed inset-0 bg-grid-pattern pointer-events-none z-0"
         style={{ transform: `translate(${mousePos.x * 10}px, ${mousePos.y * 10}px)` }}
       />
-      
+
       {/* Gradient Overlay */}
       <div className="fixed inset-0 bg-gradient-to-b from-background via-transparent to-background z-0 pointer-events-none" />
-      
+
       {/* Scanline Effect */}
       <div className="scanline fixed inset-0 z-[60] pointer-events-none" />
 
@@ -78,7 +101,7 @@ export function Layout({ children }: LayoutProps) {
       </div>
 
       {/* Mobile Backdrop Overlay */}
-      <div 
+      <div
         className={cn(
           "fixed inset-0 bg-black/60 backdrop-blur-sm z-40 md:hidden transition-opacity duration-300",
           isMenuOpen ? "opacity-100" : "opacity-0 pointer-events-none"
@@ -88,7 +111,7 @@ export function Layout({ children }: LayoutProps) {
       />
 
       {/* Mobile Sidebar Drawer */}
-      <aside 
+      <aside
         className={cn(
           "fixed md:hidden w-[280px] max-w-[85vw] h-full bg-background/98 border-r border-sidebar-border flex flex-col backdrop-blur-md transition-transform duration-300 ease-out z-50",
           isMenuOpen ? 'translate-x-0' : '-translate-x-full'
@@ -100,14 +123,14 @@ export function Layout({ children }: LayoutProps) {
             <ComposeLogo className="w-9 h-9 text-cyan-400 drop-shadow-[0_0_15px_rgba(6,182,212,0.5)]" />
             <div>
               <h1 className="font-display font-black text-lg tracking-tighter text-foreground leading-none">
-                COMPOSE<br/>
+                COMPOSE<br />
                 <span className="text-cyan-400">.MARKET</span>
               </h1>
               <p className="font-mono text-[7px] text-fuchsia-500 tracking-widest mt-0.5">POWERED BY MANOWAR</p>
             </div>
           </div>
-          <button 
-            onClick={() => setIsMenuOpen(false)} 
+          <button
+            onClick={() => setIsMenuOpen(false)}
             className="p-2 text-muted-foreground hover:text-foreground transition-colors"
             aria-label="Close menu"
           >
@@ -185,8 +208,8 @@ export function Layout({ children }: LayoutProps) {
       {/* Mobile Header */}
       <div className="md:hidden fixed top-0 left-0 right-0 h-14 bg-background/95 backdrop-blur-md border-b border-sidebar-border flex items-center justify-between px-3 z-30 safe-area-top">
         <div className="flex items-center gap-2 min-w-0 flex-1">
-          <button 
-            onClick={() => setIsMenuOpen(!isMenuOpen)} 
+          <button
+            onClick={() => setIsMenuOpen(!isMenuOpen)}
             className="p-2 text-muted-foreground border border-sidebar-border rounded-sm hover:border-cyan-500/50 active:bg-cyan-500/10 transition-colors touch-manipulation shrink-0"
             aria-label="Toggle menu"
             aria-expanded={isMenuOpen}
@@ -196,7 +219,7 @@ export function Layout({ children }: LayoutProps) {
           <ComposeLogo className="w-6 h-6 text-cyan-400 shrink-0" />
           <span className="font-display font-bold text-white tracking-tight text-xs truncate hidden xs:block">COMPOSE.MARKET</span>
         </div>
-        
+
         {/* Mobile Connect Button */}
         <div className="shrink-0">
           <WalletConnector compact />
@@ -205,11 +228,14 @@ export function Layout({ children }: LayoutProps) {
 
       {/* Desktop TopBar */}
       <div className="hidden md:block">
-        <TopBar />
+        <TopBar sidebarCollapsed={sidebarCollapsed} />
       </div>
-      
+
       {/* Main Content */}
-      <main className="pl-0 md:pl-64 pt-14 md:pt-16 min-h-screen relative overflow-hidden">
+      <main className={cn(
+        "pl-0 pt-14 md:pt-16 min-h-screen relative overflow-hidden transition-all duration-300",
+        sidebarCollapsed ? "md:pl-16" : "md:pl-64"
+      )}>
         <div className="relative z-10 p-4 md:p-6 max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
           {children}
         </div>
