@@ -1614,6 +1614,191 @@ function RunWorkflowDialog({
 
 
 // =============================================================================
+// Floating Toolbox for Fullscreen Mode
+// =============================================================================
+
+interface FloatingToolboxProps {
+  onClose: () => void;
+  onAddStep: (connectorId: string, tool: ConnectorTool) => void;
+  onAddAgentStep: (agent: Agent) => void;
+  onRun: () => void;
+  onRequest: () => void;
+  isRunning: boolean;
+  nodeCount: number;
+}
+
+function FloatingToolbox({
+  onClose,
+  onAddStep,
+  onAddAgentStep,
+  onRun,
+  onRequest,
+  isRunning,
+  nodeCount,
+}: FloatingToolboxProps) {
+  // Initialize position accounting for sidebar on desktop (sidebar is 256px = 16rem when expanded, 64px when collapsed)
+  // On mobile, start near top-left with padding
+  const getInitialPosition = () => {
+    if (typeof window === 'undefined') return { x: 280, y: 80 };
+    const isMobile = window.innerWidth < 768;
+    return isMobile
+      ? { x: 16, y: 70 } // Mobile: padding from edges
+      : { x: 280, y: 100 }; // Desktop: past sidebar width + padding
+  };
+
+  const [position, setPosition] = useState(getInitialPosition);
+  const [isMinimized, setIsMinimized] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const toolboxRef = useRef<HTMLDivElement>(null);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    // Only drag from the header
+    if (!(e.target as HTMLElement).closest('[data-drag-handle]')) return;
+
+    setIsDragging(true);
+    setDragOffset({
+      x: e.clientX - position.x,
+      y: e.clientY - position.y,
+    });
+    e.preventDefault();
+  };
+
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      // Constrain to viewport with padding
+      const toolboxWidth = 288; // w-72 = 18rem = 288px
+      const toolboxMinHeight = 100;
+      const padding = 16;
+      const newX = Math.max(padding, Math.min(window.innerWidth - toolboxWidth - padding, e.clientX - dragOffset.x));
+      const newY = Math.max(padding, Math.min(window.innerHeight - toolboxMinHeight - padding, e.clientY - dragOffset.y));
+      setPosition({ x: newX, y: newY });
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging, dragOffset]);
+
+  return (
+    <div
+      ref={toolboxRef}
+      className="fixed z-50 w-[calc(100vw-32px)] sm:w-72 max-w-72 bg-card/95 backdrop-blur-xl border border-cyan-500/30 rounded-lg shadow-2xl overflow-hidden"
+      style={{
+        left: `${position.x}px`,
+        top: `${position.y}px`,
+        cursor: isDragging ? 'grabbing' : 'auto',
+      }}
+      onMouseDown={handleMouseDown}
+    >
+      {/* Draggable Header */}
+      <div
+        data-drag-handle
+        className="flex items-center justify-between px-3 py-2 bg-sidebar-accent border-b border-sidebar-border cursor-grab active:cursor-grabbing select-none"
+      >
+        <div className="flex items-center gap-2">
+          <div className="flex gap-0.5">
+            <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40" />
+            <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40" />
+            <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40" />
+          </div>
+          <span className="text-xs font-mono font-bold text-cyan-400">TOOLBOX</span>
+          <Badge variant="outline" className="text-[9px] h-4 px-1 border-cyan-500/30 text-cyan-400 font-mono">
+            {nodeCount} steps
+          </Badge>
+        </div>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setIsMinimized(!isMinimized)}
+            className="h-6 w-6 text-muted-foreground hover:text-foreground"
+          >
+            {isMinimized ? <ChevronRight className="w-3.5 h-3.5 rotate-90" /> : <ChevronRight className="w-3.5 h-3.5 -rotate-90" />}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onClose}
+            className="h-6 w-6 text-muted-foreground hover:text-cyan-400"
+            title="Exit fullscreen (ESC)"
+          >
+            <Minimize2 className="w-3.5 h-3.5" />
+          </Button>
+        </div>
+      </div>
+
+      {/* Collapsible Body */}
+      {!isMinimized && (
+        <div className="p-3 space-y-3">
+          {/* Action Buttons */}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              onClick={onRun}
+              disabled={isRunning || nodeCount === 0}
+              className="bg-green-500 text-white hover:bg-green-600 font-bold font-mono text-xs h-8 flex-1"
+            >
+              {isRunning ? (
+                <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+              ) : (
+                <Play className="w-3.5 h-3.5 mr-1.5" />
+              )}
+              {isRunning ? "RUNNING" : "RUN"}
+            </Button>
+            <Button
+              onClick={onRequest}
+              variant="outline"
+              className="border-fuchsia-500/30 hover:border-fuchsia-500 hover:bg-fuchsia-500/10 text-xs h-8"
+            >
+              <Bot className="w-3.5 h-3.5 mr-1.5" />
+              REQUEST
+            </Button>
+          </div>
+
+          {/* Compact Pickers */}
+          <div className="border-t border-sidebar-border pt-3">
+            <Tabs defaultValue="connectors" className="w-full">
+              <TabsList className="w-full h-8 rounded-sm bg-sidebar-accent border border-sidebar-border">
+                <TabsTrigger
+                  value="connectors"
+                  className="flex-1 text-[10px] h-6 data-[state=active]:bg-cyan-500/20 data-[state=active]:text-cyan-400 rounded-sm"
+                >
+                  <Plug className="w-3 h-3 mr-1" />
+                  PLUGINS
+                </TabsTrigger>
+                <TabsTrigger
+                  value="agents"
+                  className="flex-1 text-[10px] h-6 data-[state=active]:bg-fuchsia-500/20 data-[state=active]:text-fuchsia-400 rounded-sm"
+                >
+                  <Bot className="w-3 h-3 mr-1" />
+                  AGENTS
+                </TabsTrigger>
+              </TabsList>
+              <TabsContent value="connectors" className="mt-2 max-h-48 overflow-y-auto">
+                <ConnectorPicker onSelect={onAddStep} />
+              </TabsContent>
+              <TabsContent value="agents" className="mt-2 max-h-48 overflow-y-auto">
+                <AgentsPicker onSelect={onAddAgentStep} />
+              </TabsContent>
+            </Tabs>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// =============================================================================
 // Fullscreen Canvas Overlay
 // =============================================================================
 
@@ -1621,9 +1806,25 @@ interface FullscreenOverlayProps {
   isOpen: boolean;
   onClose: () => void;
   children: React.ReactNode;
+  onAddStep: (connectorId: string, tool: ConnectorTool) => void;
+  onAddAgentStep: (agent: Agent) => void;
+  onRun: () => void;
+  onRequest: () => void;
+  isRunning: boolean;
+  nodeCount: number;
 }
 
-function FullscreenOverlay({ isOpen, onClose, children }: FullscreenOverlayProps) {
+function FullscreenOverlay({
+  isOpen,
+  onClose,
+  children,
+  onAddStep,
+  onAddAgentStep,
+  onRun,
+  onRequest,
+  isRunning,
+  nodeCount,
+}: FullscreenOverlayProps) {
   // Handle ESC key to close
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
@@ -1642,7 +1843,6 @@ function FullscreenOverlay({ isOpen, onClose, children }: FullscreenOverlayProps
       {/* Blurred backdrop */}
       <div
         className="absolute inset-0 bg-background/85 backdrop-blur-xl transition-opacity duration-300"
-        onClick={onClose}
         style={{
           background: "linear-gradient(145deg, hsl(222 47% 3% / 0.92), hsl(270 60% 10% / 0.88))"
         }}
@@ -1650,25 +1850,28 @@ function FullscreenOverlay({ isOpen, onClose, children }: FullscreenOverlayProps
 
       {/* Content container */}
       <div className="relative w-full h-full p-6 animate-in zoom-in-95 fade-in duration-300">
-        {/* Header with close button */}
-        <div className="absolute top-4 right-4 z-10 flex items-center gap-3">
+        {/* Header badge (top right) */}
+        <div className="absolute top-4 right-4 z-10">
           <Badge variant="outline" className="font-mono border-cyan-500/30 text-cyan-400">
-            FULLSCREEN MODE
+            FULLSCREEN MODE • Press ESC to exit
           </Badge>
-          <Button
-            onClick={onClose}
-            variant="outline"
-            size="icon"
-            className="border-sidebar-border hover:border-cyan-500 hover:bg-cyan-500/10 transition-all"
-          >
-            <Minimize2 className="w-4 h-4" />
-          </Button>
         </div>
 
         {/* Fullscreen canvas container */}
         <div className="w-full h-full rounded-sm border border-cyan-500/30 overflow-hidden bg-black/60 shadow-2xl neon-border">
           {children}
         </div>
+
+        {/* Floating Toolbox */}
+        <FloatingToolbox
+          onClose={onClose}
+          onAddStep={onAddStep}
+          onAddAgentStep={onAddAgentStep}
+          onRun={onRun}
+          onRequest={onRequest}
+          isRunning={isRunning}
+          nodeCount={nodeCount}
+        />
       </div>
     </div>
   );
@@ -1705,7 +1908,8 @@ function ComposeFlow() {
   const [pendingWarpAgent, setPendingWarpAgent] = useState<Agent | null>(null);
 
   // Fullscreen canvas state
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  // Start in expanded/fullscreen mode by default for better UX
+  const [isFullscreen, setIsFullscreen] = useState(true);
 
   // Run workflow dialog state
   const [showRunDialog, setShowRunDialog] = useState(false);
@@ -2435,7 +2639,16 @@ function ComposeFlow() {
       </div>
 
       {/* Fullscreen Canvas Overlay */}
-      <FullscreenOverlay isOpen={isFullscreen} onClose={() => setIsFullscreen(false)}>
+      <FullscreenOverlay
+        isOpen={isFullscreen}
+        onClose={() => setIsFullscreen(false)}
+        onAddStep={handleAddStep}
+        onAddAgentStep={handleAddAgentStep}
+        onRun={() => setShowRunDialog(true)}
+        onRequest={() => setShowRFADialog(true)}
+        isRunning={isRunning}
+        nodeCount={nodes.length}
+      >
         <ReactFlowProvider>
           <ReactFlow
             nodes={nodes}
