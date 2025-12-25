@@ -21,6 +21,7 @@ import {
     RefreshCw,
     Trash2,
 } from "lucide-react";
+import { MarkdownRenderer } from "@/components/renderer";
 
 export interface ChatMessage {
     id: string;
@@ -189,14 +190,19 @@ function ChatMessageItemInner({
                     <pre className="text-xs overflow-auto max-h-64 font-mono">
                         {message.content || "..."}
                     </pre>
-                ) : (
+                ) : isLoading ? (
+                    <div className="flex items-center gap-2 text-sm text-zinc-400">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Thinking...</span>
+                    </div>
+                ) : isUser ? (
+                    // User messages: plain text (no markdown)
                     <p className="whitespace-pre-wrap text-sm">
-                        {isLoading ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                            message.content || "..."
-                        )}
+                        {message.content || "..."}
                     </p>
+                ) : (
+                    // Assistant messages: rich markdown
+                    <MarkdownRenderer content={message.content || "..."} />
                 )}
             </div>
 
