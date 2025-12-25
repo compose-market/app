@@ -157,7 +157,6 @@ function ServerCard({
   server: RegistryServer;
   onSelect: (s: RegistryServer) => void;
 }) {
-  const isInternal = server.origin === "internal";
   const isGoat = server.origin === "goat";
   const isEliza = server.origin === "eliza";
   const isRemote = isRemoteCapable(server);
@@ -166,7 +165,6 @@ function ServerCard({
   const getOriginStyle = () => {
     if (isGoat) return { bg: "bg-green-500/10", border: "border-green-500/30", text: "text-green-400" };
     if (isEliza) return { bg: "bg-fuchsia-500/10", border: "border-fuchsia-500/30", text: "text-fuchsia-400" };
-    if (isInternal) return { bg: "bg-fuchsia-500/10", border: "border-fuchsia-500/30", text: "text-fuchsia-400" };
     return { bg: "bg-cyan-500/10", border: "border-cyan-500/30", text: "text-cyan-400" };
   };
 
@@ -184,7 +182,7 @@ function ServerCard({
             <div className={`w-8 h-8 rounded-sm flex items-center justify-center border shrink-0 ${style.bg} ${style.border}`}>
               {isGoat ? (
                 <Zap className={`w-4 h-4 ${style.text}`} />
-              ) : isEliza || isInternal ? (
+              ) : isEliza ? (
                 <Sparkles className={`w-4 h-4 ${style.text}`} />
               ) : (
                 <Server className={`w-4 h-4 ${style.text}`} />
@@ -282,7 +280,6 @@ function ServerDetailDialog({
 
   if (!server) return null;
 
-  const isInternal = server.origin === "internal";
   const isGoat = server.origin === "goat";
   const isExecutable = server.executable === true;
 
@@ -322,14 +319,10 @@ function ServerDetailDialog({
           <div className="flex items-center gap-3">
             <div className={`w-10 h-10 rounded-sm flex items-center justify-center border ${isGoat
               ? "bg-green-500/10 border-green-500/30"
-              : isInternal
-                ? "bg-fuchsia-500/10 border-fuchsia-500/30"
-                : "bg-cyan-500/10 border-cyan-500/30"
+              : "bg-cyan-500/10 border-cyan-500/30"
               }`}>
               {isGoat ? (
                 <Zap className="w-5 h-5 text-green-400" />
-              ) : isInternal ? (
-                <Sparkles className="w-5 h-5 text-fuchsia-400" />
               ) : (
                 <Server className="w-5 h-5 text-cyan-400" />
               )}
@@ -348,12 +341,10 @@ function ServerDetailDialog({
 
           {/* Badges */}
           <div className="flex flex-wrap gap-2">
-            <Badge variant={isGoat ? "default" : isInternal ? "default" : "secondary"} className={
+            <Badge variant={isGoat ? "default" : "secondary"} className={
               isGoat
                 ? "bg-green-500/20 text-green-400"
-                : isInternal
-                  ? "bg-fuchsia-500/20 text-fuchsia-400"
-                  : "bg-cyan-500/20 text-cyan-400"
+                : "bg-cyan-500/20 text-cyan-400"
             }>
               {getOriginLabel(server.origin)}
             </Badge>
@@ -492,7 +483,7 @@ function ServerDetailDialog({
 
 export default function RegistryPage() {
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedOrigin, setSelectedOrigin] = useState<"all" | "mcp" | "internal" | "goat" | "eliza">("all");
+  const [selectedOrigin, setSelectedOrigin] = useState<"all" | "mcp" | "goat" | "eliza">("all");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [selectedServer, setSelectedServer] = useState<RegistryServer | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -596,7 +587,6 @@ export default function RegistryPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Sources</SelectItem>
-                <SelectItem value="internal">Compose</SelectItem>
                 <SelectItem value="mcp">MCP Tools</SelectItem>
                 <SelectItem value="goat">GOAT SDK</SelectItem>
                 <SelectItem value="eliza">ElizaOS</SelectItem>
