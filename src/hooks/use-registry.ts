@@ -33,8 +33,8 @@ function getRegistryBaseUrl(): string {
 
 const REGISTRY_BASE = getRegistryBaseUrl();
 
-/** Server origin types */
-export type ServerOrigin = "mcp" | "internal" | "goat" | "eliza";
+/** Server origin types (user-facing - excludes internal) */
+export type ServerOrigin = "mcp" | "goat" | "eliza";
 
 /** Record type: agent (autonomous AI agents) or plugin (tools/connectors) */
 export type RecordType = "agent" | "plugin";
@@ -43,9 +43,9 @@ export type RecordType = "agent" | "plugin";
 export interface RegistryServer {
   /** Unique registry ID: "mcp:{slug}", "goat:{slug}", etc */
   registryId: string;
-  /** Primary origin: mcp, internal, goat, or eliza */
+  /** Primary origin: mcp, goat, or eliza (internal servers are excluded) */
   origin: ServerOrigin;
-  /** Type classification: agent or plugin (for internal filtering) */
+  /** Type classification: agent or plugin */
   type: RecordType;
   /** All sources that provide this plugin (for deduped entries) */
   sources?: ServerOrigin[];
@@ -81,8 +81,6 @@ export interface RegistryServer {
   available: boolean;
   /** Whether this plugin has live execution capability */
   executable?: boolean;
-  /** Connector ID for internal servers */
-  connectorId?: string;
   /** Missing environment variables */
   missingEnv?: string[];
   /** Alternative registry IDs from other sources */
@@ -114,7 +112,6 @@ export interface RegistrySearchResponse {
 export interface RegistryMeta {
   totalServers: number;
   mcpServers: number;
-  internalServers: number;
   goatServers: number;
   elizaServers: number;
   loadedAt: string | null;
@@ -344,7 +341,6 @@ export function useRegistryTags() {
 
 /** Origin color mapping */
 export const ORIGIN_COLORS: Record<ServerOrigin, string> = {
-  internal: "cyan",
   mcp: "purple",
   goat: "green",
   eliza: "fuchsia",
@@ -355,8 +351,6 @@ export const ORIGIN_COLORS: Record<ServerOrigin, string> = {
  */
 export function getOriginBadgeVariant(origin: ServerOrigin): "default" | "secondary" | "outline" {
   switch (origin) {
-    case "internal":
-      return "default";
     case "goat":
     case "eliza":
       return "secondary";
@@ -370,8 +364,6 @@ export function getOriginBadgeVariant(origin: ServerOrigin): "default" | "second
  */
 export function getOriginLabel(origin: ServerOrigin): string {
   switch (origin) {
-    case "internal":
-      return "Compose";
     case "mcp":
       return "MCP";
     case "goat":
@@ -386,10 +378,8 @@ export function getOriginLabel(origin: ServerOrigin): string {
 /**
  * Get icon name for origin
  */
-export function getOriginIcon(origin: ServerOrigin): "plug" | "server" | "coins" | "bot" {
+export function getOriginIcon(origin: ServerOrigin): "server" | "coins" | "bot" {
   switch (origin) {
-    case "internal":
-      return "plug";
     case "goat":
       return "coins";
     case "eliza":
