@@ -4,7 +4,8 @@
  * React Query hooks for the MCP registry API.
  * Registry runs on the connector server (port 4001), not the lambda API server.
  */
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo, useCallback } from "react";
 
 /**
  * Build the registry base URL
@@ -228,29 +229,63 @@ async function fetchTags(): Promise<string[]> {
 }
 
 // =============================================================================
+// Constants
+// =============================================================================
+
+const REGISTRY_STALE_TIME = 6 * 60 * 60 * 1000; // 6 hours (matches use-models.ts)
+const REGISTRY_GC_TIME = 12 * 60 * 60 * 1000; // 12 hours (keep in memory longer than stale)
+const METADATA_STALE_TIME = 5 * 60 * 1000; // 5 minutes for lightweight metadata
+const REGISTRY_CACHE_KEY = ["registry", "servers"] as const;
+
+// =============================================================================
 // Hooks
 // =============================================================================
 
 /**
  * Hook for fetching servers from the registry
+ * 
+ * Uses 6-hour staleTime for large registry payloads.
+ * Options are serialized for stable cache keys.
  */
 export function useRegistryServers(options: ListServersOptions = {}) {
-  return useQuery({
-    queryKey: ["registry", "servers", options],
+  const queryClient = useQueryClient();
+
+  // Serialize options for stable query key (prevents cache misses from object reference changes)
+  const serializedOptions = JSON.stringify(options);
+  const queryKey = useMemo(
+    () => [...REGISTRY_CACHE_KEY, serializedOptions],
+    [serializedOptions]
+  );
+
+  const query = useQuery({
+    queryKey,
     queryFn: () => fetchServers(options),
-    staleTime: 60_000, // 1 minute
+    staleTime: REGISTRY_STALE_TIME,
+    gcTime: REGISTRY_GC_TIME,
   });
+
+  // Manual refresh (for refresh button) - named distinctly to avoid collision with query.refetch
+  const forceRefresh = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: REGISTRY_CACHE_KEY });
+  }, [queryClient]);
+
+  return {
+    ...query,
+    forceRefresh,
+  };
 }
 
 /**
  * Hook for searching servers
+ * Uses 5-minute staleTime for search results.
  */
 export function useRegistrySearch(query: string, limit?: number) {
   return useQuery({
     queryKey: ["registry", "search", query, limit],
     queryFn: () => searchServers(query, limit),
     enabled: query.length > 0,
-    staleTime: 30_000, // 30 seconds
+    staleTime: METADATA_STALE_TIME,
+    gcTime: REGISTRY_GC_TIME, // Keep search results cached longer
   });
 }
 
@@ -262,7 +297,8 @@ export function useRegistryServer(registryId: string | null) {
     queryKey: ["registry", "server", registryId],
     queryFn: () => fetchServer(registryId!),
     enabled: !!registryId,
-    staleTime: 60_000,
+    staleTime: REGISTRY_STALE_TIME,
+    gcTime: REGISTRY_GC_TIME,
   });
 }
 
@@ -273,7 +309,8 @@ export function useRegistryMeta() {
   return useQuery({
     queryKey: ["registry", "meta"],
     queryFn: fetchRegistryMeta,
-    staleTime: 300_000, // 5 minutes
+    staleTime: METADATA_STALE_TIME,
+    gcTime: REGISTRY_GC_TIME,
   });
 }
 
@@ -284,7 +321,8 @@ export function useRegistryCategories() {
   return useQuery({
     queryKey: ["registry", "categories"],
     queryFn: fetchCategories,
-    staleTime: 300_000,
+    staleTime: REGISTRY_STALE_TIME,
+    gcTime: REGISTRY_GC_TIME,
   });
 }
 
@@ -295,7 +333,8 @@ export function useRegistryTags() {
   return useQuery({
     queryKey: ["registry", "tags"],
     queryFn: fetchTags,
-    staleTime: 300_000,
+    staleTime: REGISTRY_STALE_TIME,
+    gcTime: REGISTRY_GC_TIME,
   });
 }
 

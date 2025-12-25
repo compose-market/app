@@ -33,7 +33,7 @@ export interface UseAudioRecordingReturn {
 
 export function useAudioRecording(options: UseAudioRecordingOptions = {}): UseAudioRecordingReturn {
     const {
-        conversationId = `conv-${Date.now()}`,
+        conversationId: providedId,
         onRecordingComplete,
         onError,
     } = options;
@@ -44,7 +44,10 @@ export function useAudioRecording(options: UseAudioRecordingOptions = {}): UseAu
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const audioChunksRef = useRef<Blob[]>([]);
     const mediaStreamRef = useRef<MediaStream | null>(null);
-    const conversationIdRef = useRef(conversationId);
+
+    // Stable conversationId - capture on first render only
+    // This prevents hook reset when caller passes `Date.now()` inline
+    const conversationIdRef = useRef(providedId ?? `conv-${Date.now()}`);
 
     // Check if recording is supported on mount
     useEffect(() => {

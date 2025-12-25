@@ -40,7 +40,7 @@ export default function ModelsPage() {
     isLoading,
     isRefetching,
     error,
-    refetch,
+    forceRefresh,
     taskCategories
   } = useModels({ search: debouncedSearch, task: selectedTask === "all" ? undefined : selectedTask });
 
@@ -117,7 +117,7 @@ export default function ModelsPage() {
           <Button
             variant="outline"
             size="icon"
-            onClick={() => refetch()}
+            onClick={() => forceRefresh()}
             disabled={isRefetching}
             className="border-sidebar-border hover:border-cyan-500"
             title="Refresh models"

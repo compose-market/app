@@ -502,7 +502,7 @@ export default function RegistryPage() {
   const { data: meta } = useRegistryMeta();
   const { data: categories } = useRegistryCategories();
 
-  const { data: serversData, isLoading: loadingServers, refetch } = useRegistryServers({
+  const { data: serversData, isLoading: loadingServers, forceRefresh } = useRegistryServers({
     origin: selectedOrigin === "all" ? undefined : selectedOrigin,
     category: selectedCategory === "all" ? undefined : selectedCategory,
   });
@@ -565,7 +565,7 @@ export default function RegistryPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => refetch()}
+              onClick={() => forceRefresh()}
               className="border-sidebar-border"
             >
               <RefreshCw className="w-4 h-4" />

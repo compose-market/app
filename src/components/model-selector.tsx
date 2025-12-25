@@ -63,7 +63,7 @@ export function ModelSelector({
         isLoading,
         isRefetching,
         error,
-        refetch,
+        forceRefresh,
         taskCategories
     } = useModels();
 
@@ -104,8 +104,8 @@ export function ModelSelector({
 
     const handleRefresh = useCallback(async (e: React.MouseEvent) => {
         e.stopPropagation();
-        await refetch();
-    }, [refetch]);
+        await forceRefresh();
+    }, [forceRefresh]);
 
     return (
         <Popover open={open} onOpenChange={setOpen}>

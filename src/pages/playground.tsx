@@ -59,6 +59,7 @@ import { MultimodalCanvas } from "@/components/canvas";
 import { useFileAttachment, type AttachedFile } from "@/hooks/use-attachment";
 import { useAudioRecording } from "@/hooks/use-recording";
 import { useRegistryServers, type RegistryServer } from "@/hooks/use-registry";
+import { useModels } from "@/hooks/use-model";
 import {
   cleanupConversationFiles,
   getIpfsUrl,
@@ -308,16 +309,21 @@ export default function PlaygroundPage() {
     return params.get("tab") === "plugins" ? "plugins" : "model";
   });
 
-  // Models
-  const [models, setModels] = useState<Model[]>([]);
-  const [modelsLoading, setModelsLoading] = useState(true);
-  const [modelsError, setModelsError] = useState<string | null>(null);
+  // ============ Models (from centralized hook - 6hr cache) ============
+  const {
+    models: rawModels,
+    isLoading: modelsLoading,
+    error: modelsErrorObj,
+    taskCategories,
+    forceRefresh: forceRefreshModels
+  } = useModels();
+  const models = rawModels as unknown as Model[];
+  const modelsError = modelsErrorObj?.message ?? null;
 
   // Model filtering
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
   const [selectedTask, setSelectedTask] = useState("all");
-  const [taskCategories, setTaskCategories] = useState<{ id: string; label: string; count: number }[]>([]);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
 
   // Model Test State
@@ -352,17 +358,19 @@ export default function PlaygroundPage() {
     return source !== "mcp" ? params.get("plugin") || "" : "";
   });
 
-  // MCP Servers State - fetched from centralized registry
-  const { data: mcpRegistryData, isLoading: mcpLoading } = useRegistryServers({
-    origin: 'mcp',
-    available: true
-  });
+  // MCP Servers State - fetched from centralized registry with stable options
+  const mcpRegistryOptions = useMemo(() => ({ origin: 'mcp' as const, available: true }), []);
+  const { data: mcpRegistryData, isLoading: mcpLoading, forceRefresh: forceRefreshMcpRegistry } = useRegistryServers(mcpRegistryOptions);
   const mcpServers = mcpRegistryData?.servers ?? [];
+  const [mcpServerSearch, setMcpServerSearch] = useState(""); // Local search for performance
   const [mcpTools, setMcpTools] = useState<McpTool[]>([]);
+  // Use registryId (unique) instead of slug (may collide after cleanSlug normalization)
   const [selectedMcpServer, setSelectedMcpServer] = useState<string>(() => {
     const params = new URLSearchParams(window.location.search);
     const source = params.get("source");
-    return source === "mcp" ? params.get("plugin") || "" : "";
+    // URL param still uses slug for readability - convert to registryId on load
+    const pluginSlug = source === "mcp" ? params.get("plugin") || "" : "";
+    return pluginSlug ? `mcp:${pluginSlug}` : "";
   });
 
   // Eliza Plugins State
@@ -375,16 +383,19 @@ export default function PlaygroundPage() {
   });
   const [selectedElizaAction, setSelectedElizaAction] = useState<string>("");
 
-  // File Attachment from shared hook
+  // Stable conversationId for file hooks (captured once on mount)
+  const conversationId = useRef(`playground-${Date.now()}`).current;
+
+  // File Attachment from shared hook  
   const fileAttachment = useFileAttachment({
-    conversationId: `playground-${Date.now()}`,
+    conversationId,
     onError: (err) => setInferenceError(err),
   });
   const { attachedFiles, fileInputRef, handleFileSelect, handleRemoveFile, isUploading, uploadedCids, cleanupFiles } = fileAttachment;
 
   // Audio recording from shared hook
   const recording = useAudioRecording({
-    conversationId: `playground-${Date.now()}`,
+    conversationId,
     onRecordingComplete: (file) => {
       fileAttachment.attachedFiles.length === 0 &&
         fileAttachment.handleFileSelect({ target: { files: [file.file] } } as unknown as React.ChangeEvent<HTMLInputElement>);
@@ -396,48 +407,14 @@ export default function PlaygroundPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const resultsEndRef = useRef<HTMLDivElement>(null);
 
-  // Fetch models on mount
+  // Auto-select first model when models load
   useEffect(() => {
-    loadModels();
-  }, []);
-
-  const loadModels = async () => {
-    setModelsLoading(true);
-    setModelsError(null);
-    try {
-      const { fetchAvailableModels } = await import("@/lib/models");
-      const modelList = await fetchAvailableModels();
-
-      // Transform AIModel to local Model interface if needed, or update local interface
-      // The shapes are compatible enough for this usage:
-      // AIModel: { id, name, source, ownedBy, available, task, pricing, ... }
-      // Model: { id, name, source, ownedBy, available, task, pricing, ... }
-      setModels(modelList as unknown as Model[]);
-
-      // Build task categories from model tasks
-      const taskCounts: Record<string, number> = {};
-      for (const m of modelList) {
-        const task = m.task || "unknown";
-        taskCounts[task] = (taskCounts[task] || 0) + 1;
-      }
-      const categories = Object.entries(taskCounts)
-        .sort((a, b) => b[1] - a[1]) // Sort by count desc
-        .map(([id, count]) => ({
-          id,
-          label: id.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" "),
-          count,
-        }));
-      setTaskCategories([{ id: "all", label: "All", count: modelList.length }, ...categories]);
-
-      if (modelList.length > 0 && !selectedModel) {
-        setSelectedModel(modelList[0].id);
-      }
-    } catch (err) {
-      setModelsError(err instanceof Error ? err.message : "Failed to fetch models");
-    } finally {
-      setModelsLoading(false);
+    if (models.length > 0 && !selectedModel) {
+      setSelectedModel(models[0].id);
     }
-  };
+  }, [models, selectedModel]);
+
+
 
   // Auto-scroll messages
   useEffect(() => {
@@ -487,6 +464,24 @@ export default function PlaygroundPage() {
 
   const modelTask = selectedModelInfo?.task || "text-generation";
   const outputType = getOutputType(modelTask);
+
+  // Filtered MCP servers for dropdown - limit to 50 items max to prevent DOM freeze
+  const MAX_MCP_DROPDOWN_ITEMS = 50;
+  const filteredMcpServers = useMemo(() => {
+    if (!mcpServerSearch.trim()) {
+      // No search - show first N items to keep dropdown responsive
+      return mcpServers.slice(0, MAX_MCP_DROPDOWN_ITEMS);
+    }
+    // Filter by search and limit results
+    const query = mcpServerSearch.toLowerCase().trim();
+    return mcpServers
+      .filter(s =>
+        s.name?.toLowerCase().includes(query) ||
+        s.slug?.toLowerCase().includes(query) ||
+        s.description?.toLowerCase().includes(query)
+      )
+      .slice(0, MAX_MCP_DROPDOWN_ITEMS);
+  }, [mcpServers, mcpServerSearch]);
 
   // ==========================================================================
   // Handlers
@@ -856,12 +851,8 @@ export default function PlaygroundPage() {
   // ==========================================================================
 
   // MCP servers are now fetched via useRegistryServers hook above
-  // Auto-select first server when servers load
-  useEffect(() => {
-    if (!selectedMcpServer && mcpServers.length > 0) {
-      setSelectedMcpServer(mcpServers[0].slug);
-    }
-  }, [mcpServers, selectedMcpServer]);
+  // NOTE: Auto-selection removed to prevent automatic MCP server spawning
+  // User must explicitly select a server before tools are fetched
 
   const fetchMcpTools = async (slug: string) => {
     setPluginsLoading(true);
@@ -887,9 +878,9 @@ export default function PlaygroundPage() {
     }
   };
 
-  // Handle MCP server change
-  const handleMcpServerChange = useCallback((slug: string) => {
-    setSelectedMcpServer(slug);
+  // Handle MCP server change - now uses registryId for unique selection
+  const handleMcpServerChange = useCallback((registryId: string) => {
+    setSelectedMcpServer(registryId);
     setSelectedTool("");
     setToolSchema(null);
     setToolArgs("{}");
@@ -1203,10 +1194,12 @@ export default function PlaygroundPage() {
     }
   }, [activeTab, pluginSource, goatStatus, elizaPlugins.length]);
 
-  // Fetch tools when MCP server is selected
+  // Fetch tools when MCP server is selected (extract slug from registryId for API)
   useEffect(() => {
     if (selectedMcpServer && activeTab === "plugins" && pluginSource === "mcp") {
-      fetchMcpTools(selectedMcpServer);
+      // registryId format is "mcp:slug" - extract just the slug for API call
+      const slug = selectedMcpServer.replace(/^mcp:/, '');
+      if (slug) fetchMcpTools(slug);
     }
   }, [selectedMcpServer, activeTab, pluginSource]);
 
@@ -1464,7 +1457,7 @@ export default function PlaygroundPage() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={loadModels}
+                  onClick={() => forceRefreshModels()}
                   disabled={modelsLoading}
                   className="text-zinc-400 hover:text-white h-8 w-8 sm:h-9 sm:w-9"
                 >
@@ -1583,17 +1576,19 @@ export default function PlaygroundPage() {
                           {mcpLoading
                             ? "Loading..."
                             : selectedMcpServer
-                              ? mcpServers.find(s => s.slug === selectedMcpServer)?.name || selectedMcpServer
+                              ? mcpServers.find(s => s.registryId === selectedMcpServer)?.name || selectedMcpServer.replace(/^mcp:/, '')
                               : "Select server..."}
                         </span>
                         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-[300px] p-0 bg-zinc-900 border-zinc-700" align="start">
-                      <Command className="bg-zinc-900">
+                      <Command className="bg-zinc-900" shouldFilter={false}>
                         <CommandInput
                           placeholder="Search servers..."
                           className="h-9"
+                          value={mcpServerSearch}
+                          onValueChange={setMcpServerSearch}
                         />
                         <CommandList className="max-h-[300px]">
                           {mcpLoading ? (
@@ -1601,16 +1596,17 @@ export default function PlaygroundPage() {
                               <Loader2 className="h-4 w-4 animate-spin mx-auto mb-2" />
                               Loading servers...
                             </div>
-                          ) : mcpServers.length === 0 ? (
-                            <CommandEmpty>No servers found</CommandEmpty>
+                          ) : filteredMcpServers.length === 0 ? (
+                            <CommandEmpty>No servers match "{mcpServerSearch}"</CommandEmpty>
                           ) : (
-                            <CommandGroup>
-                              {mcpServers.map((server) => (
+                            <CommandGroup heading={mcpServerSearch ? `${filteredMcpServers.length} matches` : `Showing ${filteredMcpServers.length} of ${mcpServers.length.toLocaleString()}`}>
+                              {filteredMcpServers.map((server) => (
                                 <CommandItem
-                                  key={server.slug}
-                                  value={`${server.name} ${server.slug} ${server.description || ""}`}
+                                  key={server.registryId}
+                                  value={server.registryId}
                                   onSelect={() => {
-                                    handleMcpServerChange(server.slug);
+                                    handleMcpServerChange(server.registryId);
+                                    setMcpServerSearch("");
                                   }}
                                   className="cursor-pointer"
                                 >
@@ -1618,7 +1614,7 @@ export default function PlaygroundPage() {
                                     <Check
                                       className={cn(
                                         "h-4 w-4 shrink-0",
-                                        selectedMcpServer === server.slug ? "opacity-100" : "opacity-0"
+                                        selectedMcpServer === server.registryId ? "opacity-100" : "opacity-0"
                                       )}
                                     />
                                     <div className="flex flex-col min-w-0 flex-1">
@@ -1728,10 +1724,10 @@ export default function PlaygroundPage() {
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={pluginSource === "goat" ? fetchPluginStatus : pluginSource === "eliza" ? fetchElizaPlugins : undefined}
-                disabled={pluginsLoading || mcpLoading || pluginSource === "mcp"}
+                onClick={pluginSource === "goat" ? fetchPluginStatus : pluginSource === "eliza" ? fetchElizaPlugins : () => forceRefreshMcpRegistry()}
+                disabled={pluginsLoading || mcpLoading}
                 className="text-zinc-400 hover:text-white shrink-0 h-8 w-8 sm:h-9 sm:w-9"
-                title={pluginSource === "mcp" ? "MCP servers auto-refresh" : "Refresh"}
+                title="Refresh"
               >
                 <RefreshCw className={cn("h-3.5 w-3.5 sm:h-4 sm:w-4", (pluginsLoading || mcpLoading) && "animate-spin")} />
               </Button>

@@ -43,7 +43,7 @@ export interface UseFileAttachmentReturn {
 
 export function useFileAttachment(options: UseFileAttachmentOptions = {}): UseFileAttachmentReturn {
     const {
-        conversationId = `conv-${Date.now()}`,
+        conversationId: providedId,
         onError,
         maxFiles = 1,
     } = options;
@@ -51,7 +51,10 @@ export function useFileAttachment(options: UseFileAttachmentOptions = {}): UseFi
     const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
     const [uploadedCids, setUploadedCids] = useState<string[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
-    const conversationIdRef = useRef(conversationId);
+
+    // Stable conversationId - capture on first render only
+    // This prevents hook reset when caller passes `Date.now()` inline
+    const conversationIdRef = useRef(providedId ?? `conv-${Date.now()}`);
 
     const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (!e.target.files || e.target.files.length === 0) return;

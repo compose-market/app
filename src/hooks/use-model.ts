@@ -33,7 +33,7 @@ export interface UseModelsReturn {
     isLoading: boolean;
     isRefetching: boolean;
     error: Error | null;
-    refetch: () => Promise<void>;
+    forceRefresh: () => Promise<void>;
     lastUpdated: Date | null;
     taskCategories: TaskCategory[];
 }
@@ -63,6 +63,7 @@ export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
         queryKey: CACHE_KEY,
         queryFn: fetchAvailableModels,
         staleTime: STALE_TIME,
+        gcTime: STALE_TIME * 2, // Keep cached 12 hours
         enabled,
     });
 
@@ -121,7 +122,8 @@ export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
         return categories;
     }, [models]);
 
-    const refetch = useCallback(async () => {
+    // Manual refresh - named distinctly to avoid collision with query.refetch
+    const forceRefresh = useCallback(async () => {
         await queryClient.invalidateQueries({ queryKey: CACHE_KEY });
     }, [queryClient]);
 
@@ -133,7 +135,7 @@ export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
         isLoading,
         isRefetching: isFetching && !isLoading,
         error: error || null,
-        refetch,
+        forceRefresh,
         lastUpdated,
         taskCategories,
     };
