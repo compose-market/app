@@ -230,7 +230,6 @@ export default function CreateAgent() {
       case "goat": return "GOAT";
       case "eliza": return "Eliza";
       case "mcp": return "MCP";
-      case "internal": return "Internal";
       default: return origin;
     }
   };
