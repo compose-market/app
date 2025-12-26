@@ -143,7 +143,7 @@ export function SessionBudgetDialog({
               <span className="font-mono text-foreground">{duration} hours</span>
             </div>
             <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground font-mono">Signatures Required</span>
+              <span className="text-muted-foreground font-mono">Approvals Required</span>
               <span className="font-mono text-fuchsia-400">1 (now)</span>
             </div>
           </div>

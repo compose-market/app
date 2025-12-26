@@ -17,11 +17,16 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ChatMessageItem, type ChatMessage } from "@/components/chat";
 import {
+    Tooltip,
+    TooltipContent,
+    TooltipProvider,
+    TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
     Bot,
     Loader2,
     Send,
     Play,
-    Zap,
     Paperclip,
     Mic,
     MicOff,
@@ -29,6 +34,7 @@ import {
     X,
     Layers,
     Trash2,
+    BookOpen,
 } from "lucide-react";
 
 export interface AttachedFile {
@@ -85,6 +91,9 @@ export interface MultimodalCanvasProps {
     onRetryMessage?: (content: string) => void;
     onDeleteMessage?: (id: string) => void;
     onClearChat?: () => void;
+
+    // Knowledge upload (agent-specific)
+    onKnowledgeUpload?: () => void;
 
     // Scroll refs
     scrollContainerRef?: React.RefObject<HTMLDivElement | null>;
@@ -154,6 +163,7 @@ export function MultimodalCanvas({
     onRetryMessage,
     onDeleteMessage,
     onClearChat,
+    onKnowledgeUpload,
     scrollContainerRef,
     messagesEndRef,
     height = "h-64",
@@ -181,7 +191,7 @@ export function MultimodalCanvas({
             {/* Header - optional */}
             {showHeader && (
                 <div className={cn(
-                    "p-3 border-b border-sidebar-border flex items-center justify-between shrink-0",
+                    "p-3 border-b border-sidebar-border flex items-center shrink-0",
                     config.headerBg
                 )}>
                     <div className="flex items-center gap-2">
@@ -190,17 +200,6 @@ export function MultimodalCanvas({
                             {title || "Chat"}
                         </span>
                     </div>
-                    {!sessionActive && onStartSession && (
-                        <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={onStartSession}
-                            className="text-xs"
-                        >
-                            <Zap className="w-3 h-3 mr-1" />
-                            Start Session
-                        </Button>
-                    )}
                 </div>
             )}
 
@@ -352,6 +351,31 @@ export function MultimodalCanvas({
                                 <Mic className="w-4 h-4" />
                             )}
                         </Button>
+                    )}
+
+                    {/* Knowledge Upload - icon only with tooltip */}
+                    {onKnowledgeUpload && (
+                        <TooltipProvider>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        onClick={onKnowledgeUpload}
+                                        disabled={sending}
+                                        className={cn(
+                                            "shrink-0 cursor-pointer text-zinc-400",
+                                            `hover:text-${config.accentColor}-400`
+                                        )}
+                                    >
+                                        <BookOpen className="w-4 h-4" />
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                    <p>Upload Knowledge</p>
+                                </TooltipContent>
+                            </Tooltip>
+                        </TooltipProvider>
                     )}
 
                     <Textarea
