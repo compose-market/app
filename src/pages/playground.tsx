@@ -1231,37 +1231,16 @@ export default function PlaygroundPage() {
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
         <div className="shrink-0 border-b border-zinc-800 p-3 lg:p-4">
-          {/* Mobile: Session controls row (shown first on mobile for prominence) */}
-          <div className="flex sm:hidden items-center justify-between gap-2 mb-3 pb-3 border-b border-zinc-800">
-            <div className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800">
-              <DollarSign className="h-3.5 w-3.5 text-emerald-500" />
-              <span className="text-xs font-mono text-white">
-                {sessionActive ? formatBudget(budgetRemaining) : "$0.00"}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Button
-                variant={sessionActive ? "outline" : "default"}
-                onClick={() => setShowSessionDialog(true)}
-                className={cn(
-                  "h-9 text-xs px-3",
-                  sessionActive && "border-emerald-500/50 text-emerald-400"
-                )}
-              >
-                <Zap className="h-3.5 w-3.5 mr-1.5" />
-                {sessionActive ? "Active" : "Start Session"}
-              </Button>
-
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setShowSettings(!showSettings)}
-                className="h-9 w-9"
-              >
-                <Settings2 className="h-4 w-4" />
-              </Button>
-            </div>
+          {/* Mobile: Settings toggle */}
+          <div className="flex sm:hidden items-center justify-end gap-2 mb-3">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setShowSettings(!showSettings)}
+              className="h-9 w-9"
+            >
+              <Settings2 className="h-4 w-4" />
+            </Button>
           </div>
 
           {/* Top row: Title, Tabs, and Session controls (desktop) */}
@@ -1296,27 +1275,8 @@ export default function PlaygroundPage() {
               )}
             </div>
 
-            {/* Session & Settings - Desktop only */}
+            {/* Settings toggle - Desktop only */}
             <div className="hidden sm:flex items-center gap-2 sm:gap-3">
-              <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg bg-zinc-900 border border-zinc-800">
-                <DollarSign className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-emerald-500" />
-                <span className="text-xs sm:text-sm font-mono text-white">
-                  {sessionActive ? formatBudget(budgetRemaining) : "$0.00"}
-                </span>
-              </div>
-
-              <Button
-                variant={sessionActive ? "outline" : "default"}
-                onClick={() => setShowSessionDialog(true)}
-                className={cn(
-                  "h-8 sm:h-9 text-xs sm:text-sm px-2 sm:px-4",
-                  sessionActive && "border-emerald-500/50 text-emerald-400"
-                )}
-              >
-                <Zap className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
-                {sessionActive ? "Session Active" : "Start Session"}
-              </Button>
-
               <Button
                 variant="ghost"
                 size="icon"
