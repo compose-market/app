@@ -40,6 +40,7 @@ import { uploadManowarBanner, uploadManowarMetadata, getIpfsUri, getIpfsUrl, fil
 import { CHAIN_IDS, CHAIN_CONFIG, thirdwebClient, INFERENCE_PRICE_WEI, getPaymentTokenContract } from "@/lib/thirdweb";
 import { createNormalizedFetch } from "@/lib/payment";
 import { AVAILABLE_MODELS } from "@/lib/models";
+import { AGENTIC_COORDINATOR_MODELS } from "@/hooks/use-coordinator";
 import { useSession } from "@/hooks/use-session.tsx";
 import {
   Dialog,
@@ -91,6 +92,12 @@ import { executeRegistryTool } from "@/lib/services";
 import { WorkflowOutputPanel, type WorkflowExecutionResult } from "@/components/output";
 import { type Agent, type AgentRegistryId, AGENT_REGISTRIES, formatInteractions, COMMON_TAGS } from "@/lib/agents";
 import { RFAComponent } from "@/components/RFAComponent";
+import {
+  type TriggerDefinition,
+  parseNLToCron,
+  TRIGGER_TEMPLATES,
+  getUserTimezone,
+} from "@/lib/triggers";
 
 // =============================================================================
 // Node Types - n8n-inspired design with protruding connectors
@@ -269,9 +276,181 @@ function AgentNode({ data }: { data: AgentNodeData }) {
   );
 }
 
+// =============================================================================
+// Trigger Node - Schedule-based workflow initiation
+// =============================================================================
+
+interface TriggerNodeData extends Record<string, unknown> {
+  trigger: {
+    id: string;
+    name: string;
+    type: "cron" | "webhook" | "event" | "manual";
+    nlDescription: string;
+    cronExpression?: string;
+    cronReadable?: string;
+    enabled: boolean;
+  };
+  status?: "pending" | "running" | "success" | "error";
+}
+
+function TriggerNode({ data }: { data: TriggerNodeData }) {
+  const { trigger, status = "pending" } = data;
+
+  const typeIcons: Record<string, React.ReactNode> = {
+    cron: <Clock className="w-4 h-4 text-amber-400" />,
+    webhook: <Globe className="w-4 h-4 text-amber-400" />,
+    event: <Zap className="w-4 h-4 text-amber-400" />,
+    manual: <Play className="w-4 h-4 text-amber-400" />,
+  };
+
+  const statusStyles = {
+    pending: trigger.enabled ? "border-amber-500/40 bg-amber-500/5" : "border-sidebar-border bg-card/50 opacity-60",
+    running: "border-amber-500 bg-amber-500/10 shadow-[0_0_25px_-5px_hsl(43_96%_50%/0.5)]",
+    success: "border-green-500 bg-green-500/5",
+    error: "border-red-500 bg-red-500/5",
+  };
+
+  return (
+    <div className={`relative w-64 rounded-lg border-2 backdrop-blur-md overflow-visible group transition-all duration-200 hover:scale-[1.02] ${statusStyles[status]}`}>
+      {/* Trigger-specific gradient header */}
+      <div className="h-1.5 w-full bg-gradient-to-r from-amber-500 to-yellow-400" />
+
+      {/* Content */}
+      <div className="p-3">
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-lg bg-amber-500/10 flex items-center justify-center border border-amber-500/30 shrink-0">
+            {typeIcons[trigger.type] || <Clock className="w-4 h-4 text-amber-400" />}
+          </div>
+          <div className="overflow-hidden flex-1 min-w-0">
+            <div className="flex items-center gap-1">
+              <h3 className="font-bold font-display text-sm truncate text-foreground leading-tight">
+                {trigger.name}
+              </h3>
+              {!trigger.enabled && <Badge variant="outline" className="text-[8px] h-3 px-1 border-muted-foreground/30">OFF</Badge>}
+            </div>
+            <p className="text-[10px] text-muted-foreground truncate">
+              {trigger.cronReadable || trigger.nlDescription}
+            </p>
+          </div>
+          {status === "running" && <Loader2 className="w-4 h-4 text-amber-400 animate-spin shrink-0" />}
+          {status === "success" && <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />}
+        </div>
+
+        <div className="flex justify-between items-center mt-2 pt-2 border-t border-sidebar-border/50">
+          <Badge variant="outline" className="text-[9px] h-4 px-1.5 font-mono border-amber-500/30 text-amber-400">
+            {trigger.type}
+          </Badge>
+          {trigger.cronExpression && (
+            <code className="text-[8px] text-muted-foreground font-mono">{trigger.cronExpression}</code>
+          )}
+        </div>
+      </div>
+
+      {/* Output handle only - triggers start the flow */}
+      <Handle
+        type="source"
+        position={Position.Right}
+        className={outputHandleStyle}
+      />
+    </div>
+  );
+}
+
+// =============================================================================
+// Hook Node - Lifecycle event handlers
+// =============================================================================
+
+interface HookNodeData extends Record<string, unknown> {
+  hook: {
+    id: string;
+    name: string;
+    type: "pre-execution" | "post-step" | "on-error" | "on-complete" | "on-context-cleanup" | "on-restart";
+    action: {
+      type: "notify" | "webhook" | "agent" | "memory" | "log";
+    };
+    enabled: boolean;
+  };
+  status?: "pending" | "running" | "success" | "error";
+}
+
+function HookNode({ data }: { data: HookNodeData }) {
+  const { hook, status = "pending" } = data;
+
+  const typeLabels: Record<string, string> = {
+    "pre-execution": "Before Start",
+    "post-step": "After Step",
+    "on-error": "On Error",
+    "on-complete": "On Complete",
+    "on-context-cleanup": "Cleanup",
+    "on-restart": "On Restart",
+  };
+
+  const actionIcons: Record<string, React.ReactNode> = {
+    notify: <AlertCircle className="w-4 h-4 text-violet-400" />,
+    webhook: <Globe className="w-4 h-4 text-violet-400" />,
+    agent: <Bot className="w-4 h-4 text-violet-400" />,
+    memory: <Sparkles className="w-4 h-4 text-violet-400" />,
+    log: <Server className="w-4 h-4 text-violet-400" />,
+  };
+
+  const statusStyles = {
+    pending: hook.enabled ? "border-violet-500/40 bg-violet-500/5" : "border-sidebar-border bg-card/50 opacity-60",
+    running: "border-violet-500 bg-violet-500/10 shadow-[0_0_25px_-5px_hsl(262_83%_58%/0.5)]",
+    success: "border-green-500 bg-green-500/5",
+    error: "border-red-500 bg-red-500/5",
+  };
+
+  return (
+    <div className={`relative w-56 rounded-lg border-2 backdrop-blur-md overflow-visible group transition-all duration-200 hover:scale-[1.02] ${statusStyles[status]}`}>
+      {/* Left handle - Input */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        className={inputHandleStyle}
+      />
+
+      {/* Hook-specific gradient header */}
+      <div className="h-1.5 w-full bg-gradient-to-r from-violet-500 to-purple-400" />
+
+      {/* Content */}
+      <div className="p-2.5">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-lg bg-violet-500/10 flex items-center justify-center border border-violet-500/30 shrink-0">
+            {actionIcons[hook.action.type] || <Zap className="w-4 h-4 text-violet-400" />}
+          </div>
+          <div className="overflow-hidden flex-1 min-w-0">
+            <h3 className="font-bold font-display text-xs truncate text-foreground leading-tight">
+              {hook.name}
+            </h3>
+            <p className="text-[9px] text-muted-foreground truncate">
+              {typeLabels[hook.type] || hook.type}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex justify-between items-center mt-1.5 pt-1.5 border-t border-sidebar-border/50">
+          <Badge variant="outline" className="text-[8px] h-3.5 px-1 font-mono border-violet-500/30 text-violet-400">
+            {hook.action.type}
+          </Badge>
+          {!hook.enabled && <Badge variant="outline" className="text-[8px] h-3 px-1 border-muted-foreground/30">OFF</Badge>}
+        </div>
+      </div>
+
+      {/* Right handle - Output */}
+      <Handle
+        type="source"
+        position={Position.Right}
+        className={outputHandleStyle}
+      />
+    </div>
+  );
+}
+
 const nodeTypes = {
   stepNode: StepNode,
   agentNode: AgentNode,
+  triggerNode: TriggerNode,
+  hookNode: HookNode,
 };
 
 // =============================================================================
@@ -343,7 +522,6 @@ function ConnectorPicker({
 
   const getOriginBadge = (origin: string) => {
     switch (origin) {
-      case "internal": return <Badge variant="default" className="text-[8px] h-4 px-1">Compose</Badge>;
       case "mcp": return <Badge variant="secondary" className="text-[8px] h-4 px-1">MCP</Badge>;
       case "goat": return <Badge variant="outline" className="text-[8px] h-4 px-1 border-green-500/50 text-green-400">GOAT</Badge>;
       case "eliza": return <Badge variant="outline" className="text-[8px] h-4 px-1 border-fuchsia-500/50 text-fuchsia-400">Eliza</Badge>;
@@ -571,7 +749,6 @@ function ConnectorDetailDialog({
     switch (server.origin) {
       case "goat": return { bg: "bg-green-500/10", border: "border-green-500/30", text: "text-green-400" };
       case "eliza": return { bg: "bg-fuchsia-500/10", border: "border-fuchsia-500/30", text: "text-fuchsia-400" };
-      case "internal": return { bg: "bg-cyan-500/10", border: "border-cyan-500/30", text: "text-cyan-400" };
       default: return { bg: "bg-purple-500/10", border: "border-purple-500/30", text: "text-purple-400" };
     }
   };
@@ -604,7 +781,7 @@ function ConnectorDetailDialog({
         server.slug,
         toolName,
         args,
-        server.connectorId
+        undefined // connectorId removed since internal tools are hidden
       );
 
       setTestResult({
@@ -659,7 +836,7 @@ function ConnectorDetailDialog({
             <div className={`w-10 h-10 rounded-sm flex items-center justify-center border ${style.bg} ${style.border}`}>
               {server.origin === "goat" ? (
                 <Zap className={`w-5 h-5 ${style.text}`} />
-              ) : server.origin === "eliza" || server.origin === "internal" ? (
+              ) : server.origin === "eliza" ? (
                 <Plug className={`w-5 h-5 ${style.text}`} />
               ) : (
                 <Server className={`w-5 h-5 ${style.text}`} />
@@ -682,8 +859,7 @@ function ConnectorDetailDialog({
           <div className="flex flex-wrap gap-2">
             <Badge className={`${style.bg} ${style.text}`}>
               {server.origin === "goat" ? "GOAT SDK" :
-                server.origin === "eliza" ? "ElizaOS" :
-                  server.origin === "internal" ? "Compose" : "MCP"}
+                server.origin === "eliza" ? "ElizaOS" : "MCP"}
             </Badge>
             {server.category && (
               <Badge variant="outline">{server.category}</Badge>
@@ -1036,6 +1212,151 @@ function AgentPickerCard({
 }
 
 // =============================================================================
+// Trigger Picker (Smart NL-first input + structured fallback)
+// =============================================================================
+
+function TriggerPicker({
+  onAdd
+}: {
+  onAdd: (trigger: Partial<TriggerDefinition>) => void
+}) {
+  const [nlInput, setNlInput] = useState("");
+  const [isParsing, setIsParsing] = useState(false);
+  const [parseResult, setParseResult] = useState<{
+    success: boolean;
+    cronExpression?: string;
+    cronReadable?: string;
+    error?: string;
+  } | null>(null);
+
+  // Parse the NL input when user stops typing
+  const handleParse = async () => {
+    if (!nlInput.trim()) return;
+
+    setIsParsing(true);
+    setParseResult(null);
+
+    try {
+      const result = await parseNLToCron(nlInput.trim(), getUserTimezone());
+      setParseResult(result);
+    } catch (error) {
+      setParseResult({ success: false, error: String(error) });
+    } finally {
+      setIsParsing(false);
+    }
+  };
+
+  const handleAdd = () => {
+    if (parseResult?.success && parseResult.cronExpression) {
+      onAdd({
+        name: nlInput.substring(0, 50),
+        type: "cron",
+        nlDescription: nlInput,
+        cronExpression: parseResult.cronExpression,
+        cronReadable: parseResult.cronReadable,
+        timezone: getUserTimezone(),
+        enabled: true,
+      });
+      setNlInput("");
+      setParseResult(null);
+    }
+  };
+
+  const handleQuickAdd = (templateKey: string) => {
+    const template = TRIGGER_TEMPLATES[templateKey];
+    if (template) {
+      onAdd({
+        name: template.cronReadable,
+        type: "cron",
+        nlDescription: template.nlDescription,
+        cronExpression: template.cronExpression,
+        cronReadable: template.cronReadable,
+        timezone: getUserTimezone(),
+        enabled: true,
+      });
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* NL Input - Primary Interface */}
+      <div>
+        <Label className="text-[10px] font-mono text-muted-foreground mb-1.5 block">
+          DESCRIBE YOUR SCHEDULE
+        </Label>
+        <div className="flex gap-2">
+          <Input
+            placeholder="e.g. every day at 9am, every Monday..."
+            value={nlInput}
+            onChange={(e) => {
+              setNlInput(e.target.value);
+              setParseResult(null);
+            }}
+            onKeyDown={(e) => e.key === "Enter" && handleParse()}
+            className="h-8 text-xs bg-background/50 border-sidebar-border flex-1"
+          />
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={handleParse}
+            disabled={!nlInput.trim() || isParsing}
+            className="h-8 px-3 text-xs"
+          >
+            {isParsing ? <Loader2 className="w-3 h-3 animate-spin" /> : "Parse"}
+          </Button>
+        </div>
+      </div>
+
+      {/* Parse Result */}
+      {parseResult && (
+        <div className={`p-2 rounded-sm border text-xs ${parseResult.success
+            ? "bg-green-500/10 border-green-500/30"
+            : "bg-red-500/10 border-red-500/30"
+          }`}>
+          {parseResult.success ? (
+            <div className="space-y-1">
+              <div className="text-green-400 font-mono">{parseResult.cronReadable}</div>
+              <code className="text-[10px] text-muted-foreground">{parseResult.cronExpression}</code>
+              <Button
+                size="sm"
+                onClick={handleAdd}
+                className="w-full mt-2 bg-amber-500 hover:bg-amber-600 text-black h-7 text-xs font-bold"
+              >
+                <Clock className="w-3 h-3 mr-1" />
+                Add Trigger
+              </Button>
+            </div>
+          ) : (
+            <div className="text-red-400">{parseResult.error}</div>
+          )}
+        </div>
+      )}
+
+      {/* Quick Templates */}
+      <div>
+        <Label className="text-[10px] font-mono text-muted-foreground mb-1.5 block">
+          QUICK ADD
+        </Label>
+        <div className="grid grid-cols-2 gap-1">
+          {["every-hour", "daily-9am", "weekdays-9am", "weekly-monday-9am"].map((key) => {
+            const template = TRIGGER_TEMPLATES[key];
+            return (
+              <button
+                key={key}
+                onClick={() => handleQuickAdd(key)}
+                className="p-1.5 text-[10px] font-mono text-left rounded-sm border border-sidebar-border hover:border-amber-500/50 hover:bg-amber-500/5 transition-all"
+              >
+                {template.cronReadable}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
 // Mint Manowar Dialog
 // =============================================================================
 
@@ -1374,9 +1695,12 @@ function MintManowarDialog({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No coordinator</SelectItem>
-                    {AVAILABLE_MODELS.filter((m: any, i: number, arr: any[]) => arr.findIndex((x: any) => x.id === m.id) === i).map((model) => (
+                    {AGENTIC_COORDINATOR_MODELS.map((model) => (
                       <SelectItem key={model.id} value={model.id}>
-                        {model.name}
+                        <div className="flex items-center gap-2">
+                          <span>{model.name}</span>
+                          <span className="text-[10px] text-muted-foreground">({model.provider})</span>
+                        </div>
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -1782,12 +2106,26 @@ function FloatingToolbox({
                   <Bot className="w-3 h-3 mr-1" />
                   AGENTS
                 </TabsTrigger>
+                <TabsTrigger
+                  value="triggers"
+                  className="flex-1 text-[10px] h-6 data-[state=active]:bg-amber-500/20 data-[state=active]:text-amber-400 rounded-sm"
+                >
+                  <Clock className="w-3 h-3 mr-1" />
+                  TRIGGERS
+                </TabsTrigger>
               </TabsList>
               <TabsContent value="connectors" className="mt-2 max-h-48 overflow-y-auto">
                 <ConnectorPicker onSelect={onAddStep} />
               </TabsContent>
               <TabsContent value="agents" className="mt-2 max-h-48 overflow-y-auto">
                 <AgentsPicker onSelect={onAddAgentStep} />
+              </TabsContent>
+              <TabsContent value="triggers" className="mt-2 max-h-48 overflow-y-auto">
+                <TriggerPicker onAdd={(trigger) => {
+                  // Add trigger node to the workflow
+                  console.log("[compose] Add trigger:", trigger);
+                  // TODO: onAddTrigger callback
+                }} />
               </TabsContent>
             </Tabs>
           </div>
