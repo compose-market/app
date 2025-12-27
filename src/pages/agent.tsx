@@ -241,10 +241,20 @@ export default function AgentDetailPage() {
           headers["x-session-user-address"] = userAddress;
         }
 
+        // Collect granted permissions from sessionStorage (from Backpack)
+        const grantedPermissions: string[] = [];
+        const permissionTypes = ["filesystem", "camera", "microphone", "geolocation", "clipboard", "notifications"];
+        permissionTypes.forEach(perm => {
+          if (sessionStorage.getItem(`consent_${perm}`) === "granted") {
+            grantedPermissions.push(perm);
+          }
+        });
+
         // Build request body with attachment if present (like playground.tsx)
         const requestBody: Record<string, unknown> = {
           message: userMessage.content,
           threadId: threadId,
+          grantedPermissions, // Pass to backend for proactive permission checks
         };
 
         // Add attachment base64 data if present (pre-computed above)
@@ -417,11 +427,70 @@ export default function AgentDetailPage() {
         recordUsage();
       }
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "Unknown error";
+      let errorMsg = err instanceof Error ? err.message : "Unknown error";
+
+      // Check for CONSENT_REQUIRED error from agent
+      try {
+        const parsedError = JSON.parse(errorMsg);
+        if (parsedError.code === "CONSENT_REQUIRED") {
+          const consentType = parsedError.consentType as string;
+          console.log(`[agent] Consent required: ${consentType}`);
+
+          // Trigger native browser permission prompt based on consent type
+          try {
+            if (consentType === "filesystem") {
+              // Use File System Access API
+              if ('showDirectoryPicker' in window) {
+                await (window as any).showDirectoryPicker();
+                // User granted filesystem access - retry the message
+                toast({ title: "Access Granted", description: "You can now interact with your files." });
+                // Store the handle for subsequent requests
+                sessionStorage.setItem(`consent_${consentType}`, "granted");
+                // Retry by calling handleSendMessage again (user can resend)
+                setInputValue(userMessage.content || "");
+                setMessages(prev => prev.filter(m => m.id !== assistantId));
+                errorMsg = "Filesystem access granted. Please resend your message.";
+              } else {
+                errorMsg = "This browser doesn't support filesystem access. Try Chrome or Edge.";
+              }
+            } else if (consentType === "camera" || consentType === "microphone") {
+              // Use MediaDevices API
+              const constraints = consentType === "camera"
+                ? { video: true }
+                : { audio: true };
+              await navigator.mediaDevices.getUserMedia(constraints);
+              toast({ title: "Access Granted", description: `${consentType} access enabled.` });
+              sessionStorage.setItem(`consent_${consentType}`, "granted");
+              setInputValue(userMessage.content || "");
+              setMessages(prev => prev.filter(m => m.id !== assistantId));
+              errorMsg = `${consentType} access granted. Please resend your message.`;
+            } else if (consentType === "geolocation") {
+              // Use Geolocation API
+              await new Promise((resolve, reject) => {
+                navigator.geolocation.getCurrentPosition(resolve, reject);
+              });
+              toast({ title: "Access Granted", description: "Location access enabled." });
+              sessionStorage.setItem(`consent_${consentType}`, "granted");
+              setInputValue(userMessage.content || "");
+              setMessages(prev => prev.filter(m => m.id !== assistantId));
+              errorMsg = "Location access granted. Please resend your message.";
+            } else {
+              errorMsg = parsedError.message;
+            }
+          } catch (permErr) {
+            // User denied permission or API not available
+            errorMsg = `Permission denied for ${consentType} access. This feature requires your consent.`;
+          }
+        }
+      } catch {
+        // Not a JSON error, use as-is
+      }
+
       setChatError(errorMsg);
       setMessages(prev =>
         prev.map(m => m.id === assistantId ? { ...m, content: `Error: ${errorMsg}` } : m)
       );
+
     } finally {
       setSending(false);
       setChatStatus("idle");
