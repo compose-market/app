@@ -1,7 +1,7 @@
 import { Link, useLocation } from "wouter";
 import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
-import { Home, ShoppingCart, PlusCircle, Layers, Box, Activity, Shield, Server, Sparkles, ChevronLeft, ChevronRight } from "lucide-react";
+import { Home, ShoppingCart, PlusCircle, Layers, Box, Activity, Shield, Server, Sparkles, ChevronLeft, ChevronRight, Vault } from "lucide-react";
 import { ComposeLogo } from "@/components/brand/Logo";
 import {
   Tooltip,
@@ -9,6 +9,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { BackpackDialog } from "@/components/backpack";
 
 const SIDEBAR_COLLAPSED_KEY = "sidebar_collapsed";
 
@@ -38,6 +39,9 @@ export function Sidebar() {
   const networkLinks = [
     { href: "/my-assets", icon: Activity, label: "MY ASSETS" },
   ];
+
+  // Vault dialog state
+  const [vaultOpen, setVaultOpen] = useState(false);
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -169,6 +173,32 @@ export function Sidebar() {
               )}
             </Tooltip>
           ))}
+
+          {/* Vault Button - Opens BackpackDialog */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => setVaultOpen(true)}
+                className={cn(
+                  "w-full flex items-center text-sm font-medium transition-all border-l-2 group",
+                  isCollapsed ? "px-0 py-3 justify-center" : "gap-3 px-4 py-3",
+                  "border-transparent text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
+                )}
+              >
+                <Vault className="w-4 h-4 shrink-0 group-hover:text-cyan-400" />
+                <span className={cn(
+                  "font-mono tracking-wider whitespace-nowrap transition-all duration-300",
+                  isCollapsed ? "w-0 opacity-0 hidden" : "w-auto opacity-100"
+                )}>VAULT</span>
+              </button>
+            </TooltipTrigger>
+            {isCollapsed && (
+              <TooltipContent side="right" className="font-mono text-xs">
+                VAULT
+              </TooltipContent>
+            )}
+          </Tooltip>
+          <BackpackDialog open={vaultOpen} onOpenChange={setVaultOpen} showTrigger={false} />
         </nav>
 
         {/* Network Status Footer */}
