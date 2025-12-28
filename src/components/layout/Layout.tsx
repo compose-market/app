@@ -2,10 +2,12 @@ import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { Sidebar, useSidebarCollapsed } from "./Sidebar";
 import { TopBar } from "./TopBar";
-import { Menu, X, Home, Box, Layers, PlusCircle, Sparkles, Activity } from "lucide-react";
+import { Menu, X, Home, Box, Layers, PlusCircle, Sparkles, Activity, Vault } from "lucide-react";
 import { ComposeLogo } from "@/components/brand/Logo";
 import { cn } from "@/lib/utils";
-import { WalletConnector } from "@/components/connector";
+import { WalletConnector, useWalletAccount } from "@/components/connector";
+import { BackpackDialog } from "@/components/backpack";
+import { SessionIndicator } from "@/components/session";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -29,6 +31,8 @@ export function Layout({ children }: LayoutProps) {
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [location] = useLocation();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileVaultOpen, setMobileVaultOpen] = useState(false);
+  const { isConnected } = useWalletAccount();
 
   // Listen for sidebar collapse state changes
   useEffect(() => {
@@ -189,6 +193,16 @@ export function Layout({ children }: LayoutProps) {
               )}
             </Link>
           ))}
+
+          {/* Vault Button - Mobile - Opens BackpackDialog */}
+          <button
+            onClick={() => setMobileVaultOpen(true)}
+            className="w-full flex items-center gap-3 px-4 py-3.5 text-sm font-medium transition-all border-l-2 group active:bg-cyan-950/40 border-transparent text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
+          >
+            <Vault className="w-5 h-5 group-hover:text-cyan-400" />
+            <span className="font-mono tracking-wider">VAULT</span>
+          </button>
+          <BackpackDialog open={mobileVaultOpen} onOpenChange={setMobileVaultOpen} showTrigger={false} />
         </nav>
 
         {/* Mobile Network Status Footer */}
@@ -220,8 +234,9 @@ export function Layout({ children }: LayoutProps) {
           <span className="font-display font-bold text-white tracking-tight text-xs truncate hidden xs:block">COMPOSE.MARKET</span>
         </div>
 
-        {/* Mobile Connect Button */}
-        <div className="shrink-0">
+        {/* Mobile Session Indicator + Connect Button */}
+        <div className="flex items-center gap-2 shrink-0">
+          {isConnected && <SessionIndicator />}
           <WalletConnector compact />
         </div>
       </div>
