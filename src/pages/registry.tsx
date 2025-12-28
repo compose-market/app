@@ -176,23 +176,23 @@ function ServerCard({
         }`}
       onClick={() => onSelect(server)}
     >
-      <CardHeader className="pb-2">
+      <CardHeader className="p-3 sm:p-4 pb-2">
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
-            <div className={`w-8 h-8 rounded-sm flex items-center justify-center border shrink-0 ${style.bg} ${style.border}`}>
+            <div className={`w-7 h-7 sm:w-8 sm:h-8 rounded-sm flex items-center justify-center border shrink-0 ${style.bg} ${style.border}`}>
               {isGoat ? (
-                <Zap className={`w-4 h-4 ${style.text}`} />
+                <Zap className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${style.text}`} />
               ) : isEliza ? (
-                <Sparkles className={`w-4 h-4 ${style.text}`} />
+                <Sparkles className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${style.text}`} />
               ) : (
-                <Server className={`w-4 h-4 ${style.text}`} />
+                <Server className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${style.text}`} />
               )}
             </div>
             <div className="min-w-0">
-              <CardTitle className="text-sm font-display font-bold truncate group-hover:text-cyan-400 transition-colors">
+              <CardTitle className="text-xs sm:text-sm font-display font-bold truncate group-hover:text-cyan-400 transition-colors">
                 {server.name}
               </CardTitle>
-              <p className="text-[10px] font-mono text-muted-foreground truncate">
+              <p className="text-[9px] sm:text-[10px] font-mono text-muted-foreground truncate">
                 {server.namespace}/{server.slug}
               </p>
             </div>
@@ -200,39 +200,39 @@ function ServerCard({
           <div className="flex flex-col items-end gap-1 shrink-0">
             <Badge
               variant="secondary"
-              className={`text-[10px] h-5 ${style.bg} ${style.text} ${style.border}`}
+              className={`text-[8px] sm:text-[10px] h-4 sm:h-5 ${style.bg} ${style.text} ${style.border}`}
             >
               {getOriginLabel(server.origin)}
             </Badge>
             {isExecutable && (
-              <Badge variant="outline" className="text-[9px] h-4 border-green-500/30 text-green-400 px-1">
-                <Play className="w-2 h-2 mr-0.5" />
+              <Badge variant="outline" className="text-[8px] sm:text-[9px] h-3.5 sm:h-4 border-green-500/30 text-green-400 px-1">
+                <Play className="w-1.5 h-1.5 sm:w-2 sm:h-2 mr-0.5" />
                 Test
               </Badge>
             )}
           </div>
         </div>
       </CardHeader>
-      <CardContent className="pt-0">
-        <CardDescription className="text-xs line-clamp-2 mb-3">
+      <CardContent className="p-3 sm:p-4 pt-0">
+        <CardDescription className="text-[10px] sm:text-xs line-clamp-2 mb-2 sm:mb-3 h-7 sm:h-8">
           {server.description}
         </CardDescription>
 
-        <div className="flex flex-wrap gap-1 mb-3">
+        <div className="flex flex-wrap gap-1 mb-2 sm:mb-3">
           {server.category && (
-            <Badge variant="outline" className="text-[10px] h-5 border-sidebar-border">
+            <Badge variant="outline" className="text-[8px] sm:text-[10px] h-4 sm:h-5 border-sidebar-border">
               {server.category}
             </Badge>
           )}
           {isRemote && (
-            <Badge variant="outline" className="text-[10px] h-5 border-green-500/30 text-green-400">
-              <Cloud className="w-2.5 h-2.5 mr-1" />
+            <Badge variant="outline" className="text-[8px] sm:text-[10px] h-4 sm:h-5 border-green-500/30 text-green-400">
+              <Cloud className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
               Remote
             </Badge>
           )}
           {server.toolCount > 0 && (
-            <Badge variant="outline" className="text-[10px] h-5 border-sidebar-border">
-              <Wrench className="w-2.5 h-2.5 mr-1" />
+            <Badge variant="outline" className="text-[8px] sm:text-[10px] h-4 sm:h-5 border-sidebar-border">
+              <Wrench className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
               {formatToolCount(server.toolCount)}
             </Badge>
           )}
@@ -241,7 +241,7 @@ function ServerCard({
         <div className="flex items-center justify-between pt-2 border-t border-sidebar-border">
           <div className="flex gap-1">
             {server.tags.slice(0, 3).map((tag) => (
-              <span key={tag} className="text-[10px] text-muted-foreground">
+              <span key={tag} className="text-[9px] sm:text-[10px] text-muted-foreground">
                 #{tag}
               </span>
             ))}
@@ -254,7 +254,7 @@ function ServerCard({
               onClick={(e) => e.stopPropagation()}
               className="text-muted-foreground hover:text-cyan-400 transition-colors"
             >
-              <Github className="w-3.5 h-3.5" />
+              <Github className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
             </a>
           )}
         </div>
@@ -639,7 +639,7 @@ export default function RegistryPage() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
             {displayServers.map((server) => (
               <ServerCard
                 key={server.registryId}
