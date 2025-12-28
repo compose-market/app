@@ -29,9 +29,16 @@ import { useFileAttachment } from "@/hooks/use-attachment";
 import { useAudioRecording } from "@/hooks/use-recording";
 import { ManowarCard, ManowarCardSkeleton } from "@/components/manowar-card";
 import {
+    Sheet,
+    SheetContent,
+    SheetHeader,
+    SheetTitle,
+} from "@/components/ui/sheet";
+import {
     ArrowLeft,
     Shield,
     Layers,
+    IdCard,
 } from "lucide-react";
 
 const MANOWAR_URL = (import.meta.env.VITE_MANOWAR_URL || "https://manowar.compose.market").replace(/\/+$/, "");
@@ -61,6 +68,9 @@ export default function ManowarPage() {
 
     // Session dialog
     const [showSessionDialog, setShowSessionDialog] = useState(false);
+
+    // Mobile card sheet
+    const [mobileCardOpen, setMobileCardOpen] = useState(false);
 
     // Local RAF ref for streaming updates
     const rafRef = useRef<number | null>(null);
@@ -428,6 +438,17 @@ export default function ManowarPage() {
                     <Layers className="w-3 h-3 mr-1" />
                     Manowar #{manowar.id}
                 </Badge>
+
+                {/* Mobile Card Button - only visible on mobile */}
+                <Button
+                    variant="ghost"
+                    size="sm"
+                    className="lg:hidden text-muted-foreground hover:text-fuchsia-400 h-7 w-7 p-0 ml-2"
+                    onClick={() => setMobileCardOpen(true)}
+                    aria-label="View workflow details"
+                >
+                    <IdCard className="w-4 h-4" />
+                </Button>
             </div>
 
             {/* Main Layout: Chat on Left, Card on Right */}
@@ -496,6 +517,24 @@ export default function ManowarPage() {
 
             {/* Session Budget Dialog */}
             <SessionBudgetDialog open={showSessionDialog} onOpenChange={setShowSessionDialog} showTrigger={false} />
+
+            {/* Mobile Card Sheet */}
+            <Sheet open={mobileCardOpen} onOpenChange={setMobileCardOpen}>
+                <SheetContent side="right" className="w-[340px] sm:w-[400px] p-0 overflow-y-auto">
+                    <SheetHeader className="p-4 border-b border-sidebar-border">
+                        <SheetTitle className="font-display text-fuchsia-400 flex items-center gap-2">
+                            <IdCard className="w-4 h-4" />
+                            Workflow Details
+                        </SheetTitle>
+                    </SheetHeader>
+                    <div className="p-4">
+                        <ManowarCard
+                            manowar={manowar}
+                            onCopyEndpoint={copyEndpoint}
+                        />
+                    </div>
+                </SheetContent>
+            </Sheet>
         </div>
     );
 }

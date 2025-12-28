@@ -40,6 +40,12 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import {
   ArrowLeft,
   Sparkles,
   Shield,
@@ -50,6 +56,7 @@ import {
   FileText,
   X,
   BookOpen,
+  IdCard,
 } from "lucide-react";
 
 const MCP_URL = (import.meta.env.VITE_MCP_URL || "https://mcp.compose.market").replace(/\/+$/, "");
@@ -109,6 +116,9 @@ export default function AgentDetailPage() {
 
   // Session dialog
   const [showSessionDialog, setShowSessionDialog] = useState(false);
+
+  // Mobile card sheet
+  const [mobileCardOpen, setMobileCardOpen] = useState(false);
 
   // Auto-register agent with backend if not registered
   const autoRegisterAgent = useCallback(async (): Promise<boolean> => {
@@ -626,6 +636,17 @@ export default function AgentDetailPage() {
           <Sparkles className="w-3 h-3 mr-1" />
           Agent #{agent.id}
         </Badge>
+
+        {/* Mobile Card Button - only visible on mobile */}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="lg:hidden text-muted-foreground hover:text-cyan-400 h-7 w-7 p-0 ml-2"
+          onClick={() => setMobileCardOpen(true)}
+          aria-label="View agent details"
+        >
+          <IdCard className="w-4 h-4" />
+        </Button>
       </div>
 
       {/* Main Layout: Chat on Left, Card on Right - fills remaining space */}
@@ -794,6 +815,24 @@ export default function AgentDetailPage() {
 
       {/* Session Budget Dialog */}
       <SessionBudgetDialog open={showSessionDialog} onOpenChange={setShowSessionDialog} showTrigger={false} />
+
+      {/* Mobile Card Sheet */}
+      <Sheet open={mobileCardOpen} onOpenChange={setMobileCardOpen}>
+        <SheetContent side="right" className="w-[340px] sm:w-[400px] p-0 overflow-y-auto">
+          <SheetHeader className="p-4 border-b border-sidebar-border">
+            <SheetTitle className="font-display text-cyan-400 flex items-center gap-2">
+              <IdCard className="w-4 h-4" />
+              Agent Details
+            </SheetTitle>
+          </SheetHeader>
+          <div className="p-4">
+            <AgentCard
+              agent={agent}
+              onCopyEndpoint={copyEndpoint}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
