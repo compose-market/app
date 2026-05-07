@@ -2,18 +2,13 @@
  * React hooks for backend service integration
  */
 import { useState, useCallback } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import {
   getConnectors,
   getConnectorTools,
   callConnectorTool,
-  runWorkflow,
-  validateWorkflow,
-  downloadWorkflow,
   checkAllServicesHealth,
   type WorkflowDefinition,
-  type WorkflowRunResult,
-  type ExportOptions,
 } from "@/lib/services";
 
 // =============================================================================
@@ -72,98 +67,6 @@ export function useConnectorCall() {
   );
 
   return { call, isLoading, error, result };
-}
-
-// =============================================================================
-// Workflow Execution Hook
-// =============================================================================
-
-/**
- * Hook to execute workflows in the sandbox
- */
-export function useWorkflowExecution() {
-  const [isRunning, setIsRunning] = useState(false);
-  const [logs, setLogs] = useState<WorkflowRunResult["logs"]>([]);
-  const [result, setResult] = useState<WorkflowRunResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const execute = useCallback(
-    async (workflow: WorkflowDefinition, input: Record<string, unknown> = {}) => {
-      setIsRunning(true);
-      setError(null);
-      setLogs([]);
-      setResult(null);
-
-      try {
-        const res = await runWorkflow(workflow, input);
-        setResult(res);
-        setLogs(res.logs);
-        return res;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "Unknown error";
-        setError(message);
-        throw err;
-      } finally {
-        setIsRunning(false);
-      }
-    },
-    []
-  );
-
-  const reset = useCallback(() => {
-    setIsRunning(false);
-    setLogs([]);
-    setResult(null);
-    setError(null);
-  }, []);
-
-  return {
-    execute,
-    reset,
-    isRunning,
-    logs,
-    result,
-    error,
-    success: result?.success ?? null,
-    context: result?.context ?? null,
-  };
-}
-
-/**
- * Hook to validate workflows without executing
- */
-export function useWorkflowValidation() {
-  return useMutation({
-    mutationFn: validateWorkflow,
-  });
-}
-
-// =============================================================================
-// Export Hook
-// =============================================================================
-
-/**
- * Hook to export workflows as downloadable projects
- */
-export function useWorkflowExport() {
-  const [isExporting, setIsExporting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const exportAsZip = useCallback(async (options: ExportOptions) => {
-    setIsExporting(true);
-    setError(null);
-    try {
-      await downloadWorkflow(options);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error";
-      setError(message);
-      throw err;
-    } finally {
-      setIsExporting(false);
-    }
-  }, []);
-
-  return { exportAsZip, isExporting, error };
 }
 
 // =============================================================================
@@ -270,4 +173,20 @@ export function useWorkflowBuilder(initialWorkflow?: Partial<WorkflowDefinition>
     stepCount: workflow.steps.length,
     isValid: workflow.steps.length > 0 && workflow.name.length > 0,
   };
+}
+
+// =============================================================================
+// Workflow Execution Hook
+// =============================================================================
+
+/**
+ * Hook to track workflow execution state
+ */
+export function useWorkflowExecution() {
+  const [isRunning, setIsRunning] = useState(false);
+
+  const start = useCallback(() => setIsRunning(true), []);
+  const stop = useCallback(() => setIsRunning(false), []);
+
+  return { isRunning, start, stop };
 }

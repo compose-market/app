@@ -1,395 +1,573 @@
 /**
- * MCP Registry Hooks
- * React Query hooks for the MCP registry API.
- * Registry runs on the services/connector (port 4001), not the API server.
+ * Connectors registry hooks.
+ *
+ * React Query hooks that talk to the connectors broker
+ * (https://connectors.compose.market) for tools and onchain connectors.
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useCallback } from "react";
+import { useMemo, useCallback, useEffect, useState } from "react";
+import { normalizeConnectorBinding, type CanonicalConnectorOrigin } from "@/lib/connectors";
 
 /**
- * Build the registry base URL
- * The registry is on the connector server under /registry path.
+ * Build the connectors broker base URL.
  */
-function getRegistryBaseUrl(): string {
-  // Check for explicit connector URL first
-  const connectorUrl = import.meta.env.VITE_CONNECTOR_URL;
-  if (connectorUrl) {
-    return `${connectorUrl.replace(/\/$/, "")}/registry`;
-  }
-
-  return "https://services.compose.market/connector/registry";
+function getBrokerBaseUrl(): string {
+    const url = import.meta.env.VITE_CONNECTORS_URL;
+    if (url) {
+        return url.replace(/\/$/, "");
+    }
+    return "https://connectors.compose.market";
 }
 
-const REGISTRY_BASE = getRegistryBaseUrl();
+const BROKER_BASE = getBrokerBaseUrl();
 
-/** Server origin types (user-facing - excludes internal) */
-export type ServerOrigin = "mcp" | "goat" | "eliza";
+/** Server origin types (user-facing). */
+export type ServerOrigin = CanonicalConnectorOrigin | "eliza";
 
-/** Record type: agent (autonomous AI agents) or plugin (tools/connectors) */
+/** Record type: agent (autonomous AI agents) or plugin (tools/connectors). */
 export type RecordType = "agent" | "plugin";
 
-/** Unified server record from the registry */
+/** Unified server record. */
 export interface RegistryServer {
-  /** Unique registry ID: "mcp:{slug}", "goat:{slug}", etc */
-  registryId: string;
-  /** Primary origin: mcp, goat, or eliza (internal servers are excluded) */
-  origin: ServerOrigin;
-  /** Type classification: agent or plugin */
-  type: RecordType;
-  /** All sources that provide this plugin (for deduped entries) */
-  sources?: ServerOrigin[];
-  /** Canonical key used for deduplication */
-  canonicalKey?: string;
-  /** Human-readable name */
-  name: string;
-  /** Namespace (author/org) */
-  namespace: string;
-  /** URL-safe slug */
-  slug: string;
-  /** Description */
-  description: string;
-  /** Capability attributes */
-  attributes: string[];
-  /** Repository URL */
-  repoUrl?: string;
-  /** UI/directory URL */
-  uiUrl?: string;
-  /** Category for filtering */
-  category?: string;
-  /** Tags for search */
-  tags: string[];
-  /** Tool count */
-  toolCount: number;
-  /** Tools metadata */
-  tools?: Array<{
+    registryId: string;
+    origin: ServerOrigin;
+    type: RecordType;
+    sources?: ServerOrigin[];
+    canonicalKey?: string;
     name: string;
-    description?: string;
-    inputSchema?: Record<string, unknown>;
-  }>;
-  /** Whether this server is available (all env vars present) */
-  available: boolean;
-  /** Whether this plugin has live execution capability */
-  executable?: boolean;
-  /** Missing environment variables */
-  missingEnv?: string[];
-  /** Alternative registry IDs from other sources */
-  alternateIds?: string[];
-  /** Transport type: stdio, http, or docker */
-  transport?: "stdio" | "http" | "docker";
-  /** Docker image name (if containerized) */
-  image?: string;
-  /** Remote URL (if HTTP/SSE server) */
-  remoteUrl?: string;
+    namespace: string;
+    slug: string;
+    description: string;
+    attributes: string[];
+    repoUrl?: string;
+    uiUrl?: string;
+    category?: string;
+    tags: string[];
+    toolCount: number;
+    tools?: Array<{
+        name: string;
+        description?: string;
+        inputSchema?: Record<string, unknown>;
+    }>;
+    available: boolean;
+    executable?: boolean;
+    missingEnv?: string[];
+    alternateIds?: string[];
+    transport?: "stdio" | "http" | "docker";
+    image?: string;
+    remoteUrl?: string;
+    status?: ServedCatalogStatus;
+    credentialGated?: boolean;
 }
 
-/** Registry list response */
 export interface RegistryListResponse {
-  total: number;
-  offset: number;
-  limit: number;
-  servers: RegistryServer[];
+    total: number;
+    offset: number;
+    limit: number;
+    servers: RegistryServer[];
 }
 
-/** Registry search response */
 export interface RegistrySearchResponse {
-  query: string;
-  total: number;
-  servers: RegistryServer[];
+    query: string;
+    total: number;
+    servers: RegistryServer[];
 }
 
-/** Registry metadata */
 export interface RegistryMeta {
-  totalServers: number;
-  mcpServers: number;
-  goatServers: number;
-  elizaServers: number;
-  loadedAt: string | null;
+    totalServers: number;
+    toolsServers: number;
+    onchainServers: number;
+    loadedAt: string | null;
 }
 
-/** Options for listing servers */
 export interface ListServersOptions {
-  /** Filter by type (agent or plugin) */
-  type?: RecordType;
-  /** Filter by origin (supports comma-separated list, e.g. "goat,eliza") */
-  origin?: ServerOrigin | string;
-  category?: string;
-  available?: boolean;
-  limit?: number;
-  offset?: number;
+    type?: RecordType;
+    origin?: ServerOrigin | string;
+    category?: string;
+    available?: boolean;
+    limit?: number;
+    offset?: number;
+    enabled?: boolean;
 }
 
-/**
- * Fetch servers from the registry
- */
+export interface SearchServersOptions {
+    origin?: ServerOrigin | string;
+    category?: string;
+    enabled?: boolean;
+}
+
+type ServedCatalogStatus = "live" | "credential_gated";
+
+interface BrokerServerSummary {
+    slug: string;
+    origin: CanonicalConnectorOrigin;
+    name: string;
+    namespace: string;
+    description: string;
+    tags: string[];
+    category: string | null;
+    status: ServedCatalogStatus;
+    statefulness: "stateless" | "stateful" | "unknown";
+    cardVersion: string;
+    inspectedAt: string | null;
+}
+
+interface BrokerServerCard extends BrokerServerSummary {
+    repoUrl: string | null;
+    image: string | null;
+    compiledAt: string | null;
+    tools: Array<{ name: string; description?: string | null; inputSchema: Record<string, unknown> }>;
+    credentials: Array<{ varName: string; description?: string | null; obtainUrl?: string | null }>;
+}
+
+interface BrokerOnchainPlugin {
+    id: string;
+    name: string;
+    description: string;
+    toolCount: number;
+    tools: Array<{ name: string; description: string; parameters: Record<string, unknown>; pluginId: string }>;
+    requiresApiKey?: boolean;
+    apiKeyConfigured?: boolean;
+}
+
+interface BrokerOnchainResponse {
+    plugins: BrokerOnchainPlugin[];
+    status: {
+        initialized: boolean;
+        walletAddress: string | null;
+        chain: string;
+        chainId: number;
+        rpcUrl: string | null;
+        error: string | null;
+        totalTools: number;
+    };
+}
+
+interface BrokerToolsListResponse {
+    total: number;
+    offset: number;
+    limit: number;
+    servers: BrokerServerSummary[];
+}
+
+const DEFAULT_REGISTRY_PAGE_SIZE = 50;
+const MAX_TOOLS_PAGE_SIZE = 200;
+const MAX_SEARCH_RESULTS = 50;
+
+function summaryToRegistryServer(s: BrokerServerSummary): RegistryServer {
+    const binding = normalizeConnectorBinding({ registryId: s.slug, origin: s.origin });
+    return {
+        registryId: binding.registryId,
+        origin: binding.origin,
+        type: "plugin",
+        sources: [binding.origin],
+        canonicalKey: s.slug,
+        name: s.name,
+        namespace: s.namespace,
+        slug: s.slug,
+        description: s.description,
+        attributes: [],
+        category: s.category ?? undefined,
+        tags: s.tags,
+        toolCount: 0,
+        available: true,
+        executable: true,
+        status: s.status,
+        credentialGated: s.status === "credential_gated",
+    };
+}
+
+function cardToRegistryServer(s: BrokerServerCard): RegistryServer {
+    const binding = normalizeConnectorBinding({ registryId: s.slug, origin: s.origin });
+    return {
+        registryId: binding.registryId,
+        origin: binding.origin,
+        type: "plugin",
+        sources: [binding.origin],
+        canonicalKey: s.slug,
+        name: s.name,
+        namespace: s.namespace,
+        slug: s.slug,
+        description: s.description,
+        attributes: [],
+        repoUrl: s.repoUrl ?? undefined,
+        category: s.category ?? undefined,
+        tags: s.tags,
+        toolCount: s.tools.length,
+        tools: s.tools.map((t) => ({
+            name: t.name,
+            description: t.description ?? undefined,
+            inputSchema: t.inputSchema,
+        })),
+        available: true,
+        executable: true,
+        image: s.image ?? undefined,
+        missingEnv: s.credentials.map((c) => c.varName),
+        status: s.status,
+        credentialGated: s.status === "credential_gated",
+    };
+}
+
+function pluginToRegistryServer(p: BrokerOnchainPlugin): RegistryServer {
+    const binding = normalizeConnectorBinding({ registryId: p.id, origin: "onchain" });
+    return {
+        registryId: binding.registryId,
+        origin: binding.origin,
+        type: "plugin",
+        sources: [binding.origin],
+        canonicalKey: p.id,
+        name: p.name,
+        namespace: "onchain",
+        slug: p.id,
+        description: p.description,
+        attributes: [],
+        category: "defi",
+        tags: ["onchain", "defi"],
+        toolCount: p.toolCount,
+        tools: p.tools.map((t) => ({
+            name: t.name,
+            description: t.description,
+            inputSchema: t.parameters,
+        })),
+        available: true,
+        executable: true,
+    };
+}
+
 async function fetchServers(options: ListServersOptions = {}): Promise<RegistryListResponse> {
-  const params = new URLSearchParams();
-  if (options.type) params.set("type", options.type);
-  if (options.origin) params.set("origin", options.origin);
-  if (options.category) params.set("category", options.category);
-  if (options.available !== undefined) params.set("available", String(options.available));
-  if (options.limit) params.set("limit", String(options.limit));
-  if (options.offset) params.set("offset", String(options.offset));
+    const { enabled: _enabled, ...listOptions } = options;
+    const origins = (options.origin ? String(options.origin).split(",") : ["tools", "onchain"])
+        .map((origin) => normalizeConnectorBinding({ registryId: "placeholder", origin }).origin);
+    const requestedLimit = listOptions.limit;
+    const offset = listOptions.offset ?? 0;
+    const toolsLimit = Math.min(Math.max(1, requestedLimit ?? DEFAULT_REGISTRY_PAGE_SIZE), MAX_TOOLS_PAGE_SIZE);
 
-  const url = `${REGISTRY_BASE}/servers?${params}`;
-  const res = await fetch(url);
+    const tasks: Array<Promise<{ total: number; servers: RegistryServer[] }>> = [];
 
-  if (!res.ok) {
-    throw new Error(`Failed to fetch servers: ${res.status}`);
-  }
+    if (origins.includes("tools")) {
+        tasks.push(
+            (async () => {
+                const params = new URLSearchParams({ limit: String(toolsLimit), offset: String(offset) });
+                if (listOptions.category) params.set("category", listOptions.category);
+                const res = await fetch(`${BROKER_BASE}/tools?${params}`);
+                if (!res.ok) throw new Error(`Failed to fetch tools catalog: ${res.status}`);
+                const data = await res.json() as BrokerToolsListResponse;
+                return {
+                    total: data.total,
+                    servers: data.servers.map(summaryToRegistryServer),
+                };
+            })(),
+        );
+    }
 
-  return res.json();
+    if (origins.includes("onchain")) {
+        tasks.push(
+            fetch(`${BROKER_BASE}/onchain`).then(async (res) => {
+                if (!res.ok) return { total: 0, servers: [] };
+                const data = await res.json() as BrokerOnchainResponse;
+                return {
+                    total: data.plugins.length,
+                    servers: data.plugins.map(pluginToRegistryServer),
+                };
+            }),
+        );
+    }
+
+    const results = await Promise.all(tasks);
+
+    let merged: RegistryServer[] = [];
+    let total = 0;
+    for (const r of results) {
+        merged = merged.concat(r.servers);
+        total += r.total;
+    }
+
+    if (listOptions.category) {
+        merged = merged.filter((s) => s.category === listOptions.category);
+    }
+    if (listOptions.available !== undefined) {
+        merged = merged.filter((s) => s.available === listOptions.available);
+    }
+
+    return { total: merged.length, offset, limit: merged.length, servers: merged };
 }
 
 /**
- * Search servers in the registry
+ * Search the catalog across tools and onchain connectors.
  */
-async function searchServers(query: string, limit?: number): Promise<RegistrySearchResponse> {
-  const params = new URLSearchParams({ q: query });
-  if (limit !== undefined) params.set("limit", String(limit));
-  const url = `${REGISTRY_BASE}/servers/search?${params}`;
-  const res = await fetch(url);
-
-  if (!res.ok) {
-    throw new Error(`Failed to search servers: ${res.status}`);
-  }
-
-  return res.json();
+async function searchServers(query: string, limit = DEFAULT_REGISTRY_PAGE_SIZE, options: SearchServersOptions = {}): Promise<RegistrySearchResponse> {
+    const normalizedQuery = query.toLowerCase().trim();
+    if (normalizedQuery.length < 2) {
+        return { query: normalizedQuery, total: 0, servers: [] };
+    }
+    const { enabled: _enabled, ...searchOptions } = options;
+    const origins = (searchOptions.origin ? String(searchOptions.origin).split(",") : ["tools", "onchain"])
+        .map((origin) => normalizeConnectorBinding({ registryId: "placeholder", origin }).origin);
+    const boundedLimit = Math.min(Math.max(1, limit), MAX_SEARCH_RESULTS);
+    const params = new URLSearchParams({ q: query });
+    params.set("limit", String(boundedLimit));
+    const [toolsData, onchainData] = await Promise.all([
+        origins.includes("tools")
+            ? fetch(`${BROKER_BASE}/tools/search?${params}`).then(async (res) => {
+                if (!res.ok) throw new Error(`Failed to search servers: ${res.status}`);
+                return await res.json() as { query: string; total: number; servers: BrokerServerSummary[] };
+            })
+            : Promise.resolve<{ query: string; total: number; servers: BrokerServerSummary[] }>({ query: normalizedQuery, total: 0, servers: [] }),
+        origins.includes("onchain")
+            ? fetch(`${BROKER_BASE}/onchain`).then(async (res) => {
+                if (!res.ok) return null;
+                return await res.json() as BrokerOnchainResponse;
+            })
+            : Promise.resolve<BrokerOnchainResponse | null>(null),
+    ]);
+    const needle = normalizedQuery;
+    let onchainServers: RegistryServer[] = [];
+    if (onchainData) {
+        onchainServers = onchainData.plugins
+            .map(pluginToRegistryServer)
+            .filter((server) => (
+                server.name.toLowerCase().includes(needle)
+                || server.slug.toLowerCase().includes(needle)
+                || server.description.toLowerCase().includes(needle)
+                || server.tags.some((tag) => tag.toLowerCase().includes(needle))
+            ));
+    }
+    let servers = [
+        ...toolsData.servers.map(summaryToRegistryServer),
+        ...onchainServers,
+    ];
+    if (searchOptions.category) {
+        servers = servers.filter((server) => server.category === searchOptions.category);
+    }
+    servers = servers.slice(0, boundedLimit);
+    return {
+        query: toolsData.query || normalizedQuery,
+        total: toolsData.total + onchainServers.length,
+        servers,
+    };
 }
 
-/**
- * Fetch a single server by ID
- */
 async function fetchServer(registryId: string): Promise<RegistryServer> {
-  const url = `${REGISTRY_BASE}/servers/${encodeURIComponent(registryId)}`;
-  const res = await fetch(url);
-
-  if (!res.ok) {
-    throw new Error(`Failed to fetch server: ${res.status}`);
-  }
-
-  return res.json();
+    const binding = normalizeConnectorBinding(registryId, { defaultOrigin: "tools" });
+    if (binding.origin === "onchain") {
+        const id = binding.slug;
+        const res = await fetch(`${BROKER_BASE}/onchain/${encodeURIComponent(id)}`);
+        if (!res.ok) throw new Error(`Failed to fetch onchain connector: ${res.status}`);
+        const plugin = await res.json() as BrokerOnchainPlugin;
+        return pluginToRegistryServer(plugin);
+    }
+    const slug = binding.slug;
+    const res = await fetch(`${BROKER_BASE}/tools/${encodeURIComponent(slug)}`);
+    if (!res.ok) throw new Error(`Failed to fetch server: ${res.status}`);
+    const card = await res.json() as BrokerServerCard;
+    return cardToRegistryServer(card);
 }
 
-/**
- * Fetch registry metadata
- */
 async function fetchRegistryMeta(): Promise<RegistryMeta> {
-  const url = `${REGISTRY_BASE}/meta`;
-  const res = await fetch(url);
-
-  if (!res.ok) {
-    throw new Error(`Failed to fetch registry metadata: ${res.status}`);
-  }
-
-  return res.json();
+    const [toolsMeta, onchain] = await Promise.all([
+        fetch(`${BROKER_BASE}/tools/meta`).then((r) => r.json() as Promise<{ origins: Record<string, number>; total: number }>),
+        fetch(`${BROKER_BASE}/onchain`).then((r) => r.ok ? r.json() as Promise<BrokerOnchainResponse> : Promise.resolve(null)),
+    ]);
+    return {
+        totalServers: toolsMeta.total + (onchain?.plugins.length ?? 0),
+        toolsServers: toolsMeta.origins["tools"] ?? 0,
+        onchainServers: onchain?.plugins.length ?? 0,
+        loadedAt: new Date().toISOString(),
+    };
 }
 
-/**
- * Fetch all categories
- */
 async function fetchCategories(): Promise<string[]> {
-  const url = `${REGISTRY_BASE}/categories`;
-  const res = await fetch(url);
-
-  if (!res.ok) {
-    throw new Error(`Failed to fetch categories: ${res.status}`);
-  }
-
-  const data = await res.json();
-  return data.categories;
+    const res = await fetch(`${BROKER_BASE}/tools/categories`);
+    if (!res.ok) throw new Error(`Failed to fetch categories: ${res.status}`);
+    const data = await res.json() as { categories: string[] };
+    return data.categories;
 }
 
-/**
- * Fetch all tags
- */
 async function fetchTags(): Promise<string[]> {
-  const url = `${REGISTRY_BASE}/tags`;
-  const res = await fetch(url);
-
-  if (!res.ok) {
-    throw new Error(`Failed to fetch tags: ${res.status}`);
-  }
-
-  const data = await res.json();
-  return data.tags;
+    const res = await fetch(`${BROKER_BASE}/tools/tags`);
+    if (!res.ok) throw new Error(`Failed to fetch tags: ${res.status}`);
+    const data = await res.json() as { tags: string[] };
+    return data.tags;
 }
 
 // =============================================================================
 // Constants
 // =============================================================================
 
-const REGISTRY_STALE_TIME = 6 * 60 * 60 * 1000; // 6 hours (matches use-models.ts)
-const REGISTRY_GC_TIME = 12 * 60 * 60 * 1000; // 12 hours (keep in memory longer than stale)
-const METADATA_STALE_TIME = 5 * 60 * 1000; // 5 minutes for lightweight metadata
+const REGISTRY_STALE_TIME = 6 * 60 * 60 * 1000;
+const REGISTRY_GC_TIME = 12 * 60 * 60 * 1000;
+const REGISTRY_SEARCH_GC_TIME = 10 * 60 * 1000;
+const METADATA_STALE_TIME = 5 * 60 * 1000;
 const REGISTRY_CACHE_KEY = ["registry", "servers"] as const;
+const SEARCH_DEBOUNCE_MS = 250;
 
 // =============================================================================
 // Hooks
 // =============================================================================
 
-/**
- * Hook for fetching servers from the registry
- * 
- * Uses 6-hour staleTime for large registry payloads.
- * Options are serialized for stable cache keys.
- */
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+    const [debounced, setDebounced] = useState(value);
+
+    useEffect(() => {
+        const timeout = window.setTimeout(() => setDebounced(value), delayMs);
+        return () => window.clearTimeout(timeout);
+    }, [delayMs, value]);
+
+    return debounced;
+}
+
 export function useRegistryServers(options: ListServersOptions = {}) {
-  const queryClient = useQueryClient();
+    const queryClient = useQueryClient();
+    const { enabled = true, ...listOptions } = options;
 
-  // Serialize options for stable query key (prevents cache misses from object reference changes)
-  const serializedOptions = JSON.stringify(options);
-  const queryKey = useMemo(
-    () => [...REGISTRY_CACHE_KEY, serializedOptions],
-    [serializedOptions]
-  );
+    const serializedOptions = JSON.stringify(listOptions);
+    const queryKey = useMemo(
+        () => [...REGISTRY_CACHE_KEY, serializedOptions],
+        [serializedOptions],
+    );
 
-  const query = useQuery({
-    queryKey,
-    queryFn: () => fetchServers(options),
-    staleTime: REGISTRY_STALE_TIME,
-    gcTime: REGISTRY_GC_TIME,
-  });
+    const query = useQuery({
+        queryKey,
+        queryFn: () => fetchServers(listOptions),
+        enabled,
+        staleTime: REGISTRY_STALE_TIME,
+        gcTime: REGISTRY_GC_TIME,
+    });
 
-  // Manual refresh (for refresh button) - named distinctly to avoid collision with query.refetch
-  const forceRefresh = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: REGISTRY_CACHE_KEY });
-  }, [queryClient]);
+    const forceRefresh = useCallback(async () => {
+        await queryClient.invalidateQueries({ queryKey: REGISTRY_CACHE_KEY });
+    }, [queryClient]);
 
-  return {
-    ...query,
-    forceRefresh,
-  };
+    return {
+        ...query,
+        forceRefresh,
+    };
 }
 
-/**
- * Hook for searching servers
- * Uses 5-minute staleTime for search results.
- */
-export function useRegistrySearch(query: string, limit?: number) {
-  return useQuery({
-    queryKey: ["registry", "search", query, limit],
-    queryFn: () => searchServers(query, limit),
-    enabled: query.length > 0,
-    staleTime: METADATA_STALE_TIME,
-    gcTime: REGISTRY_GC_TIME, // Keep search results cached longer
-  });
+export function useRegistrySearch(query: string, limit = DEFAULT_REGISTRY_PAGE_SIZE, options: SearchServersOptions = {}) {
+    const trimmedQuery = query.trim();
+    const debouncedQuery = useDebouncedValue(trimmedQuery, SEARCH_DEBOUNCE_MS);
+    const { enabled = true, ...searchOptions } = options;
+    const serializedOptions = JSON.stringify(searchOptions);
+
+    return useQuery({
+        queryKey: ["registry", "search", debouncedQuery, limit, serializedOptions],
+        queryFn: () => searchServers(debouncedQuery, limit, searchOptions),
+        enabled: enabled && debouncedQuery.length >= 2,
+        staleTime: METADATA_STALE_TIME,
+        gcTime: REGISTRY_SEARCH_GC_TIME,
+    });
 }
 
-/**
- * Hook for fetching a single server
- */
 export function useRegistryServer(registryId: string | null) {
-  return useQuery({
-    queryKey: ["registry", "server", registryId],
-    queryFn: () => fetchServer(registryId!),
-    enabled: !!registryId,
-    staleTime: REGISTRY_STALE_TIME,
-    gcTime: REGISTRY_GC_TIME,
-  });
+    return useQuery({
+        queryKey: ["registry", "server", registryId],
+        queryFn: () => fetchServer(registryId!),
+        enabled: !!registryId,
+        staleTime: REGISTRY_STALE_TIME,
+        gcTime: REGISTRY_GC_TIME,
+    });
 }
 
-/**
- * Hook for registry metadata
- */
 export function useRegistryMeta() {
-  return useQuery({
-    queryKey: ["registry", "meta"],
-    queryFn: fetchRegistryMeta,
-    staleTime: METADATA_STALE_TIME,
-    gcTime: REGISTRY_GC_TIME,
-  });
+    return useQuery({
+        queryKey: ["registry", "meta"],
+        queryFn: fetchRegistryMeta,
+        staleTime: METADATA_STALE_TIME,
+        gcTime: REGISTRY_GC_TIME,
+    });
 }
 
-/**
- * Hook for categories
- */
 export function useRegistryCategories() {
-  return useQuery({
-    queryKey: ["registry", "categories"],
-    queryFn: fetchCategories,
-    staleTime: REGISTRY_STALE_TIME,
-    gcTime: REGISTRY_GC_TIME,
-  });
+    return useQuery({
+        queryKey: ["registry", "categories"],
+        queryFn: fetchCategories,
+        staleTime: REGISTRY_STALE_TIME,
+        gcTime: REGISTRY_GC_TIME,
+    });
 }
 
-/**
- * Hook for tags
- */
 export function useRegistryTags() {
-  return useQuery({
-    queryKey: ["registry", "tags"],
-    queryFn: fetchTags,
-    staleTime: REGISTRY_STALE_TIME,
-    gcTime: REGISTRY_GC_TIME,
-  });
+    return useQuery({
+        queryKey: ["registry", "tags"],
+        queryFn: fetchTags,
+        staleTime: REGISTRY_STALE_TIME,
+        gcTime: REGISTRY_GC_TIME,
+    });
 }
 
 // =============================================================================
 // Utility Functions
 // =============================================================================
 
-/** Origin color mapping */
+function registryServerTextMatches(server: RegistryServer, query: string): boolean {
+    return server.name.toLowerCase().includes(query)
+        || server.slug.toLowerCase().includes(query)
+        || server.registryId.toLowerCase().includes(query)
+        || server.description.toLowerCase().includes(query)
+        || server.tags.some((tag) => tag.toLowerCase().includes(query));
+}
+
+export function mergeRegistrySearchResults(
+    query: string,
+    semanticServers: RegistryServer[] | undefined,
+    allServers: RegistryServer[],
+): RegistryServer[] {
+    const normalized = query.toLowerCase().trim();
+    if (!normalized) return allServers;
+    const byId = new Map<string, RegistryServer>();
+    for (const server of semanticServers ?? []) byId.set(server.registryId, server);
+    for (const server of allServers) {
+        if (registryServerTextMatches(server, normalized)) byId.set(server.registryId, server);
+    }
+    return [...byId.values()];
+}
+
 export const ORIGIN_COLORS: Record<ServerOrigin, string> = {
-  mcp: "purple",
-  goat: "green",
-  eliza: "fuchsia",
+    tools: "purple",
+    onchain: "green",
+    eliza: "orange",
 };
 
-/**
- * Get badge variant for origin
- */
 export function getOriginBadgeVariant(origin: ServerOrigin): "default" | "secondary" | "outline" {
-  switch (origin) {
-    case "goat":
-    case "eliza":
-      return "secondary";
-    default:
-      return "outline";
-  }
+    switch (origin) {
+        case "onchain":
+            return "secondary";
+        default:
+            return "outline";
+    }
 }
 
-/**
- * Get display label for origin
- */
 export function getOriginLabel(origin: ServerOrigin): string {
-  switch (origin) {
-    case "mcp":
-      return "MCP";
-    case "goat":
-      return "GOAT";
-    case "eliza":
-      return "ElizaOS";
-    default:
-      return origin;
-  }
+    switch (origin) {
+        case "tools":
+            return "Tools";
+        case "onchain":
+            return "Onchain";
+        case "eliza":
+            return "Eliza";
+        default:
+            return origin;
+    }
 }
 
-/**
- * Get icon name for origin
- */
-export function getOriginIcon(origin: ServerOrigin): "server" | "coins" | "bot" {
-  switch (origin) {
-    case "goat":
-      return "coins";
-    case "eliza":
-      return "bot";
-    default:
-      return "server";
-  }
+export function getOriginIcon(origin: ServerOrigin): "server" | "coins" {
+    switch (origin) {
+        case "onchain":
+            return "coins";
+        case "eliza":
+            return "server";
+        default:
+            return "server";
+    }
 }
 
-/**
- * Check if server has remote capability
- */
 export function isRemoteCapable(server: RegistryServer): boolean {
-  return server.attributes.includes("hosting:remote-capable");
+    return server.attributes.includes("hosting:remote-capable");
 }
 
-/**
- * Format tool count
- */
 export function formatToolCount(count: number): string {
-  if (count === 0) return "No tools";
-  if (count === 1) return "1 tool";
-  return `${count} tools`;
+    if (count === 0) return "No tools";
+    if (count === 1) return "1 tool";
+    return `${count} tools`;
 }

@@ -46,7 +46,6 @@ export function ConnectorDetailDialog({
     const [testResult, setTestResult] = useState<{ success: boolean; content?: unknown; error?: string } | null>(null);
     const [dynamicTools, setDynamicTools] = useState<Array<{ name: string; description?: string }>>([]);
 
-    // Fetch tools dynamically for MCP servers that don't have pre-cached tools
     useEffect(() => {
         if (!server || !open) return;
 
@@ -55,10 +54,9 @@ export function ConnectorDetailDialog({
         setTestResult(null);
         setDynamicTools([]);
 
-        // Only fetch dynamically for MCP servers without pre-cached tools
-        if (server.origin === "mcp" && (!server.tools || server.tools.length === 0)) {
-            import("@/lib/services").then(({ fetchMcpServerTools }) => {
-                fetchMcpServerTools(server.slug)
+        if (server.origin === "tools" && (!server.tools || server.tools.length === 0)) {
+            import("@/lib/services").then(({ fetchToolsConnectorTools }) => {
+                fetchToolsConnectorTools(server.slug)
                     .then((tools) => {
                         setDynamicTools(tools);
                         if (tools.length > 0) {
@@ -84,7 +82,7 @@ export function ConnectorDetailDialog({
 
     const getOriginStyle = () => {
         switch (server.origin) {
-            case "goat": return { bg: "bg-green-500/10", border: "border-green-500/30", text: "text-green-400" };
+            case "onchain": return { bg: "bg-green-500/10", border: "border-green-500/30", text: "text-green-400" };
             case "eliza": return { bg: "bg-fuchsia-500/10", border: "border-fuchsia-500/30", text: "text-fuchsia-400" };
             default: return { bg: "bg-purple-500/10", border: "border-purple-500/30", text: "text-purple-400" };
         }
@@ -171,7 +169,7 @@ export function ConnectorDetailDialog({
                 <DialogHeader>
                     <div className="flex items-center gap-3">
                         <div className={`w-10 h-10 rounded-sm flex items-center justify-center border ${style.bg} ${style.border}`}>
-                            {server.origin === "goat" ? (
+                            {server.origin === "onchain" ? (
                                 <Zap className={`w-5 h-5 ${style.text}`} />
                             ) : server.origin === "eliza" ? (
                                 <Plug className={`w-5 h-5 ${style.text}`} />
@@ -195,8 +193,8 @@ export function ConnectorDetailDialog({
                     {/* Badges */}
                     <div className="flex flex-wrap gap-2">
                         <Badge className={`${style.bg} ${style.text}`}>
-                            {server.origin === "goat" ? "GOAT SDK" :
-                                server.origin === "eliza" ? "ElizaOS" : "MCP"}
+                            {server.origin === "onchain" ? "Onchain" :
+                                server.origin === "eliza" ? "ElizaOS" : "Tools"}
                         </Badge>
                         {server.category && (
                             <Badge variant="outline">{server.category}</Badge>

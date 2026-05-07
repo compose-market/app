@@ -69,10 +69,9 @@ export default function Home() {
 
         {/* Stats Dashboard */}
         <section className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-          <StatCard label="Total Agents" value="8,420" trend="+12%" icon={Cpu} />
-          <StatCard label="Workflows Active" value="1,204" trend="+5%" icon={Layers} />
-          <StatCard label="24h Volume" value="$2.4M" trend="+8%" icon={Zap} />
-          <StatCard label="Network Load" value="42%" trend="-2%" icon={Hexagon} />
+          <StatCard label="Total Agents" value="54" trend="+2" icon={Cpu} />
+          <StatCard label="x402 Workflows" value="5885" trend="+35" icon={Layers} />
+          <StatCard label="Downloads" value="2258" trend="+26" icon={Zap} />
         </section>
 
         {/* Features Grid */}

@@ -1,11 +1,11 @@
 /**
  * Connector Picker Component
- * 
- * Unified search across MCP, GOAT, and Eliza plugin registries.
+ *
+ * Unified search across tools, onchain, and Eliza registries.
  * Single-click adds plugin to canvas, drag-drop also supported.
  */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -28,22 +28,20 @@ export function ConnectorPicker({ onSelect }: ConnectorPickerProps) {
     const [detailServer, setDetailServer] = useState<RegistryServer | null>(null);
     const [detailOpen, setDetailOpen] = useState(false);
 
-    // Fetch all servers with search (only plugins, not agents)
-    const { data: searchData, isLoading: isSearching } = useRegistrySearch(
-        searchQuery,
-        30
-    );
+    const searchReady = searchQuery.trim().length >= 2;
+    const { data: searchData, isLoading: isSearching } = useRegistrySearch(searchQuery, 50);
 
-    // Fetch all servers when no search (only plugins)
     const { data: allData, isLoading: isLoadingAll } = useRegistryServers({
         type: "plugin",
-        limit: 50,
     });
 
-    const servers = searchQuery.trim()
-        ? searchData?.servers || []
-        : allData?.servers || [];
-    const isLoading = searchQuery.trim() ? isSearching : isLoadingAll;
+    const allServers = allData?.servers || [];
+    const servers = useMemo(() => (
+        searchReady
+            ? searchData?.servers ?? []
+            : allServers
+    ), [allServers, searchData?.servers, searchReady]);
+    const isLoading = searchReady ? isSearching && servers.length === 0 : isLoadingAll;
 
     // Open detail dialog
     const handleShowDetails = (server: RegistryServer, e: React.MouseEvent) => {
@@ -54,8 +52,8 @@ export function ConnectorPicker({ onSelect }: ConnectorPickerProps) {
 
     const getOriginBadge = (origin: string) => {
         switch (origin) {
-            case "mcp": return <Badge variant="secondary" className="text-[8px] h-4 px-1">MCP</Badge>;
-            case "goat": return <Badge variant="outline" className="text-[8px] h-4 px-1 border-green-500/50 text-green-400">GOAT</Badge>;
+            case "tools": return <Badge variant="secondary" className="text-[8px] h-4 px-1">Tools</Badge>;
+            case "onchain": return <Badge variant="outline" className="text-[8px] h-4 px-1 border-green-500/50 text-green-400">Onchain</Badge>;
             case "eliza": return <Badge variant="outline" className="text-[8px] h-4 px-1 border-fuchsia-500/50 text-fuchsia-400">Eliza</Badge>;
             default: return null;
         }
@@ -69,7 +67,7 @@ export function ConnectorPicker({ onSelect }: ConnectorPickerProps) {
                     SEARCH TOOLS
                 </Label>
                 <Input
-                    placeholder="Search connectors, plugins, MCPs..."
+                    placeholder="Search connectors and tools..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="h-8 text-xs bg-background/50 border-sidebar-border"

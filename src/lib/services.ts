@@ -1,18 +1,17 @@
 /**
  * Backend Service API Client
  *
- * Provides typed functions for interacting with:
- * - Connector Hub (https://services.compose.market/connector)
- * - Sandbox Service (https://services.compose.market/sandbox)
- * - Exporter Service (https://services.compose.market/exporter)
+ * Talks to:
+ * - Connectors broker (https://connectors.compose.market) — tools catalog,
+ *   tool execution, onchain connectors
  * - API Gateway (https://api.compose.market) — via the shared SDK singleton
  */
 
 import { sdk } from "./sdk";
+import { normalizeConnectorBinding } from "./connectors";
 
 // Service URLs from environment or defaults
-const CONNECTOR_URL = import.meta.env.VITE_CONNECTOR_URL || "https://services.compose.market/connector";
-const EXPORTER_URL = import.meta.env.VITE_EXPORTER_URL || "https://services.compose.market/exporter";
+const CONNECTORS_URL = import.meta.env.VITE_CONNECTORS_URL || "https://connectors.compose.market";
 
 // =============================================================================
 // Types
@@ -74,54 +73,78 @@ export interface WorkflowRunResult {
   logs: StepLog[];
 }
 
-export interface ExportOptions {
-  workflow: WorkflowDefinition;
-  projectName?: string;
-  description?: string;
-  author?: string;
+// =============================================================================
+// Connectors broker catalog + execution
+// =============================================================================
+
+interface ServerSummary {
+  slug: string;
+  origin: "tools" | "onchain";
+  name: string;
+  namespace: string;
+  description: string;
+  tags: string[];
+  category: string | null;
+  status: "live" | "credential_gated";
+  statefulness: "stateless" | "stateful" | "unknown";
+  cardVersion: string;
+  inspectedAt: string | null;
 }
 
-// =============================================================================
-// Connector Hub API
-// =============================================================================
+interface ServerListResponse {
+  total: number;
+  offset: number;
+  limit: number;
+  servers: ServerSummary[];
+}
 
-/**
- * Fetch list of available connectors
- */
-export async function getConnectors(): Promise<ConnectorInfo[]> {
-  const res = await fetch(`${CONNECTOR_URL}/connectors`);
+const DEFAULT_CONNECTOR_LIMIT = 50;
+
+async function fetchToolSummariesPage(limit = DEFAULT_CONNECTOR_LIMIT, offset = 0): Promise<ServerSummary[]> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  const res = await fetch(`${CONNECTORS_URL}/tools?${params}`);
   if (!res.ok) {
     throw new Error(`Failed to fetch connectors: ${res.status}`);
   }
-  const data = await res.json();
-  return data.connectors;
+  const data = await res.json() as ServerListResponse;
+  return data.servers || [];
 }
 
-/**
- * Fetch tools for a specific connector
- */
+export async function getConnectors(): Promise<ConnectorInfo[]> {
+  const servers = await fetchToolSummariesPage();
+  return servers.map((s) => ({
+    id: s.slug,
+    label: s.name,
+    description: s.description,
+    available: true,
+  }));
+}
+
 export async function getConnectorTools(connectorId: string): Promise<ConnectorTool[]> {
-  const res = await fetch(`${CONNECTOR_URL}/connectors/${encodeURIComponent(connectorId)}/tools`);
+  const res = await fetch(`${CONNECTORS_URL}/tools/${encodeURIComponent(connectorId)}`);
   if (!res.ok) {
     throw new Error(`Failed to fetch tools for ${connectorId}: ${res.status}`);
   }
-  const data = await res.json();
-  return data.tools;
+  const data = await res.json() as { tools?: ConnectorTool[] };
+  return data.tools || [];
 }
 
 /**
- * Call a tool on a connector directly
+ * Call a tool on a connector directly. Routes through api/ for x402.
  */
 export async function callConnectorTool(
   connectorId: string,
   toolName: string,
   args: Record<string, unknown>
 ): Promise<{ success: boolean; content: unknown; raw: unknown }> {
-  const res = await fetch(`${CONNECTOR_URL}/connectors/${encodeURIComponent(connectorId)}/call`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ toolName, args }),
-  });
+  const res = await sdk.fetch(
+    `/api/tools/${encodeURIComponent(connectorId)}/execute/${encodeURIComponent(toolName)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ args }),
+    },
+  );
 
   if (!res.ok) {
     const text = await res.text();
@@ -132,7 +155,7 @@ export async function callConnectorTool(
 }
 
 // =============================================================================
-// Plugin Execution API (GOAT, Eliza, MCP)
+// Connector execution API
 // =============================================================================
 
 export interface PluginExecutionResult {
@@ -145,140 +168,75 @@ export interface PluginExecutionResult {
   content?: unknown;
 }
 
-/**
- * Execute a GOAT plugin tool
- */
-export async function executeGoatPlugin(
+export async function executeOnchainConnector(
   pluginId: string,
   tool: string,
   args: Record<string, unknown>
 ): Promise<PluginExecutionResult> {
-  const res = await fetch(`${CONNECTOR_URL}/plugins/${encodeURIComponent(pluginId)}/execute`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ tool, args }),
-  });
-
+  const res = await sdk.fetch(
+    `/api/onchain/${encodeURIComponent(pluginId)}/execute/${encodeURIComponent(tool)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ args }),
+    },
+  );
   return res.json();
 }
 
-/**
- * Execute a spawned MCP server tool
- */
 export async function executeSpawnedServer(
   slug: string,
   tool: string,
   args: Record<string, unknown>
 ): Promise<PluginExecutionResult> {
-  const res = await fetch(`${CONNECTOR_URL}/mcp/servers/${encodeURIComponent(slug)}/call`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ tool, args }),
-  });
+  const res = await sdk.fetch(
+    `/api/tools/${encodeURIComponent(slug)}/execute/${encodeURIComponent(tool)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ args }),
+    },
+  );
 
-  const data = await res.json();
+  const data = await res.json() as { ok?: boolean; result?: unknown; kind?: string; message?: string };
   return {
-    success: data.success ?? !data.error,
+    success: Boolean(data.ok),
     pluginId: slug,
     tool,
-    content: data.content,
-    error: data.error,
+    content: data.result,
+    error: data.ok ? undefined : (data.message || data.kind),
   };
 }
 
-/**
- * Fetch tools from a spawned MCP server (on-demand)
- */
-export async function fetchMcpServerTools(
+export async function fetchToolsConnectorTools(
   serverSlug: string
 ): Promise<{ name: string; description?: string; inputSchema?: Record<string, unknown> }[]> {
-  const res = await fetch(`${CONNECTOR_URL}/mcp/servers/${encodeURIComponent(serverSlug)}/tools`);
-
+  const res = await fetch(`${CONNECTORS_URL}/tools/${encodeURIComponent(serverSlug)}`);
   if (!res.ok) {
     const data = await res.json().catch(() => ({ error: "Unknown error" }));
     throw new Error(data.error || `Failed to fetch tools: ${res.status}`);
   }
-
-  const data = await res.json();
+  const data = await res.json() as { tools?: ConnectorTool[] };
   return data.tools || [];
 }
 
-/**
- * Execute a spawned MCP server tool
- * Routes through api/ (API_BASE) for x402 payment handling
- */
-export async function executeMcpServer(
-  serverSlug: string,
-  tool: string,
-  args: Record<string, unknown>
-): Promise<PluginExecutionResult> {
-  // Route through api/ for x402 payment
-  const res = await sdk.fetch(`/api/mcp/servers/${encodeURIComponent(serverSlug)}/call`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ tool, args }),
-  });
-
-  const data = await res.json();
-  return {
-    success: data.success ?? !data.error,
-    pluginId: serverSlug,
-    tool,
-    content: data.content,
-    error: data.error || data.message,
-  };
-}
-
-/**
- * Fetch tools from an MCP server (spawns on-demand via MCP spawner)
- */
-export async function fetchRemoteMcpServerTools(serverSlug: string): Promise<ConnectorTool[]> {
+export async function fetchRemoteToolsConnectorTools(serverSlug: string): Promise<ConnectorTool[]> {
   try {
-    // Route through connector which proxies to MCP spawner
-    const res = await fetch(`${CONNECTOR_URL}/mcp/servers/${encodeURIComponent(serverSlug)}/tools`);
+    const res = await fetch(`${CONNECTORS_URL}/tools/${encodeURIComponent(serverSlug)}`);
     if (!res.ok) {
-      console.warn(`Failed to fetch MCP tools for ${serverSlug}: ${res.status}`);
+      console.warn(`Failed to fetch tools for ${serverSlug}: ${res.status}`);
       return [];
     }
-    const data = await res.json();
+    const data = await res.json() as { tools?: ConnectorTool[] };
     return data.tools || [];
   } catch (error) {
-    console.warn(`Error fetching MCP tools for ${serverSlug}:`, error);
+    console.warn(`Error fetching tools for ${serverSlug}:`, error);
     return [];
   }
 }
 
-// Alias for backwards compatibility
-export const fetchMCPServerTools = fetchRemoteMcpServerTools;
-
 /**
- * Execute an MCP server tool (spawns on-demand via MCP spawner)
- * Routes through api/ (API_BASE) for x402 payment handling
- */
-export async function executeRemoteMcpServer(
-  serverSlug: string,
-  tool: string,
-  args: Record<string, unknown>
-): Promise<PluginExecutionResult> {
-  // Route through api/ for x402 payment
-  const res = await sdk.fetch(`/api/mcp/servers/${encodeURIComponent(serverSlug)}/call`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ tool, args }),
-  });
-
-  const data = await res.json();
-  return {
-    success: data.success ?? !data.error,
-    pluginId: serverSlug,
-    tool,
-    content: data.content,
-    error: data.error || data.message,
-  };
-}
-
-/**
- * Execute a registry server tool based on origin
+ * Execute a registry server tool based on origin.
  */
 export async function executeRegistryTool(
   registryId: string,
@@ -286,130 +244,14 @@ export async function executeRegistryTool(
   slug: string,
   tool: string,
   args: Record<string, unknown>,
-  connectorId?: string
+  _connectorId?: string
 ): Promise<PluginExecutionResult> {
-  // Route to appropriate endpoint based on origin
-  if (origin === "goat") {
-    // Extract plugin ID from registry ID (goat:goat-erc20 -> goat-erc20)
-    const pluginId = registryId.replace("goat:", "");
-    return executeGoatPlugin(pluginId, tool, args);
+  const binding = normalizeConnectorBinding({ registryId, origin, slug }, { defaultOrigin: "tools" });
+  if (binding.origin === "onchain") {
+    const pluginId = binding.slug;
+    return executeOnchainConnector(pluginId, tool, args);
   }
-
-  if (origin === "mcp" || origin === "mcp") {
-    // Use remote SSE proxy endpoint for MCP servers
-    return executeRemoteMcpServer(slug, tool, args);
-  }
-
-  if (origin === "internal") {
-    // Internal connectors use the connector ID from entryPoint if available
-    const actualConnectorId = connectorId || registryId.replace("internal:compose-", "");
-    const result = await callConnectorTool(actualConnectorId, tool, args);
-    return {
-      success: result.success,
-      pluginId: actualConnectorId,
-      tool,
-      content: result.content,
-    };
-  }
-
-  // Default: try spawned MCP server (verified npm packages only)
-  return executeSpawnedServer(slug, tool, args);
-}
-
-// =============================================================================
-// Sandbox API
-// =============================================================================
-
-/**
- * Execute a workflow in the sandbox
- */
-export async function runWorkflow(
-  workflow: WorkflowDefinition,
-  input: Record<string, unknown> = {}
-): Promise<WorkflowRunResult> {
-  const res = await fetch(`sandbox/run`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ workflow, input }),
-  });
-
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({ error: "Unknown error" }));
-    throw new Error(data.error || `Workflow execution failed: ${res.status}`);
-  }
-
-  return res.json();
-}
-
-/**
- * Validate a workflow without executing
- */
-export async function validateWorkflow(
-  workflow: WorkflowDefinition
-): Promise<{ valid: boolean; errors: string[] }> {
-  const res = await fetch(`sandbox/validate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ workflow }),
-  });
-
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({ error: "Unknown error" }));
-    throw new Error(data.error || `Validation failed: ${res.status}`);
-  }
-
-  return res.json();
-}
-
-/**
- * Fetch connectors via sandbox proxy
- */
-export async function getSandboxConnectors(): Promise<ConnectorInfo[]> {
-  const res = await fetch(`sandbox/connectors`);
-  if (!res.ok) {
-    throw new Error(`Failed to fetch connectors: ${res.status}`);
-  }
-  const data = await res.json();
-  return data.connectors;
-}
-
-// =============================================================================
-// Exporter API
-// =============================================================================
-
-/**
- * Export a workflow as a downloadable zip file
- */
-export async function exportWorkflow(options: ExportOptions): Promise<Blob> {
-  const res = await fetch(`${EXPORTER_URL}/export/workflow`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(options),
-  });
-
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({ error: "Unknown error" }));
-    throw new Error(data.error || `Export failed: ${res.status}`);
-  }
-
-  return res.blob();
-}
-
-/**
- * Export and automatically trigger download
- */
-export async function downloadWorkflow(options: ExportOptions): Promise<void> {
-  const blob = await exportWorkflow(options);
-
-  // Create download link
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${options.projectName || options.workflow.name || "workflow"}.zip`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  return executeSpawnedServer(binding.slug, tool, args);
 }
 
 // =============================================================================
@@ -424,52 +266,30 @@ export interface ServiceHealth {
   error?: string;
 }
 
-export async function checkConnectorHealth(): Promise<ServiceHealth> {
+export async function checkConnectorsHealth(): Promise<ServiceHealth> {
   try {
-    const res = await fetch(`${CONNECTOR_URL}/health`);
-    return res.json();
+    const res = await fetch(`${CONNECTORS_URL}/`);
+    const data = await res.json() as { service?: string; ok?: boolean; timestamp?: string };
+    return {
+      status: data.ok ? "ok" : "error",
+      service: data.service || "connectors",
+      timestamp: data.timestamp,
+    };
   } catch (error) {
-    return { status: "error", service: "connector", error: String(error) };
+    return { status: "error", service: "connectors", error: String(error) };
   }
 }
 
-export async function checkSandboxHealth(): Promise<ServiceHealth> {
-  try {
-    const res = await fetch(`sandbox/health`);
-    return res.json();
-  } catch (error) {
-    return { status: "error", service: "sandbox", error: String(error) };
-  }
-}
-
-export async function checkExporterHealth(): Promise<ServiceHealth> {
-  try {
-    const res = await fetch(`${EXPORTER_URL}/health`);
-    return res.json();
-  } catch (error) {
-    return { status: "error", service: "exporter", error: String(error) };
-  }
-}
+// Backwards-compat alias used by callers that haven't been updated yet.
+export const checkConnectorHealth = checkConnectorsHealth;
 
 export async function checkAllServicesHealth(): Promise<{
   connector: ServiceHealth;
-  sandbox: ServiceHealth;
-  exporter: ServiceHealth;
   allHealthy: boolean;
 }> {
-  const [connector, sandbox, exporter] = await Promise.all([
-    checkConnectorHealth(),
-    checkSandboxHealth(),
-    checkExporterHealth(),
-  ]);
-
+  const connector = await checkConnectorsHealth();
   return {
     connector,
-    sandbox,
-    exporter,
-    allHealthy:
-      connector.status === "ok" &&
-      sandbox.status === "ok" &&
-      exporter.status === "ok",
+    allHealthy: connector.status === "ok",
   };
 }

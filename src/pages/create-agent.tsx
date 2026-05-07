@@ -47,7 +47,7 @@ import {
   loadSelectedCatalogModel,
   type SelectedCatalogModel,
 } from "@/lib/models";
-import { useRegistryServers, useRegistrySearch, type RegistryServer, type ServerOrigin } from "@/hooks/use-registry";
+import { useRegistrySearch, useRegistryServers, type RegistryServer, type ServerOrigin } from "@/hooks/use-registry";
 import {
   uploadAgentAvatar,
   uploadAgentCard,
@@ -162,21 +162,23 @@ export default function CreateAgent() {
     }
   }, []);
 
-  // Fetch plugins/MCPs
-  const { data: searchData, isLoading: isSearching } = useRegistrySearch(
-    pluginSearch,
-    20
-  );
-
-  const { data: defaultPlugins, isLoading: isLoadingDefault } = useRegistryServers({
-    origin: "goat,mcp",
-    limit: 30,
+  // Fetch connectors
+  const pluginSearchReady = pluginSearch.trim().length >= 2;
+  const { data: searchData, isLoading: isSearching } = useRegistrySearch(pluginSearch, 50, {
+    origin: "onchain,tools",
   });
 
-  const isLoadingPlugins = pluginSearch.trim() ? isSearching : isLoadingDefault;
-  const availablePlugins: RegistryServer[] = pluginSearch.trim()
-    ? (searchData?.servers ?? [])
-    : (defaultPlugins?.servers ?? []);
+  const { data: defaultPlugins, isLoading: isLoadingDefault } = useRegistryServers({
+    origin: "onchain,tools",
+  });
+
+  const defaultPluginServers = defaultPlugins?.servers ?? [];
+  const availablePlugins: RegistryServer[] = useMemo(() => (
+    pluginSearchReady
+      ? searchData?.servers ?? []
+      : defaultPluginServers
+  ), [defaultPluginServers, pluginSearchReady, searchData?.servers]);
+  const isLoadingPlugins = pluginSearchReady ? isSearching && availablePlugins.length === 0 : isLoadingDefault;
 
   // Precompute selected plugin IDs for O(1) lookups (Fix 7)
   const selectedIds = useMemo(() => new Set(selectedPlugins.map(p => p.id)), [selectedPlugins]);
@@ -200,16 +202,16 @@ export default function CreateAgent() {
 
   const getOriginColor = (origin: ServerOrigin) => {
     switch (origin) {
-      case "goat": return "border-green-500/50 text-green-400 bg-green-500/10";
-      case "mcp": return "border-cyan-500/50 text-cyan-400 bg-cyan-500/10";
+      case "onchain": return "border-green-500/50 text-green-400 bg-green-500/10";
+      case "tools": return "border-cyan-500/50 text-cyan-400 bg-cyan-500/10";
       default: return "border-slate-500/50 text-slate-400 bg-slate-500/10";
     }
   };
 
   const getOriginLabel = (origin: ServerOrigin) => {
     switch (origin) {
-      case "goat": return "GOAT";
-      case "mcp": return "MCP";
+      case "onchain": return "Onchain";
+      case "tools": return "Tools";
       default: return origin;
     }
   };
@@ -966,7 +968,7 @@ export default function CreateAgent() {
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                       <Input
-                        placeholder="Search plugins..."
+                        placeholder="Search connectors..."
                         value={pluginSearch}
                         onChange={(e) => {
                           setPluginSearch(e.target.value);
@@ -980,7 +982,7 @@ export default function CreateAgent() {
                       <div className="absolute z-50 w-full mt-1 bg-sidebar border border-sidebar-border rounded-sm shadow-lg">
                         <div className="flex items-center justify-between px-3 py-1.5 border-b border-sidebar-border">
                           <span className="text-[10px] font-mono text-muted-foreground uppercase">
-                            {pluginSearch ? "Search Results" : "Popular Plugins"}
+                            {pluginSearch ? "Search Results" : "Popular Connectors"}
                           </span>
                           <Link href="/registry">
                             <Button type="button" variant="ghost" size="sm" className="text-[10px] text-green-400 hover:text-green-300 h-auto py-0.5 px-1">
@@ -994,12 +996,12 @@ export default function CreateAgent() {
                               <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
                             </div>
                           ) : availablePlugins.length === 0 ? (
-                            <div className="py-6 text-center text-xs text-muted-foreground">No plugins found</div>
+                            <div className="py-6 text-center text-xs text-muted-foreground">No connectors found</div>
                           ) : (
                             <div className="p-1">
                               {availablePlugins.map(server => {
                                 const isSelected = selectedPlugins.some(p => p.id === server.registryId);
-                                const isTestable = server.origin === "goat";
+                                const isTestable = server.origin === "onchain";
                                 return (
                                   <button
                                     key={server.registryId}

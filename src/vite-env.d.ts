@@ -15,9 +15,7 @@ interface ImportMetaEnv {
   readonly VITE_RUNTIME_URL?: string;
   
   // Backend Services
-  readonly VITE_CONNECTOR_SERVICE_URL?: string;
-  readonly VITE_SANDBOX_SERVICE_URL?: string;
-  readonly VITE_EXPORTER_SERVICE_URL?: string;
+  readonly VITE_CONNECTORS_URL?: string;
 
   // Storage and knowledge
   readonly VITE_PINATA_JWT?: string;

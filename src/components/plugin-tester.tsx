@@ -1,8 +1,10 @@
 /**
  * Plugin Tester Component
- * 
- * Unified testing interface for GOAT, MCP, and Eliza plugins.
- * Extracts all plugin testing functionality from the playground page.
+ *
+ * Unified testing interface for onchain and tools connectors.
+ * Catalog reads go to the connectors broker
+ * (https://connectors.compose.market). Execution routes through api/ for
+ * x402 payment handling.
  */
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useActiveWallet } from "thirdweb/react";
@@ -24,7 +26,8 @@ import {
     CommandList,
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
-import { useRegistryServers } from "@/hooks/use-registry";
+import { useRegistryMeta, useRegistrySearch, useRegistryServers } from "@/hooks/use-registry";
+import { normalizeConnectorBinding } from "@/lib/connectors";
 import {
     Loader2,
     RefreshCw,
@@ -46,7 +49,7 @@ interface GoatTool {
     name: string;
     description: string;
     parameters: Record<string, unknown>;
-    example?: Record<string, unknown>;
+    pluginId: string;
 }
 
 interface PluginInfo {
@@ -56,6 +59,7 @@ interface PluginInfo {
     toolCount: number;
     requiresApiKey?: boolean;
     apiKeyConfigured?: boolean;
+    tools: GoatTool[];
 }
 
 interface PluginResult {
@@ -67,59 +71,32 @@ interface PluginResult {
     txHash?: string;
     explorer?: string;
     executedBy?: string;
-    source?: "goat" | "mcp" | "eliza";
+    source?: "onchain" | "tools";
     executionTime?: number;
-}
-
-interface ElizaPlugin {
-    id: string;
-    package: string;
-    source?: string;
-    description?: string;
-    version?: string;
-    supports?: {
-        v0: boolean;
-        v1: boolean;
-    };
-}
-
-interface ElizaActionParameter {
-    name: string;
-    type: "string" | "number" | "boolean" | "object" | "array";
-    description: string;
-    required: boolean;
-    default?: unknown;
-    enum?: string[];
-    example?: unknown;
-}
-
-interface ElizaAction {
-    name: string;
-    description: string;
-    similes: string[];
-    parameters: ElizaActionParameter[];
-    examples: Array<{ input: string; output?: string }>;
-}
-
-interface ElizaPluginsResponse {
-    count: number;
-    plugins: ElizaPlugin[];
-}
-
-interface ElizaActionsResponse {
-    pluginId: string;
-    package: string;
-    description?: string;
-    actionCount: number;
-    actions: ElizaAction[];
 }
 
 interface GoatStatus {
     initialized: boolean;
     walletAddress: string | null;
     chain: string | null;
+    chainId: number | null;
+    rpcUrl: string | null;
+    error: string | null;
     totalTools: number;
     plugins: PluginInfo[];
+}
+
+interface OnchainResponse {
+    plugins: PluginInfo[];
+    status: {
+        initialized: boolean;
+        walletAddress: string | null;
+        chain: string;
+        chainId: number;
+        rpcUrl: string | null;
+        error: string | null;
+        totalTools: number;
+    };
 }
 
 interface McpTool {
@@ -128,15 +105,18 @@ interface McpTool {
     inputSchema: Record<string, unknown>;
 }
 
-interface McpToolsResponse {
-    server: string;
-    toolCount: number;
+interface McpServerCard {
+    slug: string;
+    name: string;
+    description: string;
+    status: "live" | "credential_gated";
     tools: McpTool[];
+    credentials: Array<{ varName: string; description?: string | null; obtainUrl?: string | null }>;
 }
 
-type PluginSource = "goat" | "mcp" | "eliza";
+type PluginSource = "onchain" | "tools";
 
-const CONNECTOR_URL = (import.meta.env.VITE_CONNECTOR_URL || "https://services.compose.market/connector").replace(/\/+$/, "");
+const CONNECTORS_URL = (import.meta.env.VITE_CONNECTORS_URL || "https://connectors.compose.market").replace(/\/+$/, "");
 
 // =============================================================================
 // Helpers
@@ -169,6 +149,11 @@ function generateDefaultArgs(schema: Record<string, unknown>): Record<string, un
         }
     }
     return result;
+}
+
+function normalizePluginSlug(value: string, source: PluginSource): string {
+    if (!value) return "";
+    return normalizeConnectorBinding(value, { defaultOrigin: source }).slug;
 }
 
 function formatSchemaHint(schema: Record<string, unknown>): string {
@@ -207,7 +192,7 @@ export function PluginTester({
     sessionActive,
     budgetRemaining,
     formatBudget,
-    initialSource = "goat",
+    initialSource = "tools",
     initialPlugin = "",
 }: PluginTesterProps) {
     const wallet = useActiveWallet();
@@ -225,58 +210,69 @@ export function PluginTester({
     const [executingPlugin, setExecutingPlugin] = useState(false);
     const [pluginError, setPluginError] = useState<string | null>(null);
 
-    // GOAT state
+    // Onchain state
     const [goatStatus, setGoatStatus] = useState<GoatStatus | null>(null);
     const [pluginTools, setPluginTools] = useState<GoatTool[]>([]);
     const [selectedPlugin, setSelectedPlugin] = useState<string>(
-        initialSource !== "mcp" ? initialPlugin : ""
+        initialSource === "onchain" ? normalizePluginSlug(initialPlugin, "onchain") : ""
     );
 
-    // MCP state - fetched from centralized registry
-    const mcpRegistryOptions = useMemo(() => ({ origin: 'mcp' as const, available: true }), []);
+    // Tools state
+    const [mcpServerPickerOpen, setMcpServerPickerOpen] = useState(false);
+    const mcpRegistryOptions = useMemo(() => ({
+        origin: "tools" as const,
+        limit: 50,
+        offset: 0,
+        enabled: pluginSource === "tools" && mcpServerPickerOpen,
+    }), [mcpServerPickerOpen, pluginSource]);
     const { data: mcpRegistryData, isLoading: mcpLoading, forceRefresh: forceRefreshMcpRegistry } = useRegistryServers(mcpRegistryOptions);
     const mcpServers = mcpRegistryData?.servers ?? [];
+    const { data: registryMeta } = useRegistryMeta();
+    const mcpCatalogTotal = registryMeta?.toolsServers ?? mcpRegistryData?.total ?? mcpServers.length;
     const [mcpServerSearch, setMcpServerSearch] = useState("");
+    const trimmedMcpServerSearch = mcpServerSearch.trim();
+    const mcpSearchReady = trimmedMcpServerSearch.length >= 2;
+    const { data: mcpSearchData, isLoading: mcpSearchLoading } = useRegistrySearch(trimmedMcpServerSearch, 50, {
+        origin: "tools",
+        enabled: pluginSource === "tools" && mcpServerPickerOpen,
+    });
+    const [selectedMcpCard, setSelectedMcpCard] = useState<McpServerCard | null>(null);
     const [mcpTools, setMcpTools] = useState<McpTool[]>([]);
     const [selectedMcpServer, setSelectedMcpServer] = useState<string>(
-        initialSource === "mcp" && initialPlugin ? `mcp:${initialPlugin}` : ""
+        initialSource === "tools" && initialPlugin ? normalizePluginSlug(initialPlugin, "tools") : ""
     );
 
-    // Eliza state
-    const [elizaPlugins, setElizaPlugins] = useState<ElizaPlugin[]>([]);
-    const [elizaActions, setElizaActions] = useState<ElizaAction[]>([]);
-    const [selectedElizaPlugin, setSelectedElizaPlugin] = useState<string>(
-        initialSource === "eliza" ? initialPlugin : ""
-    );
-    const [selectedElizaAction, setSelectedElizaAction] = useState<string>("");
-
-    // Filtered MCP servers
-    const MAX_MCP_DROPDOWN_ITEMS = 50;
+    // Filtered tool servers
     const filteredMcpServers = useMemo(() => {
-        if (!mcpServerSearch.trim()) {
-            return mcpServers.slice(0, MAX_MCP_DROPDOWN_ITEMS);
+        if (!mcpSearchReady) {
+            return mcpServers.slice(0, 50);
         }
-        const query = mcpServerSearch.toLowerCase().trim();
-        return mcpServers
-            .filter(s =>
-                s.name?.toLowerCase().includes(query) ||
-                s.slug?.toLowerCase().includes(query) ||
-                s.description?.toLowerCase().includes(query)
-            )
-            .slice(0, MAX_MCP_DROPDOWN_ITEMS);
-    }, [mcpServers, mcpServerSearch]);
+        return (mcpSearchData?.servers ?? [])
+            .filter((server) => server.origin === "tools")
+            .slice(0, 50);
+    }, [mcpSearchData?.servers, mcpSearchReady, mcpServers]);
 
     // ==========================================================================
-    // GOAT Handlers
+    // Onchain Handlers
     // ==========================================================================
 
     const fetchPluginStatus = async () => {
         setPluginsLoading(true);
         try {
-            const response = await fetch(`${CONNECTOR_URL}/plugins/status`);
+            const response = await fetch(`${CONNECTORS_URL}/onchain`);
             if (!response.ok) throw new Error(`Failed to fetch status: ${response.status}`);
-            const data = await response.json();
-            setGoatStatus(data);
+            const data = await response.json() as OnchainResponse;
+            const status: GoatStatus = {
+                initialized: data.status.initialized,
+                walletAddress: data.status.walletAddress,
+                chain: data.status.chain,
+                chainId: data.status.chainId,
+                rpcUrl: data.status.rpcUrl,
+                error: data.status.error,
+                totalTools: data.status.totalTools,
+                plugins: data.plugins,
+            };
+            setGoatStatus(status);
             if (!selectedPlugin && data.plugins?.length > 0) {
                 setSelectedPlugin(data.plugins[0].id);
             }
@@ -290,14 +286,16 @@ export function PluginTester({
 
     const fetchPluginTools = async (pluginId: string) => {
         try {
-            const response = await fetch(`${CONNECTOR_URL}/plugins/${encodeURIComponent(pluginId)}/tools`);
+            const slug = normalizePluginSlug(pluginId, "onchain");
+            const response = await fetch(`${CONNECTORS_URL}/onchain/${encodeURIComponent(slug)}`);
             if (!response.ok) throw new Error(`Failed to fetch tools: ${response.status}`);
-            const data = await response.json();
-            setPluginTools(data.tools || []);
-            if (data.tools?.length > 0) {
-                setSelectedTool(data.tools[0].name);
-                setToolSchema(data.tools[0].parameters);
-                const defaultArgs = data.tools[0].example || generateDefaultArgs(data.tools[0].parameters);
+            const data = await response.json() as PluginInfo;
+            const tools = data.tools || [];
+            setPluginTools(tools);
+            if (tools.length > 0) {
+                setSelectedTool(tools[0].name);
+                setToolSchema(tools[0].parameters);
+                const defaultArgs = generateDefaultArgs(tools[0].parameters);
                 setToolArgs(JSON.stringify(defaultArgs, null, 2));
             }
         } catch (err) {
@@ -313,13 +311,13 @@ export function PluginTester({
         const tool = pluginTools.find(t => t.name === toolName);
         if (tool) {
             setToolSchema(tool.parameters);
-            const defaultArgs = tool.example || generateDefaultArgs(tool.parameters);
+            const defaultArgs = generateDefaultArgs(tool.parameters);
             setToolArgs(JSON.stringify(defaultArgs, null, 2));
         }
     }, [pluginTools]);
 
     const handlePluginChange = useCallback((pluginId: string) => {
-        setSelectedPlugin(pluginId);
+        setSelectedPlugin(normalizePluginSlug(pluginId, "onchain"));
         setSelectedTool("");
         setToolSchema(null);
         setToolArgs("{}");
@@ -352,26 +350,26 @@ export function PluginTester({
                 throw new Error("Compose key session is required");
             }
 
-
             const headers: Record<string, string> = { "Content-Type": "application/json" };
-
-            const response = await sdk.fetch(`${CONNECTOR_URL}/plugins/${encodeURIComponent(selectedPlugin)}/execute`, {
-                method: "POST",
-                headers,
-                body: JSON.stringify({ tool: selectedTool, args }),
-            });
+            const response = await sdk.fetch(
+                `/api/onchain/${encodeURIComponent(normalizePluginSlug(selectedPlugin, "onchain"))}/execute/${encodeURIComponent(selectedTool)}`,
+                {
+                    method: "POST",
+                    headers,
+                    body: JSON.stringify({ args }),
+                },
+            );
 
             const data = await response.json();
             const result: PluginResult = {
-                success: data.success ?? response.ok,
+                success: data.ok ?? data.success ?? response.ok,
                 pluginId: selectedPlugin,
                 tool: selectedTool,
                 result: data.result,
-                error: data.error || data.hint,
-                txHash: data.txHash,
-                explorer: data.explorer,
-                executedBy: data.executedBy,
-                source: "goat",
+                error: data.ok === false ? (data.message || data.kind) : (data.error || data.hint),
+                txHash: data.result?.txHash || data.txHash,
+                executedBy: goatStatus?.walletAddress || undefined,
+                source: "onchain",
             };
 
             setPluginResults(prev => [...prev, result]);
@@ -380,32 +378,39 @@ export function PluginTester({
             setPluginError(errorMsg);
             setPluginResults(prev => [
                 ...prev,
-                { success: false, pluginId: selectedPlugin, tool: selectedTool, error: errorMsg, source: "goat" },
+                { success: false, pluginId: selectedPlugin, tool: selectedTool, error: errorMsg, source: "onchain" },
             ]);
         } finally {
             setExecutingPlugin(false);
         }
-    }, [selectedPlugin, selectedTool, toolArgs, executingPlugin, wallet, sessionActive, budgetRemaining]);
+    }, [selectedPlugin, selectedTool, toolArgs, executingPlugin, wallet, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, goatStatus, paymentChainId]);
 
     // ==========================================================================
-    // MCP Handlers
+    // Tools Handlers
     // ==========================================================================
 
     const fetchMcpTools = async (slug: string) => {
         setPluginsLoading(true);
         try {
-            const response = await fetch(`${CONNECTOR_URL}/mcp/servers/${encodeURIComponent(slug)}/tools`);
-            if (!response.ok) throw new Error(`Failed to fetch MCP tools: ${response.status}`);
-            const data: McpToolsResponse = await response.json();
+            const response = await fetch(`${CONNECTORS_URL}/tools/${encodeURIComponent(slug)}`);
+            if (!response.ok) throw new Error(`Failed to fetch tools: ${response.status}`);
+            const data = await response.json() as McpServerCard;
+            setSelectedMcpCard(data);
+            setPluginError(null);
             setMcpTools(data.tools || []);
             if (data.tools?.length > 0) {
                 setSelectedTool(data.tools[0].name);
                 setToolSchema(data.tools[0].inputSchema);
                 const defaultArgs = generateDefaultArgs(data.tools[0].inputSchema);
                 setToolArgs(JSON.stringify(defaultArgs, null, 2));
+            } else {
+                setSelectedTool("");
+                setToolSchema(null);
+                setToolArgs("{}");
             }
         } catch (err) {
-            console.error("Failed to fetch MCP tools:", err);
+            console.error("Failed to fetch tools:", err);
+            setSelectedMcpCard(null);
             setMcpTools([]);
             setPluginError(err instanceof Error ? err.message : "Failed to fetch tools");
         } finally {
@@ -414,10 +419,11 @@ export function PluginTester({
     };
 
     const handleMcpServerChange = useCallback((registryId: string) => {
-        setSelectedMcpServer(registryId);
+        setSelectedMcpServer(normalizePluginSlug(registryId, "tools"));
         setSelectedTool("");
         setToolSchema(null);
         setToolArgs("{}");
+        setSelectedMcpCard(null);
         setMcpTools([]);
     }, []);
 
@@ -432,11 +438,13 @@ export function PluginTester({
     }, [mcpTools]);
 
     const currentMcpTool = mcpTools.find(t => t.name === selectedTool);
+    const selectedMcpCredentials = selectedMcpCard?.credentials ?? [];
+    const mcpCredentialsRequired = pluginSource === "tools" && selectedMcpCard?.status === "credential_gated";
 
     const handleExecuteMcpTool = useCallback(async () => {
         if (!selectedMcpServer || !selectedTool || executingPlugin) return;
         if (!wallet) {
-            setPluginError("Connect wallet to execute MCP tools");
+            setPluginError("Connect wallet to execute tools");
             return;
         }
 
@@ -460,23 +468,25 @@ export function PluginTester({
                 throw new Error("Compose key session is required");
             }
 
-
+            const slug = normalizePluginSlug(selectedMcpServer, "tools");
             const headers: Record<string, string> = { "Content-Type": "application/json" };
-
-            const response = await sdk.fetch(`${CONNECTOR_URL}/mcp/servers/${encodeURIComponent(selectedMcpServer)}/call`, {
-                method: "POST",
-                headers,
-                body: JSON.stringify({ tool: selectedTool, args }),
-            });
+            const response = await sdk.fetch(
+                `/api/tools/${encodeURIComponent(slug)}/execute/${encodeURIComponent(selectedTool)}`,
+                {
+                    method: "POST",
+                    headers,
+                    body: JSON.stringify({ args }),
+                },
+            );
 
             const data = await response.json();
             const result: PluginResult = {
-                success: data.success ?? response.ok,
+                success: data.ok ?? response.ok,
                 pluginId: selectedMcpServer,
                 tool: selectedTool,
-                result: data.content,
-                error: data.error || data.message,
-                source: "mcp",
+                result: data.result,
+                error: data.ok === false ? (data.message || data.kind) : (data.error || data.hint),
+                source: "tools",
             };
 
             setPluginResults(prev => [...prev, result]);
@@ -485,158 +495,12 @@ export function PluginTester({
             setPluginError(errorMsg);
             setPluginResults(prev => [
                 ...prev,
-                { success: false, pluginId: selectedMcpServer, tool: selectedTool, error: errorMsg, source: "mcp" },
+                { success: false, pluginId: selectedMcpServer, tool: selectedTool, error: errorMsg, source: "tools" },
             ]);
         } finally {
             setExecutingPlugin(false);
         }
-    }, [selectedMcpServer, selectedTool, toolArgs, executingPlugin, wallet, sessionActive, budgetRemaining]);
-
-    // ==========================================================================
-    // Eliza Handlers
-    // ==========================================================================
-
-    const fetchElizaPlugins = async () => {
-        setPluginsLoading(true);
-        try {
-            const response = await fetch(`${CONNECTOR_URL}/eliza/plugins`);
-            if (!response.ok) throw new Error(`Failed to fetch Eliza plugins: ${response.status}`);
-            const data: ElizaPluginsResponse = await response.json();
-            setElizaPlugins(data.plugins || []);
-        } catch (err) {
-            console.error("Failed to fetch Eliza plugins:", err);
-            setPluginError(err instanceof Error ? err.message : "Failed to fetch Eliza plugins");
-        } finally {
-            setPluginsLoading(false);
-        }
-    };
-
-    const fetchElizaActions = async (pluginId: string) => {
-        setPluginsLoading(true);
-        setElizaActions([]);
-        try {
-            const response = await fetch(`${CONNECTOR_URL}/eliza/plugins/${encodeURIComponent(pluginId)}/actions`);
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.error || `Failed to fetch actions: ${response.status}`);
-            }
-            const data: ElizaActionsResponse = await response.json();
-            setElizaActions(data.actions || []);
-            if (data.actions?.length > 0) {
-                handleElizaActionChange(data.actions[0].name);
-            }
-        } catch (err) {
-            console.error("Failed to fetch Eliza actions:", err);
-            setPluginError(err instanceof Error ? err.message : "Failed to fetch actions");
-        } finally {
-            setPluginsLoading(false);
-        }
-    };
-
-    const handleElizaPluginChange = (pluginId: string) => {
-        setSelectedElizaPlugin(pluginId);
-        setSelectedElizaAction("");
-        setElizaActions([]);
-        setSelectedTool("");
-        setToolSchema(null);
-        setToolArgs("{}");
-        setPluginError(null);
-        if (pluginId) fetchElizaActions(pluginId);
-    };
-
-    const handleElizaActionChange = (actionName: string) => {
-        setSelectedElizaAction(actionName);
-        setSelectedTool(actionName);
-        setPluginError(null);
-
-        const action = elizaActions.find(a => a.name === actionName);
-        if (action) {
-            const defaultArgs: Record<string, unknown> = {};
-            for (const param of action.parameters) {
-                if (param.example !== undefined) {
-                    defaultArgs[param.name] = param.example;
-                } else if (param.default !== undefined) {
-                    defaultArgs[param.name] = param.default;
-                } else if (param.required) {
-                    switch (param.type) {
-                        case "string": defaultArgs[param.name] = param.enum?.[0] || ""; break;
-                        case "number": defaultArgs[param.name] = 0; break;
-                        case "boolean": defaultArgs[param.name] = false; break;
-                        case "array": defaultArgs[param.name] = []; break;
-                        case "object": defaultArgs[param.name] = {}; break;
-                    }
-                }
-            }
-            setToolArgs(JSON.stringify(defaultArgs, null, 2));
-            setToolSchema({
-                properties: action.parameters.reduce((acc, p) => {
-                    acc[p.name] = { type: p.type, description: p.description, enum: p.enum, default: p.default };
-                    return acc;
-                }, {} as Record<string, unknown>),
-                required: action.parameters.filter(p => p.required).map(p => p.name),
-            });
-        }
-    };
-
-    const handleElizaExecution = useCallback(async () => {
-        if (!selectedElizaPlugin || !selectedElizaAction || executingPlugin) return;
-        if (!wallet) {
-            setPluginError("Connect wallet to execute Eliza actions");
-            return;
-        }
-
-        let params: Record<string, unknown> = {};
-        try {
-            params = JSON.parse(toolArgs);
-        } catch (e) {
-            setPluginError(`Invalid JSON: ${e instanceof Error ? e.message : "Parse error"}`);
-            return;
-        }
-
-        setExecutingPlugin(true);
-        setPluginError(null);
-
-        try {
-            let activeComposeKeyToken = composeKeyToken;
-            if (!activeComposeKeyToken) {
-                activeComposeKeyToken = await ensureComposeKeyToken();
-            }
-            if (!activeComposeKeyToken) {
-                throw new Error("Compose key session is required");
-            }
-
-
-            const headers: Record<string, string> = { "Content-Type": "application/json" };
-
-            const response = await sdk.fetch(`${CONNECTOR_URL}/eliza/plugins/${encodeURIComponent(selectedElizaPlugin)}/execute`, {
-                method: "POST",
-                headers,
-                body: JSON.stringify({ action: selectedElizaAction, params }),
-            });
-
-            const data = await response.json();
-            const result: PluginResult = {
-                success: data.success ?? response.ok,
-                pluginId: selectedElizaPlugin,
-                tool: selectedElizaAction,
-                result: data.result || data.text,
-                error: data.error,
-                source: "eliza",
-                executionTime: data.executionTime,
-            };
-
-            setPluginResults(prev => [...prev, result]);
-        } catch (err) {
-            const errorMsg = err instanceof Error ? err.message : "Unknown error";
-            setPluginError(errorMsg);
-            setPluginResults(prev => [
-                ...prev,
-                { success: false, pluginId: selectedElizaPlugin, tool: selectedElizaAction, error: errorMsg, source: "eliza" },
-            ]);
-        } finally {
-            setExecutingPlugin(false);
-        }
-    }, [selectedElizaPlugin, selectedElizaAction, toolArgs, executingPlugin, wallet, sessionActive, budgetRemaining]);
+    }, [selectedMcpServer, selectedTool, toolArgs, executingPlugin, wallet, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, paymentChainId]);
 
     // ==========================================================================
     // Source Change Handler
@@ -648,11 +512,11 @@ export function PluginTester({
         setToolSchema(null);
         setToolArgs("{}");
         setPluginError(null);
-        if (source !== "goat") setSelectedPlugin("");
-        if (source !== "mcp") setSelectedMcpServer("");
-        if (source !== "eliza") {
-            setSelectedElizaPlugin("");
-            setSelectedElizaAction("");
+        if (source !== "onchain") setSelectedPlugin("");
+        if (source !== "tools") {
+            setSelectedMcpServer("");
+            setSelectedMcpCard(null);
+            setMcpTools([]);
         }
     }, []);
 
@@ -666,31 +530,23 @@ export function PluginTester({
     // ==========================================================================
 
     useEffect(() => {
-        if (pluginSource === "goat" && !goatStatus) {
+        if (pluginSource === "onchain" && !goatStatus) {
             fetchPluginStatus();
-        } else if (pluginSource === "eliza" && elizaPlugins.length === 0) {
-            fetchElizaPlugins();
         }
-    }, [pluginSource, goatStatus, elizaPlugins.length]);
+    }, [pluginSource, goatStatus]);
 
     useEffect(() => {
-        if (selectedMcpServer && pluginSource === "mcp") {
-            const slug = selectedMcpServer.replace(/^mcp:/, '');
+        if (selectedMcpServer && pluginSource === "tools") {
+            const slug = normalizePluginSlug(selectedMcpServer, "tools");
             if (slug) fetchMcpTools(slug);
         }
     }, [selectedMcpServer, pluginSource]);
 
     useEffect(() => {
-        if (selectedPlugin && pluginSource === "goat") {
+        if (selectedPlugin && pluginSource === "onchain") {
             fetchPluginTools(selectedPlugin);
         }
     }, [selectedPlugin, pluginSource]);
-
-    useEffect(() => {
-        if (selectedElizaPlugin && pluginSource === "eliza") {
-            fetchElizaActions(selectedElizaPlugin);
-        }
-    }, [selectedElizaPlugin, pluginSource]);
 
     useEffect(() => {
         resultsEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -711,29 +567,23 @@ export function PluginTester({
                             <SelectValue />
                         </SelectTrigger>
                         <SelectContent className="bg-zinc-900 border-zinc-700">
-                            <SelectItem value="goat">
+                            <SelectItem value="onchain">
                                 <div className="flex items-center gap-2">
-                                    <Badge className="bg-green-500/20 text-green-400 border-green-500/40 text-[10px] px-1.5">GOAT</Badge>
+                                    <Badge className="bg-green-500/20 text-green-400 border-green-500/40 text-[10px] px-1.5">Onchain</Badge>
                                     <span className="text-[10px] text-zinc-500">DeFi</span>
                                 </div>
                             </SelectItem>
-                            <SelectItem value="mcp">
+                            <SelectItem value="tools">
                                 <div className="flex items-center gap-2">
-                                    <Badge className="bg-purple-500/20 text-purple-400 border-purple-500/40 text-[10px] px-1.5">MCP</Badge>
+                                    <Badge className="bg-purple-500/20 text-purple-400 border-purple-500/40 text-[10px] px-1.5">Tools</Badge>
                                     <span className="text-[10px] text-zinc-500">Servers</span>
-                                </div>
-                            </SelectItem>
-                            <SelectItem value="eliza">
-                                <div className="flex items-center gap-2">
-                                    <Badge className="bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/40 text-[10px] px-1.5">Eliza</Badge>
-                                    <span className="text-[10px] text-zinc-500">AI Agents</span>
                                 </div>
                             </SelectItem>
                         </SelectContent>
                     </Select>
 
-                    {/* GOAT Plugin selector */}
-                    {pluginSource === "goat" && (
+                    {/* Onchain Plugin selector */}
+                    {pluginSource === "onchain" && (
                         <>
                             <Select value={selectedPlugin} onValueChange={handlePluginChange} disabled={!goatStatus?.plugins?.length}>
                                 <SelectTrigger className="w-full sm:w-40 lg:w-52 bg-zinc-900 border-zinc-700 h-9">
@@ -786,10 +636,10 @@ export function PluginTester({
                         </>
                     )}
 
-                    {/* MCP Server selector */}
-                    {pluginSource === "mcp" && (
+                    {/* Tools Server selector */}
+                    {pluginSource === "tools" && (
                         <>
-                            <Popover>
+                            <Popover open={mcpServerPickerOpen} onOpenChange={setMcpServerPickerOpen}>
                                 <PopoverTrigger asChild>
                                     <Button
                                         variant="outline"
@@ -800,7 +650,7 @@ export function PluginTester({
                                             {mcpLoading
                                                 ? "Loading..."
                                                 : selectedMcpServer
-                                                    ? mcpServers.find(s => s.registryId === selectedMcpServer)?.name || selectedMcpServer.replace(/^mcp:/, '')
+                                                    ? selectedMcpCard?.name || mcpServers.find(s => s.slug === normalizePluginSlug(selectedMcpServer, "tools"))?.name || normalizePluginSlug(selectedMcpServer, "tools")
                                                     : "Select server..."}
                                         </span>
                                         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
@@ -815,7 +665,11 @@ export function PluginTester({
                                             onValueChange={setMcpServerSearch}
                                         />
                                         <CommandList className="max-h-[300px]">
-                                            {mcpLoading ? (
+                                            {trimmedMcpServerSearch && !mcpSearchReady ? (
+                                                <div className="p-4 text-center text-zinc-500 text-sm">
+                                                    Type at least 2 characters to search
+                                                </div>
+                                            ) : mcpLoading || (mcpSearchReady && mcpSearchLoading && filteredMcpServers.length === 0) ? (
                                                 <div className="p-4 text-center text-zinc-500">
                                                     <Loader2 className="h-4 w-4 animate-spin mx-auto mb-2" />
                                                     Loading servers...
@@ -823,7 +677,7 @@ export function PluginTester({
                                             ) : filteredMcpServers.length === 0 ? (
                                                 <CommandEmpty>No servers match "{mcpServerSearch}"</CommandEmpty>
                                             ) : (
-                                                <CommandGroup heading={mcpServerSearch ? `${filteredMcpServers.length} matches` : `Showing ${filteredMcpServers.length} of ${mcpServers.length.toLocaleString()}`}>
+                                                <CommandGroup heading={trimmedMcpServerSearch ? `${filteredMcpServers.length.toLocaleString()} matches` : `${filteredMcpServers.length.toLocaleString()} servers`}>
                                                     {filteredMcpServers.map((server) => (
                                                         <CommandItem
                                                             key={server.registryId}
@@ -831,6 +685,7 @@ export function PluginTester({
                                                             onSelect={() => {
                                                                 handleMcpServerChange(server.registryId);
                                                                 setMcpServerSearch("");
+                                                                setMcpServerPickerOpen(false);
                                                             }}
                                                             className="cursor-pointer"
                                                         >
@@ -838,7 +693,7 @@ export function PluginTester({
                                                                 <Check
                                                                     className={cn(
                                                                         "h-4 w-4 shrink-0",
-                                                                        selectedMcpServer === server.registryId ? "opacity-100" : "opacity-0"
+                                                                        normalizePluginSlug(selectedMcpServer, "tools") === server.slug ? "opacity-100" : "opacity-0"
                                                                     )}
                                                                 />
                                                                 <div className="flex flex-col min-w-0 flex-1">
@@ -879,63 +734,15 @@ export function PluginTester({
                             </Select>
 
                             <div className="flex items-center gap-2 text-[10px] sm:text-xs shrink-0">
-                                <div className={cn("w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full", mcpServers.length > 0 ? "bg-purple-500" : "bg-zinc-500")} />
+                                <div className={cn("w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full", mcpServers.length > 0 || selectedMcpServer ? "bg-purple-500" : "bg-zinc-500")} />
                                 <span className="text-zinc-500">
-                                    {mcpServers.length > 0 ? `${mcpServers.length.toLocaleString()} servers` : "Loading..."}
-                                </span>
-                            </div>
-                        </>
-                    )}
-
-                    {/* Eliza Plugin selector */}
-                    {pluginSource === "eliza" && (
-                        <>
-                            <Select value={selectedElizaPlugin} onValueChange={handleElizaPluginChange} disabled={elizaPlugins.length === 0}>
-                                <SelectTrigger className="w-full sm:w-40 lg:w-52 bg-zinc-900 border-zinc-700 h-9">
-                                    <SelectValue placeholder={pluginsLoading ? "Loading..." : "Select plugin"} />
-                                </SelectTrigger>
-                                <SelectContent className="bg-zinc-900 border-zinc-700 max-h-80">
-                                    {elizaPlugins.length === 0 ? (
-                                        <div className="p-2 text-zinc-500 text-sm">No plugins available</div>
-                                    ) : (
-                                        elizaPlugins.map((plugin) => (
-                                            <SelectItem key={plugin.id} value={plugin.id}>
-                                                <div className="flex items-center gap-2">
-                                                    <span className="font-mono text-xs truncate max-w-24 sm:max-w-40">{plugin.id}</span>
-                                                    {plugin.version && (
-                                                        <Badge variant="outline" className="text-[9px] px-1 py-0 text-zinc-500 hidden sm:flex">{plugin.version}</Badge>
-                                                    )}
-                                                </div>
-                                            </SelectItem>
-                                        ))
-                                    )}
-                                </SelectContent>
-                            </Select>
-
-                            <Select value={selectedElizaAction} onValueChange={handleElizaActionChange} disabled={elizaActions.length === 0}>
-                                <SelectTrigger className="w-full sm:flex-1 lg:w-56 xl:w-72 bg-zinc-900 border-zinc-700 h-9">
-                                    <SelectValue placeholder={elizaActions.length === 0 ? "Select plugin first" : "Select action"} />
-                                </SelectTrigger>
-                                <SelectContent className="bg-zinc-900 border-zinc-700 max-h-96">
-                                    {elizaActions.length === 0 ? (
-                                        <div className="p-2 text-zinc-500 text-sm">No actions available</div>
-                                    ) : (
-                                        elizaActions.map((action) => (
-                                            <SelectItem key={action.name} value={action.name}>
-                                                <div className="flex flex-col py-0.5">
-                                                    <span className="font-mono text-xs">{action.name}</span>
-                                                    <span className="text-[10px] text-zinc-500 truncate max-w-48 sm:max-w-64">{action.description}</span>
-                                                </div>
-                                            </SelectItem>
-                                        ))
-                                    )}
-                                </SelectContent>
-                            </Select>
-
-                            <div className="flex items-center gap-2 text-[10px] sm:text-xs shrink-0">
-                                <div className={cn("w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full", elizaPlugins.length > 0 ? "bg-fuchsia-500" : "bg-zinc-500")} />
-                                <span className="text-zinc-500">
-                                    {elizaPlugins.length > 0 ? `${elizaPlugins.length} plugins` : "Loading..."}
+                                    {mcpCatalogTotal > 0
+                                        ? `${mcpCatalogTotal.toLocaleString()} servers`
+                                        : selectedMcpServer
+                                            ? "Server selected"
+                                            : mcpServerPickerOpen
+                                                ? "Loading..."
+                                                : "Open to browse"}
                                 </span>
                             </div>
                         </>
@@ -944,7 +751,7 @@ export function PluginTester({
                     <Button
                         variant="ghost"
                         size="icon"
-                        onClick={pluginSource === "goat" ? fetchPluginStatus : pluginSource === "eliza" ? fetchElizaPlugins : () => forceRefreshMcpRegistry()}
+                        onClick={pluginSource === "onchain" ? fetchPluginStatus : () => forceRefreshMcpRegistry()}
                         disabled={pluginsLoading || mcpLoading}
                         className="text-zinc-400 hover:text-white shrink-0 h-8 w-8 sm:h-9 sm:w-9"
                         title="Refresh"
@@ -961,15 +768,15 @@ export function PluginTester({
                         <div className="text-center py-8 text-zinc-500">
                             <Plug className="h-12 w-12 mx-auto mb-4 opacity-50" />
                             <p className="text-lg">
-                                Test {pluginSource === "goat" ? "GOAT DeFi" : pluginSource === "mcp" ? "MCP Server" : "Eliza AI"} Actions
+                                Test {pluginSource === "onchain" ? "Onchain" : "Tools"} Actions
                             </p>
                             <p className="text-sm mt-2">
                                 {sessionActive
-                                    ? `Budget: ${formatBudget(budgetRemaining)} • Select a ${pluginSource === "goat" ? "plugin" : pluginSource === "mcp" ? "server" : "plugin"} and ${pluginSource === "eliza" ? "action" : "tool"} to execute`
+                                    ? `Budget: ${formatBudget(budgetRemaining)} • Select a ${pluginSource === "onchain" ? "plugin" : "server"} and tool to execute`
                                     : "Start a session to begin"}
                             </p>
 
-                            {pluginSource === "goat" && goatStatus?.plugins && goatStatus.plugins.length > 0 && (
+                            {pluginSource === "onchain" && goatStatus?.plugins && goatStatus.plugins.length > 0 && (
                                 <div className="mt-6 text-left max-w-2xl mx-auto">
                                     <p className="text-xs text-zinc-600 uppercase tracking-wider mb-3">
                                         {goatStatus.plugins.length} Plugins • {goatStatus.totalTools} Tools
@@ -997,44 +804,14 @@ export function PluginTester({
                                 </div>
                             )}
 
-                            {pluginSource === "mcp" && mcpServers.length > 0 && (
+                            {pluginSource === "tools" && mcpCatalogTotal > 0 && (
                                 <div className="mt-6 text-left max-w-md mx-auto">
                                     <p className="text-xs text-zinc-600 uppercase tracking-wider mb-3 text-center">
-                                        {mcpServers.length.toLocaleString()} MCP Servers Available
+                                        {mcpCatalogTotal.toLocaleString()} Tool Servers Available
                                     </p>
                                     <p className="text-zinc-500 text-sm text-center">
-                                        Use the <span className="text-purple-400 font-mono">Select server</span> dropdown above to search and select from all available servers.
+                                        Use the <span className="text-purple-400 font-mono">Select server</span> dropdown above to search the catalog.
                                     </p>
-                                </div>
-                            )}
-
-                            {pluginSource === "eliza" && elizaPlugins.length > 0 && (
-                                <div className="mt-6 text-left max-w-2xl mx-auto">
-                                    <p className="text-xs text-zinc-600 uppercase tracking-wider mb-3">
-                                        {elizaPlugins.length} ElizaOS Plugins Available
-                                    </p>
-                                    <div className="grid grid-cols-2 gap-2 text-xs">
-                                        {elizaPlugins.slice(0, 8).map((plugin) => (
-                                            <button
-                                                key={plugin.id}
-                                                onClick={() => handleElizaPluginChange(plugin.id)}
-                                                className={cn(
-                                                    "bg-zinc-900 rounded-lg p-3 border text-left transition-colors",
-                                                    selectedElizaPlugin === plugin.id
-                                                        ? "border-fuchsia-500/50 bg-fuchsia-950/20"
-                                                        : "border-zinc-800 hover:border-zinc-700"
-                                                )}
-                                            >
-                                                <div className="flex items-center justify-between mb-1">
-                                                    <span className="text-fuchsia-400 font-mono text-xs">{plugin.id}</span>
-                                                    {plugin.version && (
-                                                        <Badge variant="outline" className="text-[9px] text-zinc-500">{plugin.version}</Badge>
-                                                    )}
-                                                </div>
-                                                <p className="text-zinc-500 text-[10px] line-clamp-2">{plugin.description || "No description"}</p>
-                                            </button>
-                                        ))}
-                                    </div>
                                 </div>
                             )}
 
@@ -1042,7 +819,7 @@ export function PluginTester({
                                 <div className="mt-6">
                                     <Loader2 className="h-5 w-5 animate-spin mx-auto text-cyan-400" />
                                     <p className="mt-2 text-sm">
-                                        Loading {pluginSource === "goat" ? "plugins" : pluginSource === "mcp" ? "servers" : "plugins"}...
+                                        Loading {pluginSource === "onchain" ? "plugins" : "servers"}...
                                     </p>
                                 </div>
                             )}
@@ -1063,14 +840,12 @@ export function PluginTester({
                                     <Badge
                                         className={cn(
                                             "text-[10px] px-1.5",
-                                            result.source === "mcp"
+                                            result.source === "tools"
                                                 ? "bg-purple-500/20 text-purple-400 border-purple-500/40"
-                                                : result.source === "eliza"
-                                                    ? "bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/40"
-                                                    : "bg-green-500/20 text-green-400 border-green-500/40"
+                                                : "bg-green-500/20 text-green-400 border-green-500/40"
                                         )}
                                     >
-                                        {result.source === "mcp" ? "MCP" : result.source === "eliza" ? "Eliza" : "GOAT"}
+                                        {result.source === "tools" ? "Tools" : "Onchain"}
                                     </Badge>
                                     <span className="font-mono text-sm text-zinc-300">
                                         {result.pluginId}/{result.tool}
@@ -1107,43 +882,57 @@ export function PluginTester({
             {/* Input with schema hints */}
             <div className="shrink-0 border-t border-zinc-800 p-4">
                 <div className="max-w-4xl mx-auto space-y-3">
-                    {/* Tool/Action description & schema hint */}
-                    {(pluginSource === "goat" ? currentTool : pluginSource === "mcp" ? currentMcpTool : elizaActions.find(a => a.name === selectedElizaAction)) && (
+                    {mcpCredentialsRequired && (
+                        <div className="rounded-lg border border-amber-700/60 bg-amber-950/20 p-3">
+                            <p className="text-amber-300 text-sm flex items-start gap-2">
+                                <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                                Credentials needed
+                            </p>
+                            <p className="mt-1 text-xs text-zinc-400">
+                                This server requires credentials before its tools can run.
+                            </p>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                                {selectedMcpCredentials.length > 0 ? (
+                                    selectedMcpCredentials.map((credential) => (
+                                        <Badge key={credential.varName} variant="outline" className="border-amber-500/50 text-amber-300">
+                                            {credential.varName}
+                                        </Badge>
+                                    ))
+                                ) : (
+                                    <span className="text-xs text-zinc-500">No specific env vars are recorded in the catalog.</span>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {(pluginSource === "onchain" ? currentTool : currentMcpTool) && (
                         <div className="bg-zinc-900/50 rounded-lg p-3 border border-zinc-800">
                             <div className="flex items-center gap-2 mb-2">
                                 <Terminal className={cn(
                                     "h-4 w-4",
-                                    pluginSource === "goat" ? "text-green-400" : pluginSource === "mcp" ? "text-purple-400" : "text-fuchsia-400"
+                                    pluginSource === "onchain" ? "text-green-400" : "text-purple-400"
                                 )} />
                                 <Badge
                                     className={cn(
                                         "text-[10px] px-1.5",
-                                        pluginSource === "goat"
+                                        pluginSource === "onchain"
                                             ? "bg-green-500/20 text-green-400 border-green-500/40"
-                                            : pluginSource === "mcp"
-                                                ? "bg-purple-500/20 text-purple-400 border-purple-500/40"
-                                                : "bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/40"
+                                            : "bg-purple-500/20 text-purple-400 border-purple-500/40"
                                     )}
                                 >
-                                    {pluginSource === "goat" ? "GOAT" : pluginSource === "mcp" ? "MCP" : "Eliza"}
+                                    {pluginSource === "onchain" ? "Onchain" : "Tools"}
                                 </Badge>
                                 <span className={cn(
                                     "font-mono text-sm",
-                                    pluginSource === "goat" ? "text-green-400" : pluginSource === "mcp" ? "text-purple-400" : "text-fuchsia-400"
+                                    pluginSource === "onchain" ? "text-green-400" : "text-purple-400"
                                 )}>
-                                    {pluginSource === "goat"
-                                        ? currentTool?.name
-                                        : pluginSource === "mcp"
-                                            ? currentMcpTool?.name
-                                            : elizaActions.find(a => a.name === selectedElizaAction)?.name}
+                                    {pluginSource === "onchain" ? currentTool?.name : currentMcpTool?.name}
                                 </span>
                             </div>
                             <p className="text-xs text-zinc-400 mb-2">
-                                {pluginSource === "goat"
+                                {pluginSource === "onchain"
                                     ? currentTool?.description
-                                    : pluginSource === "mcp"
-                                        ? (currentMcpTool?.description || "No description available")
-                                        : (elizaActions.find(a => a.name === selectedElizaAction)?.description || "No description available")}
+                                    : (currentMcpTool?.description || "No description available")}
                             </p>
                             {toolSchema && (
                                 <div className="mt-2 pt-2 border-t border-zinc-800">
@@ -1178,10 +967,10 @@ export function PluginTester({
                                     variant="ghost"
                                     size="sm"
                                     onClick={() => {
-                                        if (pluginSource === "goat" && currentTool) {
-                                            const defaultArgs = currentTool.example || generateDefaultArgs(currentTool.parameters);
+                                        if (pluginSource === "onchain" && currentTool) {
+                                            const defaultArgs = generateDefaultArgs(currentTool.parameters);
                                             setToolArgs(JSON.stringify(defaultArgs, null, 2));
-                                        } else if (pluginSource === "mcp" && currentMcpTool) {
+                                        } else if (pluginSource === "tools" && currentMcpTool) {
                                             const defaultArgs = generateDefaultArgs(currentMcpTool.inputSchema);
                                             setToolArgs(JSON.stringify(defaultArgs, null, 2));
                                         }
@@ -1194,26 +983,18 @@ export function PluginTester({
                             </div>
                         </div>
                         <Button
-                            onClick={
-                                pluginSource === "goat"
-                                    ? handleExecutePlugin
-                                    : pluginSource === "mcp"
-                                        ? handleExecuteMcpTool
-                                        : handleElizaExecution
-                            }
+                            onClick={pluginSource === "onchain" ? handleExecutePlugin : handleExecuteMcpTool}
                             disabled={
                                 !sessionActive ||
                                 executingPlugin ||
                                 !selectedTool ||
-                                (pluginSource === "goat" ? !selectedPlugin : pluginSource === "mcp" ? !selectedMcpServer : !selectedElizaPlugin)
+                                (pluginSource === "onchain" ? !selectedPlugin : !selectedMcpServer)
                             }
                             className={cn(
                                 "h-auto px-6",
-                                pluginSource === "goat"
+                                pluginSource === "onchain"
                                     ? "bg-green-600 hover:bg-green-700"
-                                    : pluginSource === "mcp"
-                                        ? "bg-purple-600 hover:bg-purple-700"
-                                        : "bg-fuchsia-600 hover:bg-fuchsia-700"
+                                    : "bg-purple-600 hover:bg-purple-700"
                             )}
                         >
                             {executingPlugin ? (

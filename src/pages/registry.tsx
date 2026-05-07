@@ -1,8 +1,5 @@
 /**
- * MCP Registry Browser
- * 
- * Browse and search MCP servers from official registry + Compose internal tools.
- * Includes test console for GOAT plugins.
+ * Connector Registry Browser
  */
 import { useState, useMemo } from "react";
 import { useLocation } from "wouter";
@@ -44,107 +41,11 @@ import {
   RefreshCw,
   Play,
   Zap,
-  ChevronLeft,
-  ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const ITEMS_PER_PAGE = 50;
-
 // Note: Executability is now determined by the `executable` field from the backend
 // Plugin testing is now consolidated in the Playground page (/playground?tab=plugins)
-
-// =============================================================================
-// Pagination Component
-// =============================================================================
-
-function Pagination({
-  currentPage,
-  totalPages,
-  onPageChange,
-}: {
-  currentPage: number;
-  totalPages: number;
-  onPageChange: (page: number) => void;
-}) {
-  if (totalPages <= 1) return null;
-
-  const getVisiblePages = () => {
-    const pages: (number | "ellipsis")[] = [];
-
-    // Always show first page
-    pages.push(1);
-
-    if (currentPage > 3) {
-      pages.push("ellipsis");
-    }
-
-    // Show pages around current
-    for (let i = Math.max(2, currentPage - 1); i <= Math.min(totalPages - 1, currentPage + 1); i++) {
-      if (!pages.includes(i)) {
-        pages.push(i);
-      }
-    }
-
-    if (currentPage < totalPages - 2) {
-      pages.push("ellipsis");
-    }
-
-    // Always show last page
-    if (totalPages > 1 && !pages.includes(totalPages)) {
-      pages.push(totalPages);
-    }
-
-    return pages;
-  };
-
-  const visiblePages = getVisiblePages();
-
-  return (
-    <div className="flex items-center justify-center gap-1 mt-6">
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => onPageChange(currentPage - 1)}
-        disabled={currentPage === 1}
-        className="border-sidebar-border h-8 w-8 p-0"
-      >
-        <ChevronLeft className="w-4 h-4" />
-      </Button>
-
-      {visiblePages.map((page, i) => (
-        page === "ellipsis" ? (
-          <span key={`ellipsis-${i}`} className="text-muted-foreground px-2">...</span>
-        ) : (
-          <Button
-            key={page}
-            variant={currentPage === page ? "default" : "outline"}
-            size="sm"
-            onClick={() => onPageChange(page)}
-            className={cn(
-              "h-8 min-w-8 px-2",
-              currentPage === page
-                ? "bg-cyan-500 text-black hover:bg-cyan-600"
-                : "border-sidebar-border"
-            )}
-          >
-            {page}
-          </Button>
-        )
-      ))}
-
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => onPageChange(currentPage + 1)}
-        disabled={currentPage === totalPages}
-        className="border-sidebar-border h-8 w-8 p-0"
-      >
-        <ChevronRight className="w-4 h-4" />
-      </Button>
-    </div>
-  );
-}
 
 // =============================================================================
 // Server Card Component
@@ -157,13 +58,13 @@ function ServerCard({
   server: RegistryServer;
   onSelect: (s: RegistryServer) => void;
 }) {
-  const isGoat = server.origin === "goat";
+  const isOnchain = server.origin === "onchain";
   const isEliza = server.origin === "eliza";
   const isRemote = isRemoteCapable(server);
   const isExecutable = server.executable === true;
 
   const getOriginStyle = () => {
-    if (isGoat) return { bg: "bg-green-500/10", border: "border-green-500/30", text: "text-green-400" };
+    if (isOnchain) return { bg: "bg-green-500/10", border: "border-green-500/30", text: "text-green-400" };
     if (isEliza) return { bg: "bg-fuchsia-500/10", border: "border-fuchsia-500/30", text: "text-fuchsia-400" };
     return { bg: "bg-cyan-500/10", border: "border-cyan-500/30", text: "text-cyan-400" };
   };
@@ -180,7 +81,7 @@ function ServerCard({
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0 flex-1">
             <div className={`w-7 h-7 sm:w-8 sm:h-8 rounded-sm flex items-center justify-center border shrink-0 ${style.bg} ${style.border}`}>
-              {isGoat ? (
+              {isOnchain ? (
                 <Zap className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${style.text}`} />
               ) : isEliza ? (
                 <Sparkles className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${style.text}`} />
@@ -281,7 +182,7 @@ function ServerDetailDialog({
 
   if (!server) return null;
 
-  const isGoat = server.origin === "goat";
+  const isOnchain = server.origin === "onchain";
   const isExecutable = server.executable === true;
 
   const handleAddToWorkflow = () => {
@@ -313,11 +214,8 @@ function ServerDetailDialog({
       server_name: server.name,
       server_origin: server.origin,
     });
-    // Determine source based on origin
-    const source = isGoat ? "goat" : isEliza ? "eliza" : "mcp";
-
-    // For GOAT/Eliza plugins, use the registryId; for MCP servers, use the slug
-    const pluginParam = (isGoat || isEliza) ? server.registryId : server.slug;
+    const source = isOnchain ? "onchain" : isEliza ? "eliza" : "tools";
+    const pluginParam = server.slug;
 
     // Navigate to playground with source and plugin pre-selected
     navigate(`/playground?tab=plugins&source=${source}&plugin=${encodeURIComponent(pluginParam)}`);
@@ -329,11 +227,11 @@ function ServerDetailDialog({
       <DialogContent className="max-w-2xl bg-card border-cyan-500/30">
         <DialogHeader>
           <div className="flex items-center gap-3">
-            <div className={`w-10 h-10 rounded-sm flex items-center justify-center border ${isGoat
+            <div className={`w-10 h-10 rounded-sm flex items-center justify-center border ${isOnchain
               ? "bg-green-500/10 border-green-500/30"
               : "bg-cyan-500/10 border-cyan-500/30"
               }`}>
-              {isGoat ? (
+              {isOnchain ? (
                 <Zap className="w-5 h-5 text-green-400" />
               ) : (
                 <Server className="w-5 h-5 text-cyan-400" />
@@ -353,8 +251,8 @@ function ServerDetailDialog({
 
           {/* Badges */}
           <div className="flex flex-wrap gap-2">
-            <Badge variant={isGoat ? "default" : "secondary"} className={
-              isGoat
+            <Badge variant={isOnchain ? "default" : "secondary"} className={
+              isOnchain
                 ? "bg-green-500/20 text-green-400"
                 : "bg-cyan-500/20 text-cyan-400"
             }>
@@ -439,13 +337,12 @@ function ServerDetailDialog({
 
           {/* Actions */}
           <div className="flex gap-2 pt-4 border-t border-sidebar-border">
-            {/* Show test button for GOAT plugins, Eliza plugins (executable) OR MCP servers */}
-            {(isExecutable || server.origin === "mcp" || isEliza) && (
+            {(isExecutable || server.origin === "tools" || isEliza) && (
               <Button
                 onClick={handleTestPlugin}
                 className={cn(
                   "flex-1 font-bold",
-                  isGoat
+                  isOnchain
                     ? "bg-green-500 hover:bg-green-600 text-black"
                     : isEliza
                       ? "bg-fuchsia-500 hover:bg-fuchsia-600 text-white"
@@ -460,7 +357,7 @@ function ServerDetailDialog({
               onClick={handleAddToWorkflow}
               className={cn(
                 "bg-cyan-500 hover:bg-cyan-600 text-black font-bold",
-                !(isExecutable || server.origin === "mcp" || isEliza) && "flex-1"
+                !(isExecutable || server.origin === "tools" || isEliza) && "flex-1"
               )}
             >
               <Plus className="w-4 h-4 mr-2" />
@@ -496,11 +393,10 @@ function ServerDetailDialog({
 export default function RegistryPage() {
   const posthog = usePostHog();
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedOrigin, setSelectedOrigin] = useState<"all" | "mcp" | "goat" | "eliza">("all");
+  const [selectedOrigin, setSelectedOrigin] = useState<"all" | "tools" | "onchain" | "eliza">("all");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [selectedServer, setSelectedServer] = useState<RegistryServer | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
 
   // Data fetching - no limits, fetch all
   const { data: meta } = useRegistryMeta();
@@ -511,30 +407,27 @@ export default function RegistryPage() {
     category: selectedCategory === "all" ? undefined : selectedCategory,
   });
 
-  const { data: searchData, isLoading: loadingSearch } = useRegistrySearch(searchQuery);
+  const searchReady = searchQuery.trim().length >= 2;
+  const { data: searchData, isLoading: loadingSearch } = useRegistrySearch(searchQuery, 50, {
+    origin: selectedOrigin === "all" ? undefined : selectedOrigin,
+    category: selectedCategory === "all" ? undefined : selectedCategory,
+  });
 
-  // Reset page when filters change
+  // Keep filter updates centralized so result controls stay in sync.
   const handleFilterChange = (setter: (v: any) => void) => (value: any) => {
     setter(value);
-    setCurrentPage(1);
   };
 
   // Determine which servers to show
+  const baseServers = serversData?.servers || [];
   const allServers = useMemo(() => {
-    if (searchQuery.length > 0 && searchData) {
-      return searchData.servers;
+    if (searchReady) {
+      return searchData?.servers ?? [];
     }
-    return serversData?.servers || [];
-  }, [searchQuery, searchData, serversData]);
+    return baseServers;
+  }, [baseServers, searchData?.servers, searchReady]);
 
-  // Paginate servers
-  const totalPages = Math.ceil(allServers.length / ITEMS_PER_PAGE);
-  const displayServers = useMemo(() => {
-    const start = (currentPage - 1) * ITEMS_PER_PAGE;
-    return allServers.slice(start, start + ITEMS_PER_PAGE);
-  }, [allServers, currentPage]);
-
-  const isLoading = searchQuery.length > 0 ? loadingSearch : loadingServers;
+  const isLoading = searchReady ? loadingSearch && allServers.length === 0 : loadingServers;
 
   const handleSelectServer = (server: RegistryServer) => {
     posthog?.capture("registry_server_viewed", {
@@ -547,11 +440,6 @@ export default function RegistryPage() {
     setDetailOpen(true);
   };
 
-  const handlePageChange = (page: number) => {
-    setCurrentPage(page);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
   return (
     <div className="container mx-auto px-4 py-6 max-w-7xl">
       {/* Header */}
@@ -559,10 +447,10 @@ export default function RegistryPage() {
         <div className="flex items-center justify-between mb-4">
           <div>
             <h1 className="text-2xl font-display font-bold text-cyan-400 neon-text">
-              MCP REGISTRY
+              CONNECTOR REGISTRY
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Browse and install MCP servers for your workflows
+              Browse and install tools for your workflows
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -588,12 +476,9 @@ export default function RegistryPage() {
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input
-              placeholder="Search servers by name, description, or tags..."
+              placeholder="Search tools by name, description, or tags..."
               value={searchQuery}
-              onChange={(e) => {
-                setSearchQuery(e.target.value);
-                setCurrentPage(1);
-              }}
+              onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-10 bg-background/50 border-sidebar-border font-mono"
             />
           </div>
@@ -606,8 +491,8 @@ export default function RegistryPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Sources</SelectItem>
-                <SelectItem value="mcp">MCP Tools</SelectItem>
-                <SelectItem value="goat">GOAT SDK</SelectItem>
+                <SelectItem value="tools">Tools</SelectItem>
+                <SelectItem value="onchain">Onchain</SelectItem>
                 <SelectItem value="eliza">ElizaOS</SelectItem>
               </SelectContent>
             </Select>
@@ -648,18 +533,13 @@ export default function RegistryPage() {
               {searchQuery ? (
                 <>Found <span className="text-cyan-400 font-mono">{allServers.length.toLocaleString()}</span> servers matching "{searchQuery}"</>
               ) : (
-                <>Showing <span className="text-cyan-400 font-mono">{displayServers.length}</span> of <span className="text-cyan-400 font-mono">{allServers.length.toLocaleString()}</span> servers</>
-              )}
-              {totalPages > 1 && (
-                <span className="ml-2 text-muted-foreground/70">
-                  (Page {currentPage} of {totalPages})
-                </span>
+                <>Showing <span className="text-cyan-400 font-mono">{allServers.length.toLocaleString()}</span> servers</>
               )}
             </p>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-            {displayServers.map((server) => (
+            {allServers.map((server) => (
               <ServerCard
                 key={server.registryId}
                 server={server}
@@ -667,12 +547,6 @@ export default function RegistryPage() {
               />
             ))}
           </div>
-
-          <Pagination
-            currentPage={currentPage}
-            totalPages={totalPages}
-            onPageChange={handlePageChange}
-          />
         </>
       )}
 

@@ -1,11 +1,10 @@
 /**
  * Agent Discovery System
  * Generic types and functions for discovering agents across multiple registries
- * 
+ *
  * Registries:
  * - Agentverse: Fetch.ai autonomous agent marketplace
- * - GOAT: DeFi tool plugins (60+ plugins)
- * - ElizaOS: Agent framework plugins (200+ plugins)
+ * - GOAT: DeFi tool plugins
  */
 
 import { apiFetch } from "./api";
@@ -16,9 +15,9 @@ import { apiFetch } from "./api";
 
 /**
  * Agent registries/ecosystems that can be queried
- * 
+ *
  * Note: Only registries with type="agent" are shown in the Agents tab.
- * GOAT and ElizaOS are PLUGINS, not agents - they appear in the Connectors tab.
+ * GOAT plugins are PLUGINS, not agents - they appear in the Connectors tab.
  */
 export const AGENT_REGISTRIES = {
   agentverse: {
@@ -33,18 +32,9 @@ export const AGENT_REGISTRIES = {
   goat: {
     id: "goat",
     name: "GOAT SDK",
-    description: "DeFi & Web3 tool plugins (60+ plugins)",
+    description: "DeFi & Web3 tool plugins",
     url: "https://ohmygoat.dev",
     color: "green",
-    type: "plugin" as const, // Plugins, not agents - shown in Connectors tab
-    enabled: false, // Disabled for agent search - use registry API instead
-  },
-  eliza: {
-    id: "eliza",
-    name: "ElizaOS",
-    description: "Agent framework plugins (200+ plugins)",
-    url: "https://elizaos.ai",
-    color: "fuchsia",
     type: "plugin" as const, // Plugins, not agents - shown in Connectors tab
     enabled: false, // Disabled for agent search - use registry API instead
   },
@@ -340,7 +330,7 @@ function registryServerToAgent(server: RegistryServer, registry: AgentRegistryId
     status: "active",
     type: "hosted",
     featured: false,
-    verified: true, // GOAT/ElizaOS plugins are verified
+    verified: true, // GOAT plugins are verified
     category: server.category || deriveCategory(allTags),
     tags: allTags,
     owner: server.namespace,
@@ -404,41 +394,62 @@ async function searchAgentverse(
 }
 
 /**
- * Get connector registry base URL
+ * Get connectors broker base URL
  */
 function getConnectorBaseUrl(): string {
-  const connectorUrl = import.meta.env.VITE_CONNECTOR_URL;
-  if (connectorUrl) {
-    return connectorUrl.replace(/\/$/, "");
+  const url = import.meta.env.VITE_CONNECTORS_URL;
+  if (url) {
+    return url.replace(/\/$/, "");
   }
 
-  return "https://services.compose.market/connector";
+  return "https://connectors.compose.market";
 }
 
 /**
- * Search GOAT plugins from connector registry
+ * Search GOAT plugins from the connectors broker /onchain endpoint
  */
 async function searchGoat(
   options: SearchAgentsOptions
 ): Promise<{ agents: Agent[]; total: number; tags: string[]; categories: string[] }> {
   try {
-    const params = new URLSearchParams({
-      origin: "goat",
-      limit: String(options.limit || 50),
-      offset: String(options.offset || 0),
-    });
-
-    const response = await fetch(`${getConnectorBaseUrl()}/registry/servers?${params}`);
+    const response = await fetch(`${getConnectorBaseUrl()}/onchain`);
 
     if (!response.ok) {
       console.warn("Failed to fetch GOAT plugins:", response.status);
       return { agents: [], total: 0, tags: [], categories: [] };
     }
 
-    const data = await response.json();
-    const servers: RegistryServer[] = data.servers || [];
+    const data = await response.json() as {
+      plugins?: Array<{
+        id: string;
+        name: string;
+        description: string;
+        toolCount: number;
+        requiresApiKey?: boolean;
+        apiKeyConfigured?: boolean;
+      }>;
+    };
 
-    // Filter by search if provided
+    const plugins = data.plugins || [];
+
+    const servers: RegistryServer[] = plugins.map((p) => ({
+      registryId: `onchain:${p.id}`,
+      origin: "onchain",
+      type: "plugin",
+      namespace: "goat",
+      name: p.name,
+      slug: p.id,
+      description: p.description,
+      tags: ["goat", "defi"],
+      category: "defi",
+      attributes: [],
+      toolCount: p.toolCount,
+      tools: [],
+      available: true,
+      executable: true,
+      url: undefined,
+    }));
+
     let filtered = servers;
     if (options.search) {
       const q = options.search.toLowerCase();
@@ -449,7 +460,6 @@ async function searchGoat(
       );
     }
 
-    // Filter by tags
     if (options.tags?.length) {
       filtered = filtered.filter(s =>
         options.tags!.some(t => s.tags.includes(t.toLowerCase()))
@@ -467,74 +477,12 @@ async function searchGoat(
 
     return {
       agents,
-      total: data.total || agents.length,
+      total: agents.length,
       tags: Array.from(allTags).sort(),
       categories: Array.from(allCategories).sort(),
     };
   } catch (err) {
     console.warn("Error fetching GOAT plugins:", err);
-    return { agents: [], total: 0, tags: [], categories: [] };
-  }
-}
-
-/**
- * Search ElizaOS plugins from connector registry
- */
-async function searchEliza(
-  options: SearchAgentsOptions
-): Promise<{ agents: Agent[]; total: number; tags: string[]; categories: string[] }> {
-  try {
-    const params = new URLSearchParams({
-      origin: "eliza",
-      limit: String(options.limit || 50),
-      offset: String(options.offset || 0),
-    });
-
-    const response = await fetch(`${getConnectorBaseUrl()}/registry/servers?${params}`);
-
-    if (!response.ok) {
-      console.warn("Failed to fetch ElizaOS plugins:", response.status);
-      return { agents: [], total: 0, tags: [], categories: [] };
-    }
-
-    const data = await response.json();
-    const servers: RegistryServer[] = data.servers || [];
-
-    // Filter by search if provided
-    let filtered = servers;
-    if (options.search) {
-      const q = options.search.toLowerCase();
-      filtered = servers.filter(s =>
-        s.name.toLowerCase().includes(q) ||
-        s.description.toLowerCase().includes(q) ||
-        s.tags.some(t => t.toLowerCase().includes(q))
-      );
-    }
-
-    // Filter by tags
-    if (options.tags?.length) {
-      filtered = filtered.filter(s =>
-        options.tags!.some(t => s.tags.includes(t.toLowerCase()))
-      );
-    }
-
-    const agents = filtered.map(s => registryServerToAgent(s, "eliza"));
-    const allTags = new Set<string>();
-    const allCategories = new Set<string>();
-
-    agents.forEach(a => {
-      a.tags.forEach(t => allTags.add(t));
-      if (a.category) allCategories.add(a.category);
-    });
-
-    return {
-      agents,
-      total: data.total || agents.length,
-      tags: Array.from(allTags).sort(),
-      categories: Array.from(allCategories).sort(),
-    };
-  } catch (err) {
-    console.warn("Error fetching ElizaOS plugins:", err);
     return { agents: [], total: 0, tags: [], categories: [] };
   }
 }
@@ -684,8 +632,6 @@ export async function searchAgents(
           return searchAgentverse(options);
         case "goat":
           return searchGoat(options);
-        case "eliza":
-          return searchEliza(options);
         case "manowar":
           return searchManowar(options);
         default:

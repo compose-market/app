@@ -90,7 +90,8 @@ export default function PlaygroundPage() {
 
   const initialPluginSource = useMemo(() => {
     const params = new URLSearchParams(window.location.search);
-    return (params.get("source") as "goat" | "mcp" | "eliza") || "goat";
+    const source = params.get("source");
+    return source === "tools" || source === "onchain" ? source : "tools";
   }, []);
 
   const initialPlugin = useMemo(() => {
