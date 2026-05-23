@@ -208,11 +208,7 @@ export default function ManowarPage() {
         if (!workflow?.walletAddress || !activeThreadId) return;
         try {
             abortControllerRef.current?.abort();
-            await sdk.fetch(`/workflow/${workflow.walletAddress}/stop`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ threadId: activeThreadId }),
-            });
+            await sdk.workflow.stop(workflow.walletAddress, activeThreadId);
             posthog?.capture("workflow_stopped", {
                 workflow_wallet: workflow.walletAddress,
                 workflow_title: workflow.title,

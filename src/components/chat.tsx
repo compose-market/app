@@ -8,8 +8,9 @@
  * 
  * Used by: agent.tsx, workflow.tsx, playground.tsx
  */
-import React, { Suspense, lazy, useState, useEffect, memo, useCallback } from "react";
+import React, { Suspense, lazy, useState, memo, useCallback } from "react";
 import { cn } from "@/lib/utils";
+import { GenerationCanvas } from "@/components/blur";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -43,17 +44,12 @@ import {
     Image as ImageIcon,
     Wrench,
 } from "lucide-react";
-import { GenerationCanvas } from "@/components/blur";
-import { useLyriaWebSocket } from "@/hooks/use-lyria";
 import type { AttachedFile, ChatActivityState, ChatMessage } from "@/hooks/use-chat";
 
 // Re-export for convenience
 export type { ChatMessage, AttachedFile };
 const LazyMarkdownRenderer = lazy(() =>
     import("@/lib/performance/markdown").then((module) => ({ default: module.MarkdownRenderer }))
-);
-const LazyLyriaAudioPlayer = lazy(() =>
-    import("@/components/lyria-player").then((module) => ({ default: module.LyriaAudioPlayer }))
 );
 
 function EmbeddingBlock({ content }: { content: string }) {
@@ -121,6 +117,17 @@ function EmbeddingBlock({ content }: { content: string }) {
                     </pre>
                 </div>
             )}
+        </div>
+    );
+}
+
+function AudioBlock({ src, content }: { src: string; content?: string }) {
+    return (
+        <div className="mb-2 rounded-md border border-cyan-500/25 bg-black/20 p-2">
+            {content && <p className="mb-2 text-xs text-muted-foreground">{content}</p>}
+            <audio controls preload="metadata" className="w-full">
+                <source src={src} />
+            </audio>
         </div>
     );
 }
@@ -240,7 +247,7 @@ function ChatMessageItemInner({
                         )}
                     />
                 )}
-                {message.audioUrl && <audio controls className="w-full mb-2"><source src={message.audioUrl} /></audio>}
+                {message.audioUrl && <AudioBlock src={message.audioUrl} content={!isUser ? message.content : undefined} />}
                 {message.videoUrl && <video controls className="rounded-lg max-w-full mb-2"><source src={message.videoUrl} /></video>}
 
                 {!!message.reasoning && (
@@ -282,7 +289,7 @@ function ChatMessageItemInner({
                     </div>
                 )}
 
-                {message.type === "embedding" ? (
+                {message.audioUrl ? null : message.type === "embedding" ? (
                     <EmbeddingBlock content={message.content || "..."} />
                 ) : isLoadingMedia ? (
                     <GenerationCanvas
@@ -350,10 +357,6 @@ export interface MultimodalCanvasProps {
     scrollContainerRef?: React.RefObject<HTMLDivElement | null>;
     messagesEndRef?: React.RefObject<HTMLDivElement | null>;
     height?: string;
-    /** Selected model ID for Lyria detection */
-    selectedModel?: string;
-    /** Set messages for Lyria integration */
-    setMessages?: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
 }
 
 const canvasVariantConfig = {
@@ -418,98 +421,14 @@ export function MultimodalCanvas({
     scrollContainerRef,
     messagesEndRef,
     height = "h-64",
-    selectedModel,
-    setMessages,
 }: MultimodalCanvasProps) {
     const config = canvasVariantConfig[variant];
     const activeTools = activityState?.tools.slice(-3) || [];
     const shouldShowActivity = status !== "idle" || Boolean(activityState && activityState.phase !== "idle");
 
-    // ==========================================================================
-    // Lyria RealTime Integration
-    // ==========================================================================
-    const isLyriaModel = selectedModel?.toLowerCase().includes("lyria");
-    const lyria = useLyriaWebSocket();
-    const [lyriaMessageId, setLyriaMessageId] = useState<string | null>(null);
-
-    // Handle Lyria send - intercepts regular onSend for Lyria models
     const handleSend = useCallback(() => {
-        if (isLyriaModel && setMessages) {
-            // Create user message
-            const userMessage: ChatMessage = {
-                id: crypto.randomUUID(),
-                role: "user",
-                content: inputValue.trim(),
-                timestamp: Date.now(),
-                type: "text",
-            };
-            setMessages((prev) => [...prev, userMessage]);
-
-            // Create assistant placeholder
-            const assistantId = crypto.randomUUID();
-            setLyriaMessageId(assistantId);
-            setMessages((prev) => [
-                ...prev,
-                {
-                    id: assistantId,
-                    role: "assistant",
-                    content: "🎵 Lyria RealTime Music Generation\n\nClick Play to start generating music...",
-                    timestamp: Date.now(),
-                    type: "audio",
-                },
-            ]);
-
-            // Connect and configure Lyria
-            if (lyria.state === "idle" || lyria.state === "closed" || lyria.state === "error") {
-                lyria.connect();
-            }
-            lyria.setPrompt(inputValue.trim() || "ambient electronic music");
-
-            // Clear input
-            onInputChange("");
-        } else {
-            // Regular send for non-Lyria models
-            onSend();
-        }
-    }, [isLyriaModel, setMessages, inputValue, onSend, onInputChange, lyria]);
-
-    // Update Lyria message status based on connection state
-    useEffect(() => {
-        if (!isLyriaModel || !lyriaMessageId || !setMessages) return;
-
-        let statusMessage = "";
-        switch (lyria.state) {
-            case "connecting":
-                statusMessage = "🎵 Connecting to Lyria RealTime...";
-                break;
-            case "connected":
-                statusMessage = "🎵 Connected! Waiting for session ready...";
-                break;
-            case "ready":
-                statusMessage = `🎵 Lyria RealTime Ready\n\nPrompt: "${inputValue}"\n\nClick Play to start generating music`;
-                break;
-            case "playing":
-                statusMessage = "🎵 Generating music...";
-                break;
-            case "paused":
-                statusMessage = "🎵 Music generation paused";
-                break;
-            case "error":
-                statusMessage = `🎵 Error: ${lyria.error || "Unknown error"}`;
-                break;
-            case "closed":
-                statusMessage = "🎵 Lyria session closed";
-                break;
-        }
-
-        if (statusMessage) {
-            setMessages((prev) =>
-                prev.map((m) =>
-                    m.id === lyriaMessageId ? { ...m, content: statusMessage } : m
-                )
-            );
-        }
-    }, [lyria.state, lyria.error, isLyriaModel, lyriaMessageId, setMessages, inputValue]);
+        onSend();
+    }, [onSend]);
 
     const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
         if (e.key === "Enter" && !e.shiftKey) {
@@ -561,31 +480,6 @@ export function MultimodalCanvas({
                                     onRetry={onRetryMessage}
                                     onDelete={onDeleteMessage}
                                 />
-                                {/* Lyria Audio Player for Lyria messages */}
-                                {isLyriaModel && msg.id === lyriaMessageId && (
-                                    <Suspense fallback={<GenerationCanvas type="audio" status="Loading player" className="w-full max-w-sm" />}>
-                                        <LazyLyriaAudioPlayer
-                                            audioQueue={lyria.audioQueue}
-                                            isPlaying={lyria.state === "playing"}
-                                            onPlay={lyria.play}
-                                            onPause={lyria.pause}
-                                            onStop={() => {
-                                                lyria.stop();
-                                                if (setMessages) {
-                                                    setMessages((prev) =>
-                                                        prev.map((m) =>
-                                                            m.id === lyriaMessageId
-                                                                ? { ...m, content: "🎵 Music generation stopped" }
-                                                                : m
-                                                        )
-                                                    );
-                                                }
-                                            }}
-                                            onConsumeQueue={lyria.consumeAudioQueue}
-                                            config={lyria.currentConfig}
-                                        />
-                                    </Suspense>
-                                )}
                             </React.Fragment>
                         ))}
                         <div ref={messagesEndRef} />

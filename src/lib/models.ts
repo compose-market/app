@@ -12,9 +12,11 @@
  * `api.compose.market` serves.
  */
 
-import type { Model } from "@compose-market/sdk";
+import type { Model, ModelOperationCapability, OperationModel } from "@compose-market/sdk";
 
-export type CatalogModel = Model;
+export type CatalogModel = Model & {
+  operations?: ModelOperationCapability[];
+};
 
 export type ModelJsonValue =
   | string
@@ -51,6 +53,37 @@ export interface SelectedCatalogModel {
 }
 
 export const MODEL_SELECTION_STORAGE_KEY = "selectedCatalogModel";
+
+function modelKey(model: Pick<Model, "modelId" | "provider">): string {
+  return `${model.provider}:${model.modelId}`;
+}
+
+export function mergeModelOperations(models: Model[], operationModels: OperationModel[]): CatalogModel[] {
+  const operationsByModel = new Map<string, ModelOperationCapability[]>();
+
+  for (const model of operationModels) {
+    if (!Array.isArray(model.operations) || model.operations.length === 0) {
+      continue;
+    }
+    const key = modelKey(model);
+    const existing = operationsByModel.get(key) ?? [];
+    const seen = new Set(existing.map((operation) => `${operation.modality}:${operation.operation}`));
+    for (const operation of model.operations) {
+      const operationKey = `${operation.modality}:${operation.operation}`;
+      if (seen.has(operationKey)) {
+        continue;
+      }
+      seen.add(operationKey);
+      existing.push(operation);
+    }
+    operationsByModel.set(key, existing);
+  }
+
+  return models.map((model) => {
+    const operations = operationsByModel.get(modelKey(model));
+    return operations?.length ? { ...model, operations } : { ...model, operations: [] };
+  });
+}
 
 export function getModelTypeValues(model: CatalogModel): string[] {
   if (typeof model.type === "string") {
@@ -104,27 +137,6 @@ export function buildProviderCategories(models: CatalogModel[]): ModelCategory[]
       .sort((a, b) => b[1] - a[1])
       .map(([id, count]) => ({ id, label: id, count })),
   ];
-}
-
-export function getModelOutputType(model: CatalogModel | null | undefined): "text" | "image" | "video" | "audio" | "embedding" {
-  if (!model) {
-    return "text";
-  }
-
-  const typeValues = getModelTypeValues(model).map((value) => value.toLowerCase());
-  if (typeValues.some((value) => value.includes("video"))) {
-    return "video";
-  }
-  if (typeValues.some((value) => value.includes("image"))) {
-    return "image";
-  }
-  if (typeValues.some((value) => value.includes("audio") || value.includes("speech") || value.includes("transcription"))) {
-    return "audio";
-  }
-  if (typeValues.some((value) => value.includes("embedding") || value.includes("feature-extraction"))) {
-    return "embedding";
-  }
-  return "text";
 }
 
 export function isGoogleModel(model: CatalogModel | null | undefined): boolean {

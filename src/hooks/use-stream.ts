@@ -55,7 +55,7 @@ export interface ComposeStreamCallbacks {
 
 type StreamCallOptions = Pick<
     ComposeCallOptions,
-    "x402MaxAmountWei" | "idempotencyKey" | "composeRunId" | "composeKey" | "userAddress" | "chainId"
+    "x402MaxAmountWei" | "idempotencyKey" | "composeRunId" | "composeKey" | "userAddress" | "chainId" | "timeoutMs"
 >;
 
 type AgentStreamEvent = AgentRuntimeEvent | { type: "reasoning-delta"; delta: string };
@@ -105,6 +105,7 @@ export interface VideoPollArgs {
     videoId: string;
     assistantId: string;
     signal?: AbortSignal;
+    options?: StreamCallOptions & { pollIntervalMs?: number };
 }
 
 export interface UseComposeStream {
@@ -279,7 +280,6 @@ export function useComposeStream(
     const runChat = useCallback(async (args: ChatStreamArgs): Promise<void> => {
         chat.currentAssistantIdRef.current = args.assistantId;
         chat.streamedTextRef.current = "";
-        chat.setActivityPhase("thinking", "Thinking...");
 
         const stream = sdk.inference.chat.completions.stream(args.params, {
             signal: args.signal,
@@ -306,7 +306,6 @@ export function useComposeStream(
     const runResponses = useCallback(async (args: ResponsesStreamArgs): Promise<void> => {
         chat.currentAssistantIdRef.current = args.assistantId;
         chat.streamedTextRef.current = "";
-        chat.setActivityPhase("thinking", "Thinking...");
 
         const stream = sdk.inference.responses.stream(args.params, {
             signal: args.signal,
@@ -330,8 +329,7 @@ export function useComposeStream(
     }, [chat]);
 
     const runVideo = useCallback(async (args: VideoPollArgs): Promise<void> => {
-        chat.setActivityPhase("thinking", "Video queued...");
-        const stream = sdk.inference.videos.stream(args.videoId, { signal: args.signal });
+        const stream = sdk.inference.videos.stream(args.videoId, { ...(args.options ?? {}), signal: args.signal });
         try {
             for await (const event of stream as AsyncIterable<VideoStatusStreamEvent>) {
                 if (event.type === "compose.video.status") {

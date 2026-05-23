@@ -69,6 +69,7 @@ export interface OnchainWorkflow {
   // Resolved metadata
   metadata?: WorkflowMetadata;
   agentIds?: number[];
+  agentWallets?: number[];
   // Chain where this workflow was minted
   chainId?: number;
 }
@@ -77,7 +78,7 @@ export interface OnchainWorkflow {
 // Contract Read Helpers
 // =============================================================================
 
-async function fetchAgentData(agentId: number, chainId?: number): Promise<OnchainAgent | null> {
+async function fetchAgentData(agentWallet: number, chainId?: number): Promise<OnchainAgent | null> {
   try {
     // Use chain-specific contract if chainId provided, otherwise default
     const factoryContract = chainId
@@ -85,8 +86,8 @@ async function fetchAgentData(agentId: number, chainId?: number): Promise<Onchai
       : getAgentFactoryContract();
     const data = await readContract({
       contract: factoryContract,
-      method: "function getAgentData(uint256 agentId) view returns ((bytes32 dnaHash, uint256 licenses, uint256 licensesMinted, uint256 licensePrice, address creator, bool cloneable, bool isClone, uint256 parentAgentId, string agentCardUri))",
-      params: [BigInt(agentId)],
+      method: "function getAgentData(uint256 agentWallet) view returns ((bytes32 dnaHash, uint256 licenses, uint256 licensesMinted, uint256 licensePrice, address creator, bool cloneable, bool isClone, uint256 parentAgentId, string agentCardUri))",
+      params: [BigInt(agentWallet)],
     }) as AgentData;
 
     const licenses = Number(data.licenses);
@@ -100,8 +101,8 @@ async function fetchAgentData(agentId: number, chainId?: number): Promise<Onchai
         : getWarpContract();
       isWarped = await readContract({
         contract: warpContract,
-        method: "function isWarped(uint256 agentId) view returns (bool)",
-        params: [BigInt(agentId)],
+        method: "function isWarped(uint256 agentWallet) view returns (bool)",
+        params: [BigInt(agentWallet)],
       }) as boolean;
     } catch {
       // Warp check failed, assume not warped
@@ -111,7 +112,7 @@ async function fetchAgentData(agentId: number, chainId?: number): Promise<Onchai
     // walletAddress will be populated from IPFS metadata in fetchAgentMetadata
     // chainId comes from metadata.chain field (see AgentCard type)
     return {
-      id: agentId,
+      id: agentWallet,
       dnaHash: data.dnaHash,
       walletAddress: "", // Populated from metadata
       licenses,
@@ -127,7 +128,7 @@ async function fetchAgentData(agentId: number, chainId?: number): Promise<Onchai
       isWarped,
     };
   } catch (error) {
-    console.error(`Failed to fetch agent ${agentId} on chain ${chainId}:`, error);
+    console.error(`Failed to fetch agent ${agentWallet} on chain ${chainId}:`, error);
     return null;
   }
 }
@@ -218,6 +219,12 @@ async function fetchWorkflowData(workflowId: number, chainId?: number): Promise<
       method: "function getWorkflowData(uint256 workflowId) view returns ((string title, string description, string banner, string workflowCardUri, uint256 totalPrice, uint256 units, uint256 unitsMinted, address creator, bool leaseEnabled, uint256 leaseDuration, uint8 leasePercent, bool hasCoordinator, string coordinatorModel, bool hasActiveRfa, uint256 rfaId))",
       params: [BigInt(workflowId)],
     }) as WorkflowData;
+    const agentIds = await readContract({
+      contract,
+      method: "function getAgents(uint256 workflowId) view returns (uint256[])",
+      params: [BigInt(workflowId)],
+    }) as bigint[];
+    const agents = agentIds.map((id) => Number(id));
 
     return {
       id: workflowId,
@@ -236,6 +243,8 @@ async function fetchWorkflowData(workflowId: number, chainId?: number): Promise<
       coordinatorModel: data.coordinatorModel,
       hasActiveRfa: data.hasActiveRfa,
       rfaId: Number(data.rfaId),
+      agentIds: agents,
+      agentWallets: agents,
       chainId,
     };
   } catch (error) {
@@ -347,16 +356,16 @@ export function useOnchainAgents(options?: { includeMetadata?: boolean }) {
 /**
  * Fetch a single agent by numeric ID
  */
-export function useOnchainAgent(agentId: number | null) {
+export function useOnchainAgent(agentWallet: number | null) {
   return useQuery({
-    queryKey: ["onchain-agent", agentId],
+    queryKey: ["onchain-agent", agentWallet],
     queryFn: async () => {
-      if (!agentId) return null;
-      const agent = await fetchAgentData(agentId);
+      if (!agentWallet) return null;
+      const agent = await fetchAgentData(agentWallet);
       if (!agent) return null;
       return fetchAgentMetadata(agent);
     },
-    enabled: !!agentId,
+    enabled: !!agentWallet,
     staleTime: 30 * 1000,
     gcTime: 5 * 60 * 1000, // Keep in cache 5 minutes
   });
@@ -623,7 +632,7 @@ export interface OnchainRFA {
 
 /** RFA submission */
 export interface RFASubmission {
-  agentId: number;
+  agentWallet: number;
   creator: string;
   submittedAt: number; // Unix timestamp
 }
@@ -644,7 +653,7 @@ interface ContractRFAData {
 
 /** Contract submission structure */
 interface ContractSubmission {
-  agentId: bigint;
+  agentWallet: bigint;
   creator: string;
   submittedAt: bigint;
 }
@@ -703,12 +712,12 @@ async function fetchRFASubmissions(rfaId: number): Promise<RFASubmission[]> {
     const contract = getRFAContract();
     const submissions = await readContract({
       contract,
-      method: "function getSubmissions(uint256 rfaId) view returns ((uint256 agentId, address creator, uint256 submittedAt)[])",
+      method: "function getSubmissions(uint256 rfaId) view returns ((uint256 agentWallet, address creator, uint256 submittedAt)[])",
       params: [BigInt(rfaId)],
     }) as ContractSubmission[];
 
     return submissions.map(s => ({
-      agentId: Number(s.agentId),
+      agentWallet: Number(s.agentWallet),
       creator: s.creator,
       submittedAt: Number(s.submittedAt),
     }));

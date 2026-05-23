@@ -350,17 +350,7 @@ export function BackpackDialog({
 
         try {
             setRefreshing(true);
-            const res = await sdk.fetch(
-                `/api/backpack/connections?userAddress=${encodeURIComponent(effectiveUserId)}`,
-                { signal: controller.signal },
-            );
-
-            if (!res.ok) {
-                console.warn("[Backpack] Failed to fetch connections:", res.status);
-                return;
-            }
-
-            const data = await res.json();
+            const data = await sdk.backpack.connections({ userAddress: effectiveUserId }, { signal: controller.signal });
             const connMap: Record<string, ConnectionStatus> = {};
 
             // Map Composio connections to our featured providers
@@ -432,14 +422,8 @@ export function BackpackDialog({
 
         setSearching(true);
         try {
-            const res = await sdk.fetch(
-                `/api/backpack/toolkits?search=${encodeURIComponent(query)}&limit=15`,
-                { signal: controller.signal },
-            );
-            if (res.ok) {
-                const data = await res.json();
-                setSearchResults(data.toolkits || []);
-            }
+            const data = await sdk.backpack.toolkits.list({ search: query, limit: 15 }, { signal: controller.signal });
+            setSearchResults(data.toolkits || []);
         } catch (err) {
             if (controller.signal.aborted) {
                 return;
@@ -611,22 +595,11 @@ export function BackpackDialog({
         clearStatusPolling();
 
         try {
-            // Step 1: Call backend to get OAuth redirect URL from Composio
-            const res = await sdk.fetch("/api/backpack/connect", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    userAddress: effectiveUserId,
-                    toolkit: provider.slug,
-                }),
+            const data = await sdk.backpack.connect({
+                userAddress: effectiveUserId,
+                toolkit: provider.slug,
             });
-
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                throw new Error(err.error || `Failed to initiate connection (${res.status})`);
-            }
-
-            const { redirectUrl } = await res.json();
+            const redirectUrl = data.redirectUrl || data.url;
 
             if (!redirectUrl) {
                 throw new Error("No redirect URL returned from server");
@@ -647,15 +620,7 @@ export function BackpackDialog({
             });
 
             startStatusPolling(async (signal) => {
-                const statusRes = await sdk.fetch(
-                    `/api/backpack/status/${encodeURIComponent(provider.slug)}?userAddress=${encodeURIComponent(effectiveUserId)}`,
-                    { signal },
-                );
-                if (!statusRes.ok) {
-                    return false;
-                }
-
-                const statusData = await statusRes.json();
+                const statusData = await sdk.backpack.status(provider.slug, { userAddress: effectiveUserId }, { signal });
                 if (!statusData.connected) {
                     return false;
                 }
@@ -696,19 +661,7 @@ export function BackpackDialog({
         clearStatusPolling();
 
         try {
-            // Generate a deep link
-            const res = await sdk.fetch("/api/backpack/telegram/link", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ userAddress: effectiveUserId }),
-            });
-
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                throw new Error(err.error || `Failed to generate link (${res.status})`);
-            }
-
-            const { deepLinkUrl } = await res.json();
+            const { deepLinkUrl } = await sdk.backpack.telegram.link({ userAddress: effectiveUserId });
 
             // Open Telegram deep link
             window.open(deepLinkUrl, "_blank");
@@ -719,15 +672,7 @@ export function BackpackDialog({
             });
 
             startStatusPolling(async (signal) => {
-                const statusRes = await sdk.fetch(
-                    `/api/backpack/telegram/status?userAddress=${encodeURIComponent(effectiveUserId)}`,
-                    { signal },
-                );
-                if (!statusRes.ok) {
-                    return false;
-                }
-
-                const statusData = await statusRes.json();
+                const statusData = await sdk.backpack.telegram.status({ userAddress: effectiveUserId }, { signal });
                 if (!statusData.bound) {
                     return false;
                 }
@@ -901,19 +846,10 @@ export function BackpackDialog({
         setLoadingAccount(provider.slug);
 
         try {
-            const res = await sdk.fetch("/api/backpack/disconnect", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    userAddress: effectiveUserId,
-                    toolkit: provider.slug,
-                }),
+            await sdk.backpack.disconnect({
+                userAddress: effectiveUserId,
+                toolkit: provider.slug,
             });
-
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                throw new Error(err.error || `Failed to disconnect (${res.status})`);
-            }
 
             // Update local state
             setConnections(prev => ({

@@ -10,6 +10,7 @@ import { useMemo, useCallback } from "react";
 import {
     buildTypeCategories,
     getModelTypeValues,
+    mergeModelOperations,
     type CatalogModel,
     type ModelCategory,
 } from "@/lib/models";
@@ -49,11 +50,33 @@ const CACHE_KEY = ["models-catalog"];
 // =============================================================================
 
 async function fetchCatalog(): Promise<CatalogModel[]> {
-    const result = await sdk.models.list();
+    const [result, catalog] = await Promise.all([
+        sdk.models.list(),
+        sdk.models.modalities.list(),
+    ]);
     if (!Array.isArray(result.data) || result.data.length === 0) {
         throw new Error("No models returned from /v1/models");
     }
-    return result.data;
+
+    const operationModels = (
+        await Promise.all(catalog.data.flatMap((entry) =>
+            entry.operations.map(async (operation) => {
+                const data = [];
+                let cursor: string | null | undefined;
+                do {
+                    const page = await sdk.models.modalities.models(entry.modality, operation.operation, {
+                        limit: 200,
+                        ...(cursor ? { cursor } : {}),
+                    });
+                    data.push(...page.data);
+                    cursor = page.next_cursor;
+                } while (cursor);
+                return data;
+            })
+        ))
+    ).flat();
+
+    return mergeModelOperations(result.data, operationModels);
 }
 
 export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
@@ -141,4 +164,3 @@ export function useModelsByProvider(provider: string): CatalogModel[] {
     const { filteredModels } = useModels({ provider });
     return filteredModels;
 }
-

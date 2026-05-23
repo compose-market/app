@@ -11,7 +11,8 @@
 
 import { ComposeSDK } from "@compose-market/sdk";
 
-const baseUrl = (import.meta.env.VITE_API_URL ?? "https://api.compose.market").replace(/\/+$/, "");
+const env = import.meta.env ?? {};
+const baseUrl = (env.VITE_API_URL ?? "https://api.compose.market").replace(/\/+$/, "");
 
 export const sdk = new ComposeSDK({
     baseUrl,

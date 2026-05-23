@@ -3,8 +3,9 @@
  * Used for storing agent avatars, agent cards, and Workflow metadata
  */
 
-const PINATA_JWT = import.meta.env.VITE_PINATA_JWT || "";
-const PINATA_GATEWAY = import.meta.env.VITE_PINATA_GATEWAY || "compose.mypinata.cloud";
+const env = import.meta.env ?? {};
+const PINATA_JWT = env.VITE_PINATA_JWT || "";
+const PINATA_GATEWAY = env.VITE_PINATA_GATEWAY || "compose.mypinata.cloud";
 
 const PINATA_API_URL = "https://api.pinata.cloud";
 

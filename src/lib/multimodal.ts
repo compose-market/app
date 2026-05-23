@@ -1,14 +1,20 @@
 import type {
     AudioTranscriptionResponse,
     ChatCompletion,
+    ChatMessage,
+    ChatMessageContentPart,
+    ComposeAttachmentInput,
     EmbeddingsResponse,
     ImagesResponse,
+    ModelOperationCapability,
     ResponseObject,
     VideoGenerateResponse,
     VideoJobStatus,
 } from "@compose-market/sdk";
 
 import { uploadConversationFile } from "./pinata";
+import type { CatalogModel } from "./models";
+import type { ChatMessage as UiMessage } from "@/hooks/use-chat";
 
 export type MultimodalType = "text" | "image" | "audio" | "video" | "embedding";
 
@@ -17,12 +23,115 @@ export interface MultimodalResult {
     success: boolean;
     content?: string;
     url?: string;
+    objectUrl?: string;
     base64?: string;
     mimeType?: string;
     embeddings?: number[];
     error?: string;
     jobId?: string;
     polling?: boolean;
+}
+
+export function operationLabel(operation: ModelOperationCapability | null | undefined): string {
+    return operation?.operation.replace(/-/g, " ") || "inference";
+}
+
+export function operationIcon(operation: ModelOperationCapability | null | undefined): "text" | "image" | "audio" | "video" {
+    if (operation?.modality === "image") return "image";
+    if (operation?.modality === "audio") return "audio";
+    if (operation?.modality === "video") return "video";
+    return "text";
+}
+
+export function resolveOperation(
+    model: CatalogModel | null | undefined,
+    attachments: ComposeAttachmentInput[] = [],
+): ModelOperationCapability | null {
+    if (!model) return null;
+    const operations = Array.isArray(model.operations) ? model.operations : [];
+    if (operations.length === 0) return null;
+
+    const input = operationInputType(attachments);
+    const matches = operations.filter((operation) => operation.input.includes(input));
+    if (matches.length > 0) {
+        const exact = input === "text"
+            ? matches.find((operation) => operationOutputType(operation) === "text")
+            : matches.find((operation) => operationOutputType(operation) !== "text");
+        return exact ?? matches[0] ?? null;
+    }
+
+    return null;
+}
+
+export function toChatMessage(message: UiMessage): ChatMessage {
+    const parts: ChatMessageContentPart[] = [];
+    if (message.content.trim().length > 0) {
+        parts.push({ type: "text", text: message.content });
+    }
+    if (message.imageUrl) parts.push({ type: "image_url", image_url: { url: message.imageUrl } });
+    if (message.audioUrl) parts.push({ type: "input_audio", input_audio: { url: message.audioUrl } });
+    if (message.videoUrl) parts.push({ type: "video_url", video_url: { url: message.videoUrl } });
+    if (parts.length === 0) return { role: message.role, content: "" };
+    if (parts.length === 1 && parts[0].type === "text") return { role: message.role, content: message.content };
+    return { role: message.role, content: parts };
+}
+
+type MediaKind = "text" | "image" | "audio" | "video" | "embedding";
+
+export function operationInputType(attachments: ComposeAttachmentInput[] = []): Exclude<MediaKind, "embedding"> {
+    for (const attachment of attachments) {
+        const kind = attachmentKind(attachment);
+        if (kind === "image" || kind === "audio" || kind === "video") {
+            return kind;
+        }
+    }
+    return "text";
+}
+
+export function operationOutputType(operation: ModelOperationCapability | null | undefined): MultimodalType {
+    if (!operation) return "text";
+    if (operation.output.includes("image")) return "image";
+    if (operation.output.includes("audio")) return "audio";
+    if (operation.output.includes("video")) return "video";
+    if (operation.output.includes("embedding")) return "embedding";
+    return "text";
+}
+
+function attachmentKind(attachment: ComposeAttachmentInput): string | null {
+    if (!attachment || typeof attachment === "string") return null;
+    return typeof attachment.type === "string" ? attachment.type : null;
+}
+
+export function attachmentUrl(attachments: ComposeAttachmentInput[] | undefined, type: "image" | "audio" | "video"): string | undefined {
+    for (const attachment of attachments ?? []) {
+        if (!attachment || typeof attachment === "string" || attachment.type !== type) {
+            continue;
+        }
+        const url = attachment.url ?? attachment.uri;
+        if (typeof url === "string" && url.length > 0) {
+            return url;
+        }
+    }
+    return undefined;
+}
+
+export async function audioResponseResult(response: Response): Promise<MultimodalResult> {
+    const mimeType = response.headers.get("content-type") || "audio/mpeg";
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
+        const objectUrl = URL.createObjectURL(new Blob([bytes], { type: mimeType }));
+        return { type: "audio", success: true, objectUrl, mimeType };
+    }
+    return { type: "audio", success: true, base64: bytesToBase64(bytes), mimeType };
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+    let binary = "";
+    const size = 0x8000;
+    for (let i = 0; i < bytes.length; i += size) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + size));
+    }
+    return btoa(binary);
 }
 
 export async function parseMultimodalData(

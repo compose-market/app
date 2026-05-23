@@ -10,8 +10,8 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiFetch } from "@/lib/api";
 import { CHAIN_CONFIG } from "@/lib/chains";
+import { sdk } from "@/lib/sdk";
 
 // =============================================================================
 // Types
@@ -63,28 +63,15 @@ export interface ClaimCheckResult {
 // =============================================================================
 
 async function fetchDispenserStatus(): Promise<DispenserStatusResponse> {
-    const response = await apiFetch("/api/dispenser/status");
-    if (!response.ok) {
-        throw new Error("Failed to fetch dispenser status");
-    }
-    return response.json();
+    return sdk.dispenser.status();
 }
 
 async function fetchDispenserCheck(address: string): Promise<ClaimCheckResult> {
-    const response = await apiFetch(`/api/dispenser/check/${address}`);
-    if (!response.ok) {
-        throw new Error("Failed to check dispenser status");
-    }
-    return response.json();
+    return sdk.dispenser.check({ address });
 }
 
 async function claimDispenserUSDC(address: string, chainId: number): Promise<ClaimResult> {
-    const response = await apiFetch("/api/dispenser/claim", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ address, chainId }),
-    });
-    return response.json();
+    return sdk.dispenser.claim({ address, chainId });
 }
 
 // =============================================================================

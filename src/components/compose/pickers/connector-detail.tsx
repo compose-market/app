@@ -24,7 +24,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import type { RegistryServer } from "@/hooks/use-registry";
 import type { ConnectorTool } from "@/lib/services";
-import { executeRegistryTool } from "@/lib/services";
+import { executeRegistryTool, fetchToolsConnectorTools } from "@/lib/services";
 
 interface ConnectorDetailDialogProps {
     server: RegistryServer | null;
@@ -55,22 +55,20 @@ export function ConnectorDetailDialog({
         setDynamicTools([]);
 
         if (server.origin === "tools" && (!server.tools || server.tools.length === 0)) {
-            import("@/lib/services").then(({ fetchToolsConnectorTools }) => {
-                fetchToolsConnectorTools(server.slug)
-                    .then((tools) => {
-                        setDynamicTools(tools);
-                        if (tools.length > 0) {
-                            setSelectedTool(tools[0].name);
-                        }
-                    })
-                    .catch((err) => {
-                        toast({
-                            title: "Failed to load tools",
-                            description: err.message,
-                            variant: "destructive",
-                        });
+            fetchToolsConnectorTools(server.slug)
+                .then((tools) => {
+                    setDynamicTools(tools);
+                    if (tools.length > 0) {
+                        setSelectedTool(tools[0].name);
+                    }
+                })
+                .catch((err) => {
+                    toast({
+                        title: "Failed to load tools",
+                        description: err.message,
+                        variant: "destructive",
                     });
-            });
+                });
         }
     }, [server, open, toast]);
 

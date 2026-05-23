@@ -19,6 +19,7 @@ import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
 import { sdk } from "@/lib/sdk";
 import { toComposeAttachment } from "@/hooks/use-chat";
+import type { ChatMessage, ComposeAttachmentInput, ComposeCallOptions } from "@compose-market/sdk";
 import { useChain } from "@/contexts/ChainContext";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -44,18 +45,26 @@ import { MirrorPane, type ModelParamsSchema } from "@/components/mirror-pane";
 import { CommandBar } from "@/components/command-bar";
 import { ModelBadge } from "@/components/model-badge";
 import { useChat } from "@/hooks/use-chat";
-import { useComposeStream } from "@/hooks/use-stream";
 import { useModels } from "@/hooks/use-model";
 import { CostReceiptIndicator } from "@/components/receipt-indicator";
 import { ToolTimeline } from "@/components/tool-timeline";
 import { useToast } from "@/hooks/use-toast";
+import { useComposeStream } from "@/hooks/use-stream";
+import {
+  attachmentUrl,
+  audioResponseResult,
+  operationIcon,
+  operationLabel,
+  operationOutputType,
+  parseJsonResponse,
+  resolveOperation,
+  toChatMessage,
+} from "@/lib/multimodal";
 import {
   buildProviderCategories,
   buildTypeCategories,
   formatModelTypeLabel,
-  getModelOutputType,
   getModelTypeValues,
-  getPrimaryModelType,
   isGoogleModel as isGoogleCatalogModel,
 } from "@/lib/models";
 
@@ -187,13 +196,10 @@ export default function PlaygroundPage() {
     attachedFiles, fileInputRef, handleFileSelect, handleRemoveFile, uploadedCids, cleanupFiles, clearFiles,
     isRecording, recordingSupported, startRecording, stopRecording,
   } = chat;
-
-  // Shared SDK streaming dispatcher. Handles text + video polling; all
-  // rich SSE events (text/reasoning/tool-call/receipt) route through the
-  // shared `useComposeStream` hook and the sdk.events bus.
   const streamer = useComposeStream(chat, {
-    onError: (e) => setInferenceError(e.message),
+    onError: (err) => setInferenceError(err.message),
   });
+
   const [inputValue, setInputValue] = useState("");
 
   // ============ ⌘K Global Shortcut ============
@@ -208,11 +214,10 @@ export default function PlaygroundPage() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  // Auto-select first model from FILTERED list when filters change
+  // Auto-select first model from the filtered list when filters change.
   useEffect(() => {
     if (filteredModels.length > 0 && (!selectedModel || !filteredModels.some((m) => m.modelId === selectedModel))) {
-      const preferredModel = filteredModels.find((m) => getModelOutputType(m) === "text") || filteredModels[0];
-      setSelectedModel(preferredModel.modelId);
+      setSelectedModel(filteredModels[0].modelId);
     }
   }, [filteredModels, selectedModel]);
 
@@ -232,18 +237,20 @@ export default function PlaygroundPage() {
     () => models.find((m) => m.modelId === selectedModel) || null,
     [models, selectedModel],
   );
-  const modelType = selectedModelInfo ? getPrimaryModelType(selectedModelInfo) : "chat-completions";
-  const outputType = getModelOutputType(selectedModelInfo);
   const isGoogleModel = useMemo(() => isGoogleCatalogModel(selectedModelInfo), [selectedModelInfo]);
+  const pendingAttachments = useMemo(() => (
+    attachedFiles
+      .map(toComposeAttachment)
+      .filter((attachment): attachment is ComposeAttachmentInput => Boolean(attachment))
+  ), [attachedFiles]);
+  const selectedOperation = useMemo(
+    () => resolveOperation(selectedModelInfo, pendingAttachments),
+    [selectedModelInfo, pendingAttachments],
+  );
 
   // Fetch model params
   useEffect(() => {
     if (!selectedModel || !selectedModelInfo) {
-      setModelParams(null);
-      setParamValues({});
-      return;
-    }
-    if (outputType !== "image" && outputType !== "video") {
       setModelParams(null);
       setParamValues({});
       return;
@@ -273,7 +280,7 @@ export default function PlaygroundPage() {
     };
     void fetchParams();
     return () => { abortController.abort(); };
-  }, [outputType, selectedModel, selectedModelInfo]);
+  }, [selectedModel, selectedModelInfo]);
 
   // Google tools
   const activeGoogleTools = useMemo(() => {
@@ -294,7 +301,7 @@ export default function PlaygroundPage() {
 
   const handleSendMessage = useCallback(async () => {
     if (attachedFiles.some(f => f.uploading)) return;
-    if ((!inputValue.trim() && attachedFiles.length === 0) || streaming || !selectedModel) return;
+    if ((!inputValue.trim() && attachedFiles.length === 0) || streaming || !selectedModel || !selectedModelInfo) return;
 
     if (!sessionActive || budgetRemaining <= 0) {
       toast({
@@ -310,12 +317,24 @@ export default function PlaygroundPage() {
     const attachments = attachedFiles
       .map(toComposeAttachment)
       .filter((attachment): attachment is NonNullable<typeof attachment> => Boolean(attachment));
+    const operation = resolveOperation(selectedModelInfo, attachments);
+    if (!operation) {
+      const errorMsg = `No SDK catalog operation is available for ${selectedModelInfo.modelId}`;
+      setInferenceError(errorMsg);
+      toast({
+        title: "Unsupported Input",
+        description: errorMsg,
+        variant: "destructive",
+      });
+      return;
+    }
+    const outputType = operationOutputType(operation);
     const userMessage = {
       id: crypto.randomUUID(),
       role: "user" as const,
       content: inputValue.trim(),
       timestamp: Date.now(),
-      type: outputType,
+      type: attached?.type ?? "text",
       imageUrl: attached?.type === "image" ? attached.url : undefined,
       audioUrl: attached?.type === "audio" ? attached.url : undefined,
       videoUrl: attached?.type === "video" ? attached.url : undefined,
@@ -325,7 +344,7 @@ export default function PlaygroundPage() {
       model_id: selectedModel,
       has_attachment: attachedFiles.length > 0,
       attachment_type: attachedFiles[0]?.type ?? null,
-      output_type: outputType,
+      inference_operation: operation,
       chain_id: paymentChainId,
     });
 
@@ -340,10 +359,6 @@ export default function PlaygroundPage() {
     setStreaming(true);
     setInferenceError(null);
     chat.clearActivityState();
-    chat.setActivityPhase(
-      "thinking",
-      outputType === "text" ? "Preparing request..." : `Preparing ${outputType} generation...`,
-    );
 
     const assistantId = crypto.randomUUID();
     chat.streamedTextRef.current = "";
@@ -359,7 +374,7 @@ export default function PlaygroundPage() {
 
       // Make sure the SDK has the freshly-minted Compose Key JWT cached
       // in-memory before any billable call fires.
-      const activeComposeKeyToken = await ensureComposeKeyToken() ?? composeKeyToken;
+      const activeComposeKeyToken = composeKeyToken || sdk.keys.currentToken() || await ensureComposeKeyToken();
       if (sessionActive && budgetRemaining > 0 && !activeComposeKeyToken) {
         throw new Error("Compose session key unavailable. Re-open your session and try again.");
       }
@@ -367,114 +382,128 @@ export default function PlaygroundPage() {
         sdk.keys.use(activeComposeKeyToken);
       }
 
-      const toResponsesMessage = (message: typeof userMessage | typeof messages[number]) => {
-        const parts: Array<Record<string, unknown>> = [];
-        if (typeof message.content === "string" && message.content.trim().length > 0) {
-          parts.push({ type: "text", text: message.content });
-        }
-        if (message.imageUrl) parts.push({ type: "image_url", image_url: { url: message.imageUrl } });
-        if (message.audioUrl) parts.push({ type: "input_audio", input_audio: { url: message.audioUrl } });
-        if (message.videoUrl) parts.push({ type: "video_url", video_url: { url: message.videoUrl } });
-        if (parts.length === 0) return { role: message.role, content: "" };
-        if (parts.length === 1 && parts[0].type === "text") return { role: message.role, content: message.content };
-        return { role: message.role, content: parts };
-      };
-
       const history = [...messages.slice(conversationStartIndex), userMessage];
-      const input: Array<{
-        role: "system" | "user" | "assistant";
-        content: string | Array<Record<string, unknown>>;
-      }> = history.map(toResponsesMessage);
+      const input: ChatMessage[] = history.map(toChatMessage);
       if (systemPrompt.trim()) input.unshift({ role: "system", content: systemPrompt.trim() });
 
-      const modalities =
-        outputType === "image" ? ["image"] :
-          outputType === "audio" ? ["audio"] :
-            outputType === "video" ? ["video"] :
-              outputType === "embedding" ? ["embedding", "feature-extraction"] :
-                ["text"];
-
-      // Text + image streaming — SDK responses.stream dispatches every rich
-      // SSE event (text delta, reasoning, tool-call delta, compose.receipt,
-      // compose.error, and image partial/completed events where the provider
-      // supports them) via the shared streamer hook.
-      if (outputType === "text" || outputType === "image") {
-        await streamer.runResponses({
-          params: {
-            model: selectedModel,
-            input,
-            modalities: modalities as Array<"text" | "image" | "audio" | "video">,
-            stream: true,
-            ...(attachments.length > 0 ? { attachments } : {}),
-            ...(selectedModelInfo?.provider ? { provider: selectedModelInfo.provider } : {}),
-            ...(activeGoogleTools ? { google_tools: activeGoogleTools } : {}),
-            ...(Object.keys(paramValues).length > 0 ? { custom_params: paramValues } : {}),
-          },
-          assistantId,
-          options: {
-            ...(activeComposeKeyToken ? { composeKey: activeComposeKeyToken } : {}),
-            userAddress: account.address,
-            chainId: paymentChainId,
-          },
-        });
-        return;
-      }
-
-      // Remaining non-streaming modalities use the typed SDK resources as a
-      // third-party integrator would. The SDK owns Compose Key headers,
-      // receipt extraction, budget events, and raw x402 fallback.
-      const callOptions = {
+      const callOptions: ComposeCallOptions = {
         ...(activeComposeKeyToken ? { composeKey: activeComposeKeyToken } : {}),
         userAddress: account.address,
         chainId: paymentChainId,
       };
-      const { parseMultimodalData } = await import("@/lib/multimodal");
-      const completion = outputType === "embedding"
-        ? await sdk.inference.embeddings.create({
-          model: selectedModel,
+      const customParams = {
+        ...(activeGoogleTools ? { google_tools: activeGoogleTools } : {}),
+        ...paramValues,
+      };
+
+      if (operation.modality === "embedding" || outputType === "embedding") {
+        const result = await sdk.inference.embeddings.create({
+          model: selectedModelInfo.modelId,
           input: userMessage.content,
           ...(attachments.length > 0 ? { attachments } : {}),
-          ...(selectedModelInfo?.provider ? { provider: selectedModelInfo.provider } : {}),
-          ...(Object.keys(paramValues).length > 0 ? { custom_params: paramValues } : {}),
-        }, callOptions)
-        : await sdk.inference.responses.create({
-          model: selectedModel,
-          input,
-          modalities: modalities as Array<"text" | "image" | "audio" | "video">,
-          stream: false,
-          ...(attachments.length > 0 ? { attachments } : {}),
-          ...(selectedModelInfo?.provider ? { provider: selectedModelInfo.provider } : {}),
-          ...(activeGoogleTools ? { google_tools: activeGoogleTools } : {}),
-          ...(Object.keys(paramValues).length > 0 ? { custom_params: paramValues } : {}),
+          provider: selectedModelInfo.provider,
+          ...customParams,
         }, callOptions);
-
-      const result = await parseMultimodalData(completion.data, {
-        uploadToPinata: true,
-        conversationId,
-      });
-
-      if (result.polling && result.jobId) {
+        const parsed = parseJsonResponse(result.data);
+        if (!parsed.success) throw new Error(parsed.error || "Embedding request failed");
         chat.updateAssistantMessage(assistantId, {
-          content: `Video generating... (queued)`,
-          type: "video",
+          type: "embedding",
+          content: parsed.content ?? JSON.stringify(parsed.embeddings ?? []),
         });
-        await streamer.runVideo({ videoId: result.jobId, assistantId });
+        chat.clearActivityState();
         return;
       }
 
-      if (result.success) {
-        const content = result.content || (result.type === "text" ? "" : `Generated ${result.type}:`);
+      if (operation.modality === "audio" && outputType === "audio") {
+        const result = await sdk.inference.audio.speech({
+          model: selectedModelInfo.modelId,
+          input: userMessage.content,
+          ...(attachments.length > 0 ? { attachments } : {}),
+          provider: selectedModelInfo.provider,
+          ...customParams,
+        }, callOptions);
+        const parsed = await audioResponseResult(result.response);
+        const audioUrl = parsed.objectUrl
+          ?? parsed.url
+          ?? (parsed.base64 ? `data:${parsed.mimeType || "audio/mpeg"};base64,${parsed.base64}` : undefined);
+        if (!audioUrl) throw new Error("Audio response did not include playable media");
         chat.updateAssistantMessage(assistantId, {
-          content,
-          type: result.type,
-          imageUrl: result.type === "image" ? result.url : undefined,
-          audioUrl: result.type === "audio" ? result.url : undefined,
-          videoUrl: result.type === "video" ? result.url : undefined,
+          type: "audio",
+          content: "Generated audio:",
+          audioUrl,
         });
         chat.clearActivityState();
-      } else {
-        throw new Error(result.error || "Request failed");
+        return;
       }
+
+      if (operation.modality === "audio" && outputType === "text") {
+        const file = attachmentUrl(attachments, "audio");
+        if (!file) throw new Error("This model requires an audio file input");
+        const result = await sdk.inference.audio.transcriptions({
+          model: selectedModelInfo.modelId,
+          file,
+          ...(attachments.length > 0 ? { attachments } : {}),
+          provider: selectedModelInfo.provider,
+          ...customParams,
+        }, callOptions);
+        const parsed = parseJsonResponse(result.data);
+        if (!parsed.success) throw new Error(parsed.error || "Audio transcription failed");
+        chat.updateAssistantMessage(assistantId, {
+          type: "text",
+          content: parsed.content ?? "",
+        });
+        chat.clearActivityState();
+        return;
+      }
+
+      if (operation.modality === "video" && outputType === "video") {
+        const imageUrl = attachmentUrl(attachments, "image");
+        const result = await sdk.inference.videos.generate({
+          model: selectedModelInfo.modelId,
+          prompt: userMessage.content,
+          ...(imageUrl ? { image_url: imageUrl } : {}),
+          ...(attachments.length > 0 ? { attachments } : {}),
+          provider: selectedModelInfo.provider,
+          ...customParams,
+        }, callOptions);
+        const parsed = parseJsonResponse(result.data);
+        if (!parsed.success) throw new Error(parsed.error || "Video generation failed");
+        const jobId = parsed.jobId ?? result.data.id ?? result.data.job_id;
+        chat.updateAssistantMessage(assistantId, {
+          type: "video",
+          content: parsed.content ?? (parsed.url ? "Generated video:" : ""),
+          videoUrl: parsed.url,
+        });
+        if (jobId && !parsed.url) {
+          await streamer.runVideo({
+            videoId: jobId,
+            assistantId,
+            options: {
+              ...callOptions,
+              pollIntervalMs: 1500,
+              timeoutMs: 120000,
+            },
+          });
+        } else {
+          chat.clearActivityState();
+        }
+        return;
+      }
+
+      const responseModality = outputType === "image" ? "image" : "text";
+      await streamer.runResponses({
+        params: {
+          model: selectedModelInfo.modelId,
+          input,
+          modalities: [responseModality],
+          stream: true,
+          ...(attachments.length > 0 ? { attachments } : {}),
+          provider: selectedModelInfo.provider,
+          ...customParams,
+        },
+        assistantId,
+        options: callOptions,
+      });
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Unknown error";
       setInferenceError(errorMsg);
@@ -485,7 +514,7 @@ export default function PlaygroundPage() {
     } finally {
       setStreaming(false);
     }
-  }, [inputValue, streaming, selectedModel, selectedModelInfo, messages, systemPrompt, wallet, account, budgetRemaining, outputType, attachedFiles, clearFiles, sessionActive, composeKeyToken, ensureComposeKeyToken, activeGoogleTools, paymentChainId, paramValues, toast, setShowSessionDialog, conversationId, posthog, chat, streamer, setMessages, conversationStartIndex]);
+  }, [inputValue, streaming, selectedModel, selectedModelInfo, messages, systemPrompt, wallet, account, budgetRemaining, attachedFiles, clearFiles, sessionActive, composeKeyToken, ensureComposeKeyToken, activeGoogleTools, paymentChainId, paramValues, toast, setShowSessionDialog, posthog, chat, setMessages, conversationStartIndex, streamer]);
   const handleClearChat = useCallback(() => {
     clearMessages();
     setInferenceError(null);
@@ -599,15 +628,8 @@ export default function PlaygroundPage() {
                 <div className="cm-playground__caps-row">
                   <span className="cm-playground__caps-label">Capabilities</span>
                   {uniqueCaps.map((cap) => {
-                    const c = cap.toLowerCase();
-                    let colorClass = "cm-playground__cap-tag--text";
-                    if (c.includes("image")) colorClass = "cm-playground__cap-tag--image";
-                    else if (c.includes("audio") || c.includes("speech")) colorClass = "cm-playground__cap-tag--audio";
-                    else if (c.includes("video")) colorClass = "cm-playground__cap-tag--video";
-                    else if (c.includes("embed") || c.includes("feature")) colorClass = "cm-playground__cap-tag--embedding";
-                    else if (c.includes("code")) colorClass = "cm-playground__cap-tag--code";
                     return (
-                      <span key={cap} className={`cm-playground__cap-tag ${colorClass}`}>
+                      <span key={cap} className="cm-playground__cap-tag">
                         {formatModelTypeLabel(cap)}
                       </span>
                     );
@@ -621,7 +643,6 @@ export default function PlaygroundPage() {
               variant="playground"
               showHeader={false}
               messages={messages}
-              setMessages={setMessages}
               inputValue={inputValue}
               onInputChange={setInputValue}
               onSend={handleSendMessage}
@@ -642,33 +663,26 @@ export default function PlaygroundPage() {
               scrollContainerRef={scrollContainerRef}
               messagesEndRef={messagesEndRef}
               height="h-full"
-              selectedModel={selectedModel}
               placeholder={
                 !sessionActive
                   ? "Start a session first"
-                  : outputType === "image"
-                    ? "Describe the image you want to generate..."
-                    : outputType === "audio" || selectedModel?.toLowerCase().includes("lyria")
-                      ? "Enter text to convert to speech or describe music to generate..."
-                      : attachedFiles.length > 0
-                        ? "Describe the uploaded file..."
-                        : "Type your message..."
+                  : attachedFiles.length > 0
+                    ? "Describe the uploaded file..."
+                    : `Send ${operationLabel(selectedOperation)} request...`
               }
               emptyStateIcon={
-                outputType === "image" ? (
+                operationIcon(selectedOperation) === "image" ? (
                   <ImageIcon className="mx-auto mb-4 opacity-50 text-zinc-500" style={{ width: 'clamp(2rem, 1.5rem + 2vw, 4rem)', height: 'clamp(2rem, 1.5rem + 2vw, 4rem)' }} />
-                ) : outputType === "audio" || selectedModel?.toLowerCase().includes("lyria") ? (
+                ) : operationIcon(selectedOperation) === "audio" ? (
                   <Music className="mx-auto mb-4 opacity-50 text-zinc-500" style={{ width: 'clamp(2rem, 1.5rem + 2vw, 4rem)', height: 'clamp(2rem, 1.5rem + 2vw, 4rem)' }} />
                 ) : (
                   <Bot className="mx-auto mb-4 opacity-50 text-zinc-500" style={{ width: 'clamp(2rem, 1.5rem + 2vw, 4rem)', height: 'clamp(2rem, 1.5rem + 2vw, 4rem)' }} />
                 )
               }
               emptyStateText={
-                outputType === "image"
-                  ? "Describe an image to generate"
-                  : outputType === "audio" || selectedModel?.toLowerCase().includes("lyria")
-                    ? "Enter text to convert to audio or describe music to generate"
-                    : `Start a conversation with ${selectedModelInfo?.name || "AI"}`
+                selectedModelInfo
+                  ? `Start ${operationLabel(selectedOperation)} with ${selectedModelInfo.name || selectedModelInfo.modelId}`
+                  : "Select a model to begin"
               }
               emptyStateSubtext={
                 sessionActive

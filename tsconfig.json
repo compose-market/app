@@ -6,7 +6,8 @@
     "tests/object-url.test.ts",
     "tests/chains-data.test.ts",
     "tests/cronos-removal.test.ts",
-    "tests/payment.test.ts"
+    "tests/payment.test.ts",
+    "tests/sdk.integration.test.ts"
   ],
   "exclude": [
     "node_modules",

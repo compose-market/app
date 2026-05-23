@@ -78,10 +78,10 @@ function SubmissionItem({
 }: {
     submission: RFASubmission;
     isPublisher: boolean;
-    onAccept: (agentId: number) => void;
+    onAccept: (agentWallet: number) => void;
     isAccepting: boolean;
 }) {
-    const { data: agent, isLoading } = useOnchainAgent(submission.agentId);
+    const { data: agent, isLoading } = useOnchainAgent(submission.agentWallet);
 
     const initials = agent?.metadata?.name
         ?.split(" ")
@@ -111,10 +111,10 @@ function SubmissionItem({
                 <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                         <span className="font-mono font-medium text-sm truncate">
-                            {isLoading ? "Loading..." : agent?.metadata?.name || `Agent #${submission.agentId}`}
+                            {isLoading ? "Loading..." : agent?.metadata?.name || `Agent #${submission.agentWallet}`}
                         </span>
                         <Badge variant="outline" className="text-[9px] shrink-0">
-                            #{submission.agentId}
+                            #{submission.agentWallet}
                         </Badge>
                     </div>
 
@@ -139,7 +139,7 @@ function SubmissionItem({
                 {isPublisher && (
                     <Button
                         size="sm"
-                        onClick={() => onAccept(submission.agentId)}
+                        onClick={() => onAccept(submission.agentWallet)}
                         disabled={isAccepting}
                         className="bg-green-500 hover:bg-green-600 text-white text-xs"
                     >
@@ -168,7 +168,7 @@ function SubmitAgentSection({
     isSubmitting,
 }: {
     rfa: OnchainRFA;
-    onSubmit: (agentId: number) => void;
+    onSubmit: (agentWallet: number) => void;
     isSubmitting: boolean;
 }) {
     const account = useActiveAccount();
@@ -297,7 +297,7 @@ export function RFADetails({ rfaId, open, onOpenChange, mode = "dialog" }: RFADe
     const createdDate = rfa ? new Date(rfa.createdAt * 1000) : null;
 
     // Handle accept agent
-    const handleAcceptAgent = async (agentId: number) => {
+    const handleAcceptAgent = async (agentWallet: number) => {
         if (!rfaId) return;
 
         try {
@@ -309,8 +309,8 @@ export function RFADetails({ rfaId, open, onOpenChange, mode = "dialog" }: RFADe
             const contract = getRFAContract();
             const tx = prepareContractCall({
                 contract,
-                method: "function acceptAgent(uint256 rfaId, uint256 agentId)",
-                params: [BigInt(rfaId), BigInt(agentId)],
+                method: "function acceptAgent(uint256 rfaId, uint256 agentWallet)",
+                params: [BigInt(rfaId), BigInt(agentWallet)],
             });
 
             await sendTransaction(tx);
@@ -372,7 +372,7 @@ export function RFADetails({ rfaId, open, onOpenChange, mode = "dialog" }: RFADe
     };
 
     // Handle submit agent
-    const handleSubmitAgent = async (agentId: number) => {
+    const handleSubmitAgent = async (agentWallet: number) => {
         if (!rfaId) return;
 
         try {
@@ -384,8 +384,8 @@ export function RFADetails({ rfaId, open, onOpenChange, mode = "dialog" }: RFADe
             const contract = getRFAContract();
             const tx = prepareContractCall({
                 contract,
-                method: "function submitAgent(uint256 rfaId, uint256 agentId)",
-                params: [BigInt(rfaId), BigInt(agentId)],
+                method: "function submitAgent(uint256 rfaId, uint256 agentWallet)",
+                params: [BigInt(rfaId), BigInt(agentWallet)],
             });
 
             await sendTransaction(tx);
@@ -498,7 +498,7 @@ export function RFADetails({ rfaId, open, onOpenChange, mode = "dialog" }: RFADe
                                 <div className="space-y-2 pr-2">
                                     {submissions.map((sub) => (
                                         <SubmissionItem
-                                            key={`${sub.agentId}-${sub.submittedAt}`}
+                                            key={`${sub.agentWallet}-${sub.submittedAt}`}
                                             submission={sub}
                                             isPublisher={isPublisher}
                                             onAccept={handleAcceptAgent}

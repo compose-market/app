@@ -7,7 +7,7 @@
  * - GOAT: DeFi tool plugins
  */
 
-import { apiFetch } from "./api";
+import { sdk } from "./sdk";
 
 // =============================================================================
 // Registry System
@@ -184,6 +184,28 @@ interface AgentverseSearchResponse {
   categories: string[];
 }
 
+type ManowarAgentCard = {
+  schemaVersion?: string;
+  name?: string;
+  description?: string;
+  skills?: string[];
+  image?: string;
+  avatar?: string;
+  dnaHash?: string;
+  walletAddress?: string;
+  chain?: number;
+  model?: string;
+  framework?: string;
+  licensePrice?: string;
+  licenses?: number;
+  cloneable?: boolean;
+  endpoint?: string;
+  protocols?: Array<{ name: string; version: string }>;
+  plugins?: Array<{ name?: string; registryId?: string; origin?: string }>;
+  createdAt?: string;
+  creator?: string;
+};
+
 // =============================================================================
 // Adapter Functions
 // =============================================================================
@@ -339,6 +361,48 @@ function registryServerToAgent(server: RegistryServer, registry: AgentRegistryId
   };
 }
 
+function manowarToAgent(card: ManowarAgentCard): Agent {
+  const protocolList = Array.isArray(card.protocols) ? card.protocols : [];
+  const protocols = protocolList.length > 0
+    ? protocolList
+    : [{ name: "x402", version: "1.0" }];
+  const tags = Array.from(new Set([
+    ...(card.skills || []),
+    ...(card.plugins || []).map((plugin) => plugin.origin || "").filter(Boolean),
+    "onchain",
+    "manowar",
+  ].map((tag) => tag.toLowerCase())));
+
+  const priceWei = Number(card.licensePrice || "0");
+  const pricePerRequest = Number.isFinite(priceWei) ? (priceWei / 1_000_000).toFixed(6) : "0.000000";
+  const address = card.walletAddress || "";
+
+  return {
+    id: address,
+    address,
+    name: card.name || "Unnamed Agent",
+    description: card.description || "",
+    registry: "manowar",
+    readme: card.description || "",
+    protocols,
+    avatarUrl: card.image || card.avatar || null,
+    totalInteractions: 0,
+    recentInteractions: 0,
+    rating: 5,
+    status: "active",
+    type: card.endpoint ? "hosted" : "local",
+    featured: false,
+    verified: true,
+    category: deriveCategory(tags),
+    tags,
+    owner: card.creator || address,
+    createdAt: card.createdAt || new Date().toISOString(),
+    updatedAt: card.createdAt || new Date().toISOString(),
+    onchainAgentId: undefined,
+    pricePerRequest,
+  };
+}
+
 /**
  * Derive category from tags
  */
@@ -365,25 +429,15 @@ function deriveCategory(tags: string[]): string {
 async function searchAgentverse(
   options: SearchAgentsOptions
 ): Promise<{ agents: Agent[]; total: number; tags: string[]; categories: string[] }> {
-  const params = new URLSearchParams();
-
-  if (options.search) params.set("search", options.search);
-  if (options.category) params.set("category", options.category);
-  if (options.tags?.length) params.set("tags", options.tags.join(","));
-  if (options.status) params.set("status", options.status);
-  if (options.limit) params.set("limit", options.limit.toString());
-  if (options.offset) params.set("offset", options.offset.toString());
-  if (options.sort) params.set("sort", options.sort);
-  if (options.direction) params.set("direction", options.direction);
-
-  const response = await apiFetch(`/api/agentverse/agents?${params}`);
-
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({ error: "Unknown error" }));
-    throw new Error(data.error || `Failed to fetch agents: ${response.status}`);
-  }
-
-  const data: AgentverseSearchResponse = await response.json();
+  const data = await sdk.directory.agents.agentverse({
+    search: options.search,
+    category: options.category,
+    tags: options.tags,
+    limit: options.limit,
+    offset: options.offset,
+    sort: options.sort,
+    direction: options.direction,
+  }) as unknown as AgentverseSearchResponse;
 
   return {
     agents: data.agents.map(agentverseToAgent),
@@ -493,36 +547,8 @@ async function searchGoat(
 async function searchManowar(
   options: SearchAgentsOptions
 ): Promise<{ agents: Agent[]; total: number; tags: string[]; categories: string[] }> {
-  type ManowarAgentCard = {
-    schemaVersion?: string;
-    name?: string;
-    description?: string;
-    skills?: string[];
-    image?: string;
-    avatar?: string;
-    dnaHash?: string;
-    walletAddress?: string;
-    chain?: number;
-    model?: string;
-    framework?: string;
-    licensePrice?: string;
-    licenses?: number;
-    cloneable?: boolean;
-    endpoint?: string;
-    protocols?: Array<{ name: string; version: string }>;
-    plugins?: Array<{ name?: string; registryId?: string; origin?: string }>;
-    createdAt?: string;
-    creator?: string;
-  };
-
   try {
-    const response = await apiFetch("/agents");
-    if (!response.ok) {
-      console.warn("Failed to fetch manowar agents:", response.status);
-      return { agents: [], total: 0, tags: [], categories: [] };
-    }
-
-    const data = await response.json() as { agents?: ManowarAgentCard[] };
+    const data = await sdk.directory.agents.list() as { agents?: ManowarAgentCard[] };
     const cards = Array.isArray(data.agents) ? data.agents : [];
 
     let filtered = cards.filter((card) => typeof card.walletAddress === "string" && card.walletAddress.startsWith("0x"));
@@ -558,46 +584,7 @@ async function searchManowar(
     const limit = Math.max(1, options.limit || 30);
     const paged = filtered.slice(offset, offset + limit);
 
-    const agents: Agent[] = paged.map((card) => {
-      const protocolList = Array.isArray(card.protocols) ? card.protocols : [];
-      const protocols = protocolList.length > 0
-        ? protocolList
-        : [{ name: "x402", version: "1.0" }];
-      const tags = Array.from(new Set([
-        ...(card.skills || []),
-        ...(card.plugins || []).map((plugin) => plugin.origin || "").filter(Boolean),
-        "onchain",
-        "manowar",
-      ].map((tag) => tag.toLowerCase())));
-
-      const priceWei = Number(card.licensePrice || "0");
-      const pricePerRequest = Number.isFinite(priceWei) ? (priceWei / 1_000_000).toFixed(6) : "0.000000";
-
-      return {
-        id: card.walletAddress!,
-        address: card.walletAddress!,
-        name: card.name || "Unnamed Agent",
-        description: card.description || "",
-        registry: "manowar",
-        readme: card.description || "",
-        protocols,
-        avatarUrl: card.image || card.avatar || null,
-        totalInteractions: 0,
-        recentInteractions: 0,
-        rating: 5,
-        status: "active",
-        type: card.endpoint ? "hosted" : "local",
-        featured: false,
-        verified: true,
-        category: deriveCategory(tags),
-        tags,
-        owner: card.creator || card.walletAddress!,
-        createdAt: card.createdAt || new Date().toISOString(),
-        updatedAt: card.createdAt || new Date().toISOString(),
-        onchainAgentId: undefined,
-        pricePerRequest,
-      };
-    });
+    const agents: Agent[] = paged.map(manowarToAgent);
 
     const allTags = Array.from(new Set(filtered.flatMap((card) => card.skills || []).map((tag) => tag.toLowerCase()))).sort();
     const allCategories = Array.from(new Set(filtered.map((card) => deriveCategory(card.skills || [])))).sort();
@@ -726,16 +713,26 @@ function getRelevancyScore(agent: Agent, query: string): number {
  * Get a single agent by address
  */
 export async function getAgent(address: string): Promise<Agent> {
-  // For now, only Agentverse is implemented
-  const response = await apiFetch(`/api/agentverse/agents/${encodeURIComponent(address)}`);
-
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({ error: "Unknown error" }));
-    throw new Error(data.error || `Failed to fetch agent: ${response.status}`);
+  try {
+    const data = await sdk.directory.agents.get(address) as ManowarAgentCard;
+    if (data?.walletAddress) {
+      return manowarToAgent(data);
+    }
+  } catch {
+    // Fall through to Agentverse search below; not every address is a native agent.
   }
 
-  const data: AgentverseAgent = await response.json();
-  return agentverseToAgent(data);
+  const data = await sdk.directory.agents.agentverse({ search: address, limit: 25 }) as unknown as AgentverseSearchResponse;
+  const match = data.agents.find((agent) => {
+    const full = `${agent.prefix}${agent.address}`;
+    return agent.address === address || full === address;
+  });
+
+  if (match) {
+    return agentverseToAgent(match);
+  }
+
+  throw new Error(`Failed to fetch agent: ${address}`);
 }
 
 // =============================================================================

@@ -1,4 +1,4 @@
-import { apiFetch } from "@/lib/api";
+import { sdk } from "@/lib/sdk";
 
 export interface BackpackConnectionInfo {
   slug: string;
@@ -55,30 +55,12 @@ export function resolveBackpackUserId(preferred?: string | null): string {
 }
 
 export async function fetchBackpackConnections(userAddress: string): Promise<BackpackConnectionInfo[]> {
-  const response = await apiFetch(
-    `/api/backpack/connections?userAddress=${encodeURIComponent(userAddress)}`,
-    { method: "GET" },
-  );
-
-  if (!response.ok) {
-    throw new Error(`Failed to load Backpack connections (${response.status})`);
-  }
-
-  const payload = await response.json() as { connections?: BackpackConnectionInfo[] };
+  const payload = await sdk.backpack.connections({ userAddress }) as { connections?: BackpackConnectionInfo[] };
   return Array.isArray(payload.connections) ? payload.connections : [];
 }
 
 export async function fetchBackpackPermissions(userAddress: string): Promise<BackpackCloudPermission[]> {
-  const response = await apiFetch(
-    `/api/backpack/permissions?userAddress=${encodeURIComponent(userAddress)}`,
-    { method: "GET" },
-  );
-
-  if (!response.ok) {
-    throw new Error(`Failed to load Backpack permissions (${response.status})`);
-  }
-
-  const payload = await response.json() as {
+  const payload = await sdk.backpack.permissions.list({ userAddress }) as {
     permissions?: Array<{ consentType?: string; granted?: boolean }>;
   };
 
@@ -96,39 +78,11 @@ export async function fetchBackpackPermissions(userAddress: string): Promise<Bac
 }
 
 export async function grantBackpackPermission(userAddress: string, consentType: BackpackCloudPermission): Promise<void> {
-  const response = await apiFetch("/api/backpack/permissions/grant", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      userAddress,
-      consentType,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to grant Backpack permission (${response.status})`);
-  }
-
+  await sdk.backpack.permissions.grant({ userAddress, consentType });
   cacheBackpackPermission(consentType, true);
 }
 
 export async function revokeBackpackPermission(userAddress: string, consentType: BackpackCloudPermission): Promise<void> {
-  const response = await apiFetch("/api/backpack/permissions/revoke", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      userAddress,
-      consentType,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to revoke Backpack permission (${response.status})`);
-  }
-
+  await sdk.backpack.permissions.revoke({ userAddress, consentType });
   cacheBackpackPermission(consentType, false);
 }

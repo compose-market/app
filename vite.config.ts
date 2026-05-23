@@ -24,7 +24,19 @@ export default defineConfig(() => ({
     modulePreload: {
       resolveDependencies: (_url, deps) => deps.filter((dep) => !dep.includes("vendor-thirdweb")),
     },
-    rollupOptions: {
+    rolldownOptions: {
+      onLog(level, log, defaultHandler) {
+        // Third-party packages (thirdweb, ox, @base-org, @walletconnect) emit
+        // `/* @__PURE__ */` annotations on non-call expressions (object literals,
+        // regex). Rolldown only supports pure annotations on function/constructor
+        // calls, so it warns. These are harmless — they only reduce tree-shaking
+        // hints for a few constant declarations that wouldn't be tree-shaken
+        // anyway. Filter only for node_modules to keep our own code checked.
+        if (log.code === "INVALID_ANNOTATION" && log.id?.includes("node_modules/")) {
+          return;
+        }
+        defaultHandler(level, log);
+      },
       output: {
         manualChunks(id: string) {
           if (id.includes("node_modules/react-dom/") || id.includes("node_modules/react/")) {
