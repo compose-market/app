@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Search, ChevronDown, X, Loader2, RefreshCw } from "lucide-react";
+import { ShellCommandItem, ShellModelBadge } from "@compose-market/theme/shell";
 import { useModels } from "@/hooks/use-model";
 import { formatModelTypeLabel, getPrimaryModelType } from "@/lib/models";
 
@@ -92,33 +93,30 @@ export function ModelSelector({
     return (
         <Popover open={open} onOpenChange={setOpen}>
             <PopoverTrigger asChild>
-                <Button
-                    variant="outline"
+                <ShellModelBadge
                     role="combobox"
                     aria-expanded={open}
                     disabled={disabled || isLoading}
-                    className={`w-full justify-between bg-background/50 border-sidebar-border hover:border-cyan-500/50 ${className}`}
-                >
-                    {isLoading ? (
-                        <span className="flex items-center gap-2 text-muted-foreground">
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                            Loading models...
-                        </span>
-                    ) : selectedModel ? (
-                        <span className="flex items-center gap-2 truncate">
-                            <span className="font-mono text-sm truncate">{selectedModel.name || selectedModel.modelId}</span>
-                            <Badge variant="outline" className="text-[9px] shrink-0">
-                                {formatModelTypeLabel(getPrimaryModelType(selectedModel))}
-                            </Badge>
-                        </span>
-                    ) : (
-                        <span className="text-muted-foreground">{placeholder}</span>
-                    )}
-                    <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                </Button>
+                    className={`w-full max-w-full justify-between ${className ?? ""}`}
+                    placeholder={!selectedModel}
+                    label={
+                        isLoading
+                            ? (
+                                <span className="inline-flex items-center gap-2">
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                    Loading models...
+                                </span>
+                            )
+                            : selectedModel
+                                ? selectedModel.name || selectedModel.modelId
+                                : placeholder
+                    }
+                    price={selectedModel ? formatModelTypeLabel(getPrimaryModelType(selectedModel)) : undefined}
+                    shortcut={<ChevronDown className="h-4 w-4" />}
+                />
             </PopoverTrigger>
-            <PopoverContent className="w-[400px] p-0" align="start">
-                <div className="p-2 border-b border-sidebar-border space-y-2">
+            <PopoverContent className="cm-command-panel w-[min(32rem,calc(100vw-2rem))] p-0" align="start">
+                <div className="cm-command-header space-y-2">
                     <div className="flex gap-2">
                         <div className="relative flex-1">
                             <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -126,7 +124,7 @@ export function ModelSelector({
                                 placeholder="Search models..."
                                 value={searchQuery}
                                 onChange={(event) => setSearchQuery(event.target.value)}
-                                className="pl-8 h-8 text-sm bg-background/50 border-sidebar-border"
+                                className="cm-command-input h-8 pl-8 text-sm"
                             />
                             {searchQuery && (
                                 <button
@@ -153,7 +151,7 @@ export function ModelSelector({
 
                     {showTypeFilter && typeCategories.length > 1 && (
                         <Select value={selectedType} onValueChange={setSelectedType}>
-                            <SelectTrigger className="h-8 text-xs bg-background/50 border-sidebar-border">
+                            <SelectTrigger className="cm-form-select h-8 text-xs">
                                 <SelectValue placeholder="Filter by type" />
                             </SelectTrigger>
                             <SelectContent>
@@ -167,7 +165,7 @@ export function ModelSelector({
                     )}
                 </div>
 
-                <ScrollArea className="h-[300px]">
+                <ScrollArea className="cm-command-list h-[300px]">
                     {error ? (
                         <div className="p-4 text-center text-sm text-destructive">{error.message}</div>
                     ) : filteredModels.length === 0 ? (
@@ -180,18 +178,19 @@ export function ModelSelector({
                                 const modelType = getPrimaryModelType(model);
 
                                 return (
-                                    <button
+                                    <ShellCommandItem
                                         key={model.modelId}
                                         onClick={() => handleSelect(model.modelId)}
-                                        className={`w-full text-left px-3 py-2 rounded-sm hover:bg-sidebar-accent transition-colors ${value === model.modelId ? "bg-cyan-500/10 border-l-2 border-cyan-500" : ""}`}
+                                        selected={value === model.modelId}
+                                        className="w-full text-left"
                                     >
                                         <div className="flex items-center justify-between gap-2">
-                                            <span className="font-mono text-sm truncate">{model.name || model.modelId}</span>
+                                            <span className="cm-command-item__name">{model.name || model.modelId}</span>
                                             <div className="flex items-center gap-1 shrink-0">
-                                                <Badge variant="secondary" className="text-[8px] px-1">
+                                                <Badge variant="secondary" className="cm-command-item__provider text-[8px] px-1">
                                                     {model.provider}
                                                 </Badge>
-                                                <Badge variant="outline" className="text-[9px] border-sidebar-border">
+                                                <Badge variant="outline" className="cm-command-item__type text-[9px]">
                                                     {formatModelTypeLabel(modelType)}
                                                 </Badge>
                                             </div>
@@ -199,7 +198,7 @@ export function ModelSelector({
                                         <p className="text-[10px] text-muted-foreground truncate mt-0.5">
                                             {model.modelId}
                                         </p>
-                                    </button>
+                                    </ShellCommandItem>
                                 );
                             })}
                             {filteredModels.length > 100 && (
@@ -211,7 +210,7 @@ export function ModelSelector({
                     )}
                 </ScrollArea>
 
-                <div className="p-2 border-t border-sidebar-border text-center">
+                <div className="cm-command-footer justify-center text-center">
                     <p className="text-[10px] text-muted-foreground">
                         {filteredModels.length} of {models.length} models
                     </p>

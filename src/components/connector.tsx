@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ConnectButton, useActiveAccount, useActiveWallet } from "thirdweb/react";
 import { createWallet, inAppWallet } from "thirdweb/wallets";
 import type { SmartWalletOptions } from "thirdweb/wallets";
-import { ChevronDown, LogOut, Copy, Check, ExternalLink } from "lucide-react";
+import { ChevronDown, LogOut, Copy, Check, ExternalLink, Wallet } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -108,7 +108,7 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
             !font-bold !tracking-wider
             !shadow-[0_0_15px_-3px_rgba(6,182,212,0.5)]
             hover:!bg-cyan-400
-            !border-0 !rounded-sm
+            !border-0 !rounded-full !min-h-[2.65rem]
             ${className || ""}
           `,
           style: {
@@ -135,7 +135,7 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
             !bg-cyan-500/10 !border-cyan-500/30
             !text-cyan-400 !font-mono
             hover:!bg-cyan-500/20
-            !rounded-sm
+            !rounded-full
           `,
           style: {
             fontFamily: "var(--font-mono), Fira Code, monospace",
@@ -200,25 +200,29 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
     <DropdownMenu onOpenChange={setMenuOpen}>
       <DropdownMenuTrigger asChild>
         <button
+          type="button"
+          aria-label={`Wallet ${shortAddress}`}
           className={cn(
-            "flex items-center gap-2 px-3 py-2 rounded-sm border transition-all",
-            "bg-cyan-500/10 border-cyan-500/30 text-cyan-400",
-            "hover:bg-cyan-500/20 hover:border-cyan-500/50",
-            "font-mono text-sm",
+            "cm-hud-button cm-hud-wallet",
             className
           )}
         >
-          <span className={cn("w-2 h-2 rounded-full animate-pulse", chainColor)} />
-          <span className="font-medium">
+          <Wallet className="cm-hud-icon cm-hud-wallet__icon" size={14} aria-hidden="true" />
+          <span
+            className="cm-hud-status"
+            data-tone={chainConfig?.color === "red" ? "red" : "blue"}
+            aria-hidden="true"
+          />
+          <span className="cm-hud-value">
             {balanceLoading ? "..." : `$${totalBalance}`}
           </span>
-          <span className="text-cyan-400/60 hidden sm:inline">{shortAddress}</span>
-          <ChevronDown className="w-3 h-3 text-cyan-400/60" />
+          <span className="cm-hud-address">{shortAddress}</span>
+          <ChevronDown className="cm-hud-icon" size={13} />
         </button>
       </DropdownMenuTrigger>
 
-      <DropdownMenuContent align="end" className="w-64 bg-card border-sidebar-border">
-        <div className="px-3 py-3 border-b border-sidebar-border">
+      <DropdownMenuContent align="end" className="cm-hud-menu w-64">
+        <div className="px-3 py-3 border-b border-cyan-400/15">
           <div className="flex items-center gap-2 mb-2">
             <span className={cn("w-2.5 h-2.5 rounded-full", chainColor)} />
             <span className="font-mono text-sm font-medium">
@@ -236,7 +240,7 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
           </p>
         </div>
 
-        <div className="px-3 py-2 border-b border-sidebar-border">
+        <div className="px-3 py-2 border-b border-cyan-400/15">
           <div className="flex items-center justify-between">
             <span className="font-mono text-xs text-foreground">{shortAddress}</span>
             <div className="flex items-center gap-1">

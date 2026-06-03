@@ -1,11 +1,13 @@
 import { Card, CardContent } from "@/components/ui/card";
-import { AlertCircle, ArrowLeft, Home } from "lucide-react";
+import { AlertCircle, ArrowLeft, Box } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link } from "wouter";
 
 export default function NotFound() {
   return (
-    <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-8">
+    <div className="cm-web-page">
+      <div className="cm-web-page__canvas">
+        <div className="flex h-full min-h-0 flex-col items-center justify-center space-y-8">
       {/* Glitchy 404 Display */}
       <div className="relative">
         <h1 className="text-[120px] md:text-[180px] font-display font-black text-transparent bg-clip-text bg-gradient-to-br from-cyan-400 via-fuchsia-500 to-cyan-400 leading-none select-none">
@@ -48,10 +50,10 @@ export default function NotFound() {
               <ArrowLeft className="w-4 h-4 mr-2" />
               GO BACK
             </Button>
-            <Link href="/">
+            <Link href="/market">
               <Button className="flex-1 bg-cyan-500 text-black hover:bg-cyan-400 font-mono font-bold">
-                <Home className="w-4 h-4 mr-2" />
-                HOME
+                <Box className="w-4 h-4 mr-2" />
+                MARKET
               </Button>
             </Link>
           </div>
@@ -62,6 +64,8 @@ export default function NotFound() {
       <div className="flex items-center gap-2 text-muted-foreground text-xs font-mono">
         <span className="w-2 h-2 bg-fuchsia-500 rounded-full animate-pulse"></span>
         <span>ERROR_CODE: 0x404 // COMPOSE.MARKET</span>
+      </div>
+        </div>
       </div>
     </div>
   );

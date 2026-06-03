@@ -101,6 +101,7 @@ export function WorkflowCard({ workflow, onCopyEndpoint }: WorkflowCardProps) {
         licensesAvailable: agentCard.licenses || 0,
         licensePrice: agentCard.licensePrice || "0",
         licensePriceFormatted: `$${parseFloat(agentCard.licensePrice || "0").toFixed(2)}`,
+        creatorFee: agentCard.creatorFee ?? 1,
         creator: agentCard.creator || workflow.creator,
         cloneable: agentCard.cloneable || false,
         isClone: false,

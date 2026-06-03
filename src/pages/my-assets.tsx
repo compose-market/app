@@ -1,11 +1,10 @@
 import { useState, useEffect } from "react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { usePostHog } from "@posthog/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Bot,
@@ -17,10 +16,8 @@ import {
   Copy,
   Plus,
   Activity,
-  Users,
   Clock,
   Shield,
-  ArrowRightLeft,
   Award,
   Target,
   XCircle,
@@ -39,6 +36,7 @@ import { getContractAddress, getRFAContract } from "@/lib/contracts";
 import { RFADetails } from "@/components/RFADetails";
 import { ShareSuccessDialog } from "@/components/share-dialog";
 import { getMintSuccessForShare, clearMintSuccessShare, type MintShareData } from "@/lib/share";
+import { AgentCard as SharedAgentCard } from "@/components/agent-card";
 
 export default function MyAssetsPage() {
   const { toast } = useToast();
@@ -81,26 +79,32 @@ export default function MyAssetsPage() {
 
   if (!account) {
     return (
-      <div className="max-w-4xl mx-auto pb-20 px-1">
-        <div className="cm-page-header">
-          <h1 className="cm-page-header__title">
-            <span className="text-cyan-500 mr-2">//</span>
-            MY ASSETS
-          </h1>
-          <p className="cm-page-header__subtitle">
-            View and manage your on-chain agents and workflows.
-          </p>
-        </div>
+      <div className="cm-web-page">
+        <div className="cm-web-page__canvas cm-workspace-canvas--fade">
+          <div className="cm-web-page__body cm-web-page__body--narrow">
+            <div className="cm-shell-page-header px-0">
+              <div className="cm-shell-page-header__copy">
+                <h1 className="cm-shell-page-header__title">
+                  <span className="text-cyan-500 mr-2">//</span>
+                  MY ASSETS
+                </h1>
+                <p className="cm-shell-page-header__subtitle">
+                  View and manage your on-chain agents and workflows.
+                </p>
+              </div>
+            </div>
 
-        <Card className="bg-background border-sidebar-border">
-          <CardContent className="p-8 sm:p-12 text-center space-y-3 sm:space-y-4">
-            <Shield className="w-12 h-12 sm:w-16 sm:h-16 mx-auto text-muted-foreground/50" />
-            <h2 className="text-lg sm:text-xl font-display text-foreground">Sign In Required</h2>
-            <p className="text-muted-foreground font-mono text-xs sm:text-sm max-w-md mx-auto">
-              Connect with email, social, or wallet to view your on-chain assets.
-            </p>
-          </CardContent>
-        </Card>
+            <Card className="glass-panel border-primary/20">
+              <CardContent className="p-8 sm:p-12 text-center space-y-3 sm:space-y-4">
+                <Shield className="w-12 h-12 sm:w-16 sm:h-16 mx-auto text-muted-foreground/50" />
+                <h2 className="text-lg sm:text-xl font-display text-foreground">Sign In Required</h2>
+                <p className="text-muted-foreground font-mono text-xs sm:text-sm max-w-md mx-auto">
+                  Connect with email, social, or wallet to view your on-chain assets.
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
       </div>
     );
   }
@@ -110,9 +114,11 @@ export default function MyAssetsPage() {
   const openRfaCount = rfas?.filter(r => r.status === 'Open').length || 0;
 
   return (
-    <div className="max-w-6xl mx-auto pb-20 px-1">
+    <div className="cm-web-page">
+      <div className="cm-web-page__canvas cm-workspace-canvas--fade">
+        <div className="cm-web-page__body cm-web-page__body--wide cm-page-stack cm-page-stack--simple">
       {/* Header */}
-      <div className="mb-6 sm:mb-8 space-y-3 sm:space-y-4 border-b border-sidebar-border pb-4 sm:pb-6">
+      <div className="space-y-3 sm:space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h1 className="cm-page-header__title">
@@ -132,7 +138,7 @@ export default function MyAssetsPage() {
         </div>
 
         {/* Account Info */}
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 p-3 sm:p-4 rounded-sm bg-sidebar-accent border border-sidebar-border">
+        <div className="cm-control-rail">
           <div className="flex items-center gap-2.5 sm:gap-3 flex-1">
             <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-cyan-500/20 flex items-center justify-center shrink-0">
               <Activity className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-400" />
@@ -152,7 +158,7 @@ export default function MyAssetsPage() {
               <Copy className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </Button>
           </div>
-          <div className="flex items-center justify-center sm:justify-end gap-4 sm:gap-6 text-xs sm:text-sm font-mono pt-2 sm:pt-0 border-t sm:border-t-0 border-sidebar-border sm:ml-auto">
+          <div className="flex items-center justify-center sm:justify-end gap-4 sm:gap-6 text-xs sm:text-sm font-mono sm:ml-auto">
             <div className="text-center">
               <p className="text-cyan-400 font-bold">{agentCount}</p>
               <p className="text-muted-foreground text-[10px] sm:text-xs">Agents</p>
@@ -166,25 +172,25 @@ export default function MyAssetsPage() {
       </div>
 
       {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4 sm:space-y-6">
-        <TabsList className="bg-sidebar-accent border border-sidebar-border p-1 w-full sm:w-auto">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="cm-page-tabs">
+        <TabsList className="cm-shell-tab-strip w-full sm:w-auto">
           <TabsTrigger
             value="agents"
-            className="flex-1 sm:flex-none font-mono data-[state=active]:bg-cyan-500 data-[state=active]:text-black text-xs sm:text-sm px-3 sm:px-4"
+            className="cm-shell-tab flex-1 sm:flex-none text-xs sm:text-sm px-3 sm:px-4"
           >
             <Bot className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
             AGENTS ({agentCount})
           </TabsTrigger>
           <TabsTrigger
             value="workflows"
-            className="flex-1 sm:flex-none font-mono data-[state=active]:bg-fuchsia-500 data-[state=active]:text-black text-xs sm:text-sm px-3 sm:px-4"
+            className="cm-shell-tab flex-1 sm:flex-none text-xs sm:text-sm px-3 sm:px-4"
           >
             <Layers className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
             WORKFLOWS ({workflowCount})
           </TabsTrigger>
           <TabsTrigger
             value="rfas"
-            className="flex-1 sm:flex-none font-mono data-[state=active]:bg-amber-500 data-[state=active]:text-black text-xs sm:text-sm px-3 sm:px-4"
+            className="cm-shell-tab flex-1 sm:flex-none text-xs sm:text-sm px-3 sm:px-4"
           >
             <Award className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
             RFAs ({openRfaCount})
@@ -192,11 +198,11 @@ export default function MyAssetsPage() {
         </TabsList>
 
         {/* Agents Tab */}
-        <TabsContent value="agents" className="space-y-4">
+        <TabsContent value="agents" className="cm-page-tab-panel">
           {isLoadingAgents && (
             <div className="cm-card-grid cm-card-grid--2col">
               {Array.from({ length: 4 }).map((_, i) => (
-                <Card key={i} className="bg-background border-sidebar-border">
+                <Card key={i} className="cm-surface-card">
                   <CardContent className="p-4 sm:p-5 space-y-3 sm:space-y-4">
                     <div className="flex items-start gap-2.5 sm:gap-3">
                       <Skeleton className="w-10 h-10 sm:w-12 sm:h-12 rounded-full shrink-0" />
@@ -215,13 +221,13 @@ export default function MyAssetsPage() {
           {!isLoadingAgents && agents && agents.length > 0 && (
             <div className="cm-card-grid cm-card-grid--2col">
               {agents.map((agent) => (
-                <AgentAssetCard key={agent.id} agent={agent} />
+                <AgentAssetCard key={agent.walletAddress || agent.id} agent={agent} />
               ))}
             </div>
           )}
 
           {!isLoadingAgents && (!agents || agents.length === 0) && (
-            <Card className="bg-background border-sidebar-border">
+            <Card className="cm-surface-card">
               <CardContent className="p-8 sm:p-12 text-center space-y-3 sm:space-y-4">
                 <Bot className="w-12 h-12 sm:w-16 sm:h-16 mx-auto text-muted-foreground/50" />
                 <h3 className="text-base sm:text-lg font-display text-foreground">No Agents Yet</h3>
@@ -240,11 +246,11 @@ export default function MyAssetsPage() {
         </TabsContent>
 
         {/* Workflows Tab */}
-        <TabsContent value="workflows" className="space-y-4">
+        <TabsContent value="workflows" className="cm-page-tab-panel">
           {isLoadingWorkflows && (
             <div className="cm-card-grid cm-card-grid--2col">
               {Array.from({ length: 2 }).map((_, i) => (
-                <Card key={i} className="bg-background border-sidebar-border">
+                <Card key={i} className="cm-surface-card">
                   <CardContent className="p-4 sm:p-5 space-y-3 sm:space-y-4">
                     <Skeleton className="h-24 sm:h-32 w-full rounded-sm" />
                     <Skeleton className="h-4 sm:h-5 w-3/4" />
@@ -264,7 +270,7 @@ export default function MyAssetsPage() {
           )}
 
           {!isLoadingWorkflows && (!workflows || workflows.length === 0) && (
-            <Card className="bg-background border-sidebar-border">
+            <Card className="cm-surface-card">
               <CardContent className="p-8 sm:p-12 text-center space-y-3 sm:space-y-4">
                 <Layers className="w-12 h-12 sm:w-16 sm:h-16 mx-auto text-muted-foreground/50" />
                 <h3 className="text-base sm:text-lg font-display text-foreground">No Workflows Yet</h3>
@@ -283,11 +289,11 @@ export default function MyAssetsPage() {
         </TabsContent>
 
         {/* RFAs Tab */}
-        <TabsContent value="rfas" className="space-y-4">
+        <TabsContent value="rfas" className="cm-page-tab-panel">
           {isLoadingRFAs && (
             <div className="grid grid-cols-1 gap-3 sm:gap-4">
               {Array.from({ length: 3 }).map((_, i) => (
-                <Card key={i} className="bg-background border-sidebar-border">
+                <Card key={i} className="cm-surface-card">
                   <CardContent className="p-4 sm:p-5 space-y-3">
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1 space-y-2">
@@ -319,7 +325,7 @@ export default function MyAssetsPage() {
           )}
 
           {!isLoadingRFAs && (!rfas || rfas.length === 0) && (
-            <Card className="bg-background border-sidebar-border">
+            <Card className="cm-surface-card">
               <CardContent className="p-8 sm:p-12 text-center space-y-3 sm:space-y-4">
                 <FileSearch className="w-12 h-12 sm:w-16 sm:h-16 mx-auto text-muted-foreground/50" />
                 <h3 className="text-base sm:text-lg font-display text-foreground">No RFAs Published</h3>
@@ -351,133 +357,26 @@ export default function MyAssetsPage() {
         onOpenChange={handleCloseShareDialog}
         data={shareData}
       />
+        </div>
+      </div>
     </div>
   );
 }
 
 function AgentAssetCard({ agent }: { agent: OnchainAgent }) {
-  const metadata = agent.metadata;
-  const name = metadata?.name || `Agent #${agent.id}`;
-  const description = metadata?.description || "No description available";
-
-  let avatarUrl: string | null = null;
-  if (metadata?.image && metadata.image !== "none") {
-    // Convert IPFS URI to gateway URL if needed
-    if (metadata.image.startsWith("ipfs://")) {
-      avatarUrl = getIpfsUrl(metadata.image.replace("ipfs://", ""));
-    } else if (metadata.image.startsWith("https://")) {
-      avatarUrl = metadata.image;
-    }
-  }
-
-  const initials = name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
-  // Use chainId from agent metadata (source of truth for where it was minted)
-  const agentChainId = agent.metadata?.chain;
-  const explorerUrl = agentChainId && CHAIN_CONFIG[agentChainId]
-    ? `${CHAIN_CONFIG[agentChainId].explorer}/token/${getContractAddress("AgentFactory", agentChainId)}?a=${agent.id}`
-    : null;
+  const [, setLocation] = useLocation();
 
   // Agent page URL using wallet address (primary) or ID (fallback)
   const agentPageUrl = agent.walletAddress
     ? `/agent/${agent.walletAddress}`
-    : `/agent/${agent.id}`;
+    : agent.id > 0 ? `/agent/${agent.id}` : "/agents";
 
   return (
-    <Link href={agentPageUrl} className="block">
-      <Card
-        className="bg-background border-sidebar-border hover:border-cyan-500/50 transition-colors cursor-pointer group"
-      >
-        <CardContent className="p-4 sm:p-5 space-y-3 sm:space-y-4">
-          <div className="flex items-start gap-2.5 sm:gap-3">
-            <Avatar className="w-10 h-10 sm:w-12 sm:h-12 border-2 border-cyan-500/30 group-hover:border-cyan-500/60 transition-colors shrink-0">
-              <AvatarImage src={avatarUrl || undefined} alt={name} />
-              <AvatarFallback className="bg-cyan-500/10 text-cyan-400 font-mono text-xs sm:text-sm">
-                {initials}
-              </AvatarFallback>
-            </Avatar>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-start justify-between gap-2">
-                <h3 className="font-display font-bold text-foreground truncate group-hover:text-cyan-400 transition-colors text-sm sm:text-base">
-                  {name}
-                </h3>
-                {explorerUrl && (
-                  <a
-                    href={explorerUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={(e) => e.stopPropagation()}
-                    className="p-1 text-muted-foreground hover:text-cyan-400 transition-colors shrink-0"
-                    title="View on explorer"
-                  >
-                    <ExternalLink className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                  </a>
-                )}
-              </div>
-              <p className="text-[10px] sm:text-xs font-mono text-muted-foreground">
-                Agent #{agent.id} • ERC8004
-              </p>
-            </div>
-          </div>
-
-          <p className="text-[10px] sm:text-xs text-muted-foreground line-clamp-2">
-            {description}
-          </p>
-
-          <div className="flex flex-wrap gap-1 sm:gap-1.5">
-            <Badge variant="outline" className="text-[8px] sm:text-[10px] font-mono border-cyan-500/30 text-cyan-400 bg-cyan-500/10 px-1 sm:px-1.5 py-0">
-              <Sparkles className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
-              on-chain
-            </Badge>
-            {agent.isWarped && (
-              <Badge variant="outline" className="text-[8px] sm:text-[10px] font-mono border-fuchsia-500/30 text-fuchsia-400 bg-fuchsia-500/10 px-1 sm:px-1.5 py-0">
-                <ArrowRightLeft className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
-                warped
-              </Badge>
-            )}
-            {agent.cloneable && (
-              <Badge variant="outline" className="text-[8px] sm:text-[10px] font-mono border-purple-500/30 text-purple-400 bg-purple-500/10 px-1 sm:px-1.5 py-0">
-                cloneable
-              </Badge>
-            )}
-            {agent.isClone && (
-              <Badge variant="outline" className="text-[8px] sm:text-[10px] font-mono border-orange-500/30 text-orange-400 bg-orange-500/10 px-1 sm:px-1.5 py-0">
-                clone #{agent.parentAgentId}
-              </Badge>
-            )}
-          </div>
-
-          <div className="cm-stat-grid cm-stat-grid--3col">
-            <div className="text-center p-1.5 sm:p-2 rounded-sm bg-sidebar-accent">
-              <DollarSign className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-green-400" />
-              <p className="text-foreground font-bold truncate">{agent.licensePriceFormatted}</p>
-              <p className="text-muted-foreground text-[8px] sm:text-[10px]">license cost</p>
-            </div>
-            <div className="text-center p-1.5 sm:p-2 rounded-sm bg-sidebar-accent">
-              <Users className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-cyan-400" />
-              <p className="text-foreground font-bold">{agent.licensesMinted}</p>
-              <p className="text-muted-foreground text-[8px] sm:text-[10px]">minted</p>
-            </div>
-            <div className="text-center p-1.5 sm:p-2 rounded-sm bg-sidebar-accent">
-              <Zap className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-fuchsia-400" />
-              <p className="text-foreground font-bold">
-                {agent.licenses === 0 ? "∞" : agent.licensesAvailable}
-              </p>
-              <p className="text-muted-foreground text-[8px] sm:text-[10px]">available</p>
-            </div>
-          </div>
-
-          {/* Global API Endpoint */}
-          {agent.walletAddress && (
-            <div className="pt-2 border-t border-sidebar-border">
-              <p className="text-[9px] sm:text-[10px] text-muted-foreground mb-1">API Endpoint</p>
-              <code className="text-[9px] sm:text-[10px] font-mono text-cyan-400 break-all block bg-sidebar-accent/50 p-1 sm:p-1.5 rounded">
-                api.compose.market/agent/{agent.walletAddress.slice(0, 8)}...
-              </code>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    </Link>
+    <SharedAgentCard
+      agent={agent}
+      className="cm-agent-card--asset"
+      onOpen={() => setLocation(agentPageUrl)}
+    />
   );
 }
 
@@ -501,7 +400,7 @@ function WorkflowAssetCard({ workflow }: { workflow: OnchainWorkflow }) {
   return (
     <Link href={workflowPageUrl} className="block">
       <Card
-        className="bg-background border-sidebar-border hover:border-fuchsia-500/50 transition-colors overflow-hidden cursor-pointer group"
+        className="cm-surface-card hover:border-fuchsia-500/50 transition-colors overflow-hidden cursor-pointer group"
       >
         {bannerUrl ? (
           <div className="h-24 sm:h-32 bg-cover bg-center" style={{ backgroundImage: `url(${bannerUrl})` }} />
@@ -564,17 +463,17 @@ function WorkflowAssetCard({ workflow }: { workflow: OnchainWorkflow }) {
           </div>
 
           <div className="cm-stat-grid cm-stat-grid--3col">
-            <div className="text-center p-1.5 sm:p-2 rounded-sm bg-sidebar-accent">
+            <div className="cm-stat-grid__cell">
               <DollarSign className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-green-400" />
               <p className="text-foreground font-bold truncate">${workflow.totalPrice}</p>
               <p className="text-muted-foreground text-[8px] sm:text-[10px]">total cost</p>
             </div>
-            <div className="text-center p-1.5 sm:p-2 rounded-sm bg-sidebar-accent">
+            <div className="cm-stat-grid__cell">
               <Layers className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-cyan-400" />
               <p className="text-foreground font-bold">{workflow.agentIds?.length || 0}</p>
               <p className="text-muted-foreground text-[8px] sm:text-[10px]">agents</p>
             </div>
-            <div className="text-center p-1.5 sm:p-2 rounded-sm bg-sidebar-accent">
+            <div className="cm-stat-grid__cell">
               <Zap className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-fuchsia-400" />
               <p className="text-foreground font-bold">
                 {workflow.units === 0 ? "∞" : workflow.units - workflow.unitsMinted}
@@ -656,7 +555,7 @@ function RFAAssetCard({
 
   return (
     <Card
-      className="bg-background border-sidebar-border hover:border-amber-500/50 transition-colors cursor-pointer"
+      className="cm-surface-card hover:border-amber-500/50 transition-colors cursor-pointer"
       onClick={onViewDetails}
     >
       <CardContent className="p-4 sm:p-5 space-y-3">
@@ -700,7 +599,7 @@ function RFAAssetCard({
 
         {/* Actions */}
         {rfa.status === 'Open' && (
-          <div className="flex items-center gap-2 pt-2 border-t border-sidebar-border">
+          <div className="flex items-center gap-2 pt-2 border-t border-primary/15">
             <Button
               variant="outline"
               size="sm"

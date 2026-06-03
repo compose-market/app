@@ -47,8 +47,10 @@ export default function ModelsPage() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto pb-20">
-      <div className="mb-8 space-y-4 border-b border-sidebar-border pb-6">
+    <div className="cm-web-page">
+      <div className="cm-web-page__canvas cm-workspace-canvas--fade">
+        <div className="cm-web-page__body cm-web-page__body--wide cm-page-stack">
+      <div className="cm-page-stack__header space-y-3 sm:space-y-4 border-b border-sidebar-border pb-3 sm:pb-4">
         <Link href="/create-agent">
           <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-cyan-400 -ml-2 mb-2">
             <ArrowLeft className="w-4 h-4 mr-2" />
@@ -68,7 +70,8 @@ export default function ModelsPage() {
         </p>
       </div>
 
-      <div className="flex flex-col md:flex-row gap-4 mb-8">
+      <div className="cm-page-stack__controls">
+      <div className="cm-control-rail cm-control-rail--compact flex flex-col md:flex-row gap-3 md:gap-4">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
@@ -109,7 +112,7 @@ export default function ModelsPage() {
       </div>
 
       {models.length > 0 && (
-        <div className="flex items-center gap-6 mb-6 text-sm font-mono text-muted-foreground">
+        <div className="flex items-center gap-6 text-sm font-mono text-muted-foreground">
           <div className="flex items-center gap-2">
             <Layers className="w-4 h-4 text-cyan-400" />
             <span>{models.length} total models</span>
@@ -126,6 +129,9 @@ export default function ModelsPage() {
           <p className="font-mono text-sm">{error.message}</p>
         </div>
       )}
+      </div>
+
+      <div className="cm-page-list cm-workspace-canvas--fade">
 
       {isLoading && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -169,6 +175,9 @@ export default function ModelsPage() {
           </Button>
         </div>
       )}
+      </div>
+        </div>
+      </div>
     </div>
   );
 }

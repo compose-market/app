@@ -8,6 +8,7 @@
  */
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
+import { ShellCommandItem, ShellCommandOverlay, ShellCommandPanel } from "@compose-market/theme/shell";
 import { useModels } from "@/hooks/use-model";
 import { formatModelTypeLabel, getPrimaryModelType, getDefaultModelPricingSections, getModelTypeValues } from "@/lib/models";
 import type { CatalogModel } from "@/lib/models";
@@ -172,18 +173,13 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, provider
   if (!open) return null;
 
   return createPortal(
-    <div
-      className="cm-playground__cmd-backdrop"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onOpenChange(false);
-      }}
-    >
-      <div className="cm-playground__cmd-panel" onKeyDown={handleKeyDown}>
-        <div className="cm-playground__cmd-header">
+    <ShellCommandOverlay open={open} onClose={() => onOpenChange(false)}>
+      <ShellCommandPanel onKeyDown={handleKeyDown}>
+        <div className="cm-command-header cm-playground__cmd-header">
           <input
             ref={inputRef}
-            className="cm-playground__cmd-input"
-            placeholder="Search models by name, provider, or type…"
+            className="cm-command-input cm-playground__cmd-input"
+            placeholder="Search models by name, provider, or type..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             autoComplete="off"
@@ -191,15 +187,15 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, provider
           />
         </div>
 
-        <div className="cm-playground__cmd-list" ref={listRef}>
+        <div className="cm-command-list cm-playground__cmd-list" ref={listRef}>
           {flatList.length === 0 ? (
-            <div className="cm-playground__cmd-empty">No models match "{searchQuery}"</div>
+            <div className="cm-command-empty cm-playground__cmd-empty">No models match "{searchQuery}"</div>
           ) : (
             grouped.map(([providerName, providerModels]) => {
               const pColor = getProviderColor(providerName);
               return (
               <div key={providerName}>
-                <div className="cm-playground__cmd-group" style={{ color: pColor.text }}>
+                <div className="cm-command-group cm-playground__cmd-group" style={{ color: pColor.text }}>
                   {providerName} ({providerModels.length})
                 </div>
                 {providerModels.map((model) => {
@@ -209,16 +205,11 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, provider
                   const isCurrent = model.modelId === value;
 
                   return (
-                    <div
+                    <ShellCommandItem
                       key={model.modelId}
                       data-cmd-item
-                      className={[
-                        "cm-playground__cmd-item",
-                        isSelected ? "cm-playground__cmd-item--selected" : "",
-                        isCurrent ? "cm-playground__cmd-item--current" : "",
-                      ]
-                        .filter(Boolean)
-                        .join(" ")}
+                      selected={isSelected}
+                      current={isCurrent}
                       onClick={() => {
                         onSelect(model.modelId);
                         onOpenChange(false);
@@ -238,7 +229,7 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, provider
                         </span>
                         <span className="cm-playground__cmd-item-price">{formatPrice(model)}</span>
                       </div>
-                    </div>
+                    </ShellCommandItem>
                   );
                 })}
               </div>
@@ -247,7 +238,7 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, provider
           )}
         </div>
 
-        <div className="cm-playground__cmd-footer">
+        <div className="cm-command-footer cm-playground__cmd-footer">
           <span className="cm-playground__cmd-footer-count">
             {filteredModels.length} of {models.length} models
           </span>
@@ -263,8 +254,8 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, provider
             </span>
           </div>
         </div>
-      </div>
-    </div>,
+      </ShellCommandPanel>
+    </ShellCommandOverlay>,
     document.body
   );
 }

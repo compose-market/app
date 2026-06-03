@@ -206,6 +206,10 @@ type ManowarAgentCard = {
   creator?: string;
 };
 
+type ManowarAgentPage = {
+  agents?: ManowarAgentCard[];
+};
+
 // =============================================================================
 // Adapter Functions
 // =============================================================================
@@ -548,7 +552,17 @@ async function searchManowar(
   options: SearchAgentsOptions
 ): Promise<{ agents: Agent[]; total: number; tags: string[]; categories: string[] }> {
   try {
-    const data = await sdk.directory.agents.list() as { agents?: ManowarAgentCard[] };
+    const params = new URLSearchParams({
+      limit: String(Math.max(1, Math.min(60, options.limit || 30))),
+    });
+    if (options.search) params.set("q", options.search);
+    const response = await sdk.fetch(`/agents?${params.toString()}`, {
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) {
+      throw new Error(`Agent lookup failed with status ${response.status}`);
+    }
+    const data = await response.json() as ManowarAgentPage;
     const cards = Array.isArray(data.agents) ? data.agents : [];
 
     let filtered = cards.filter((card) => typeof card.walletAddress === "string" && card.walletAddress.startsWith("0x"));

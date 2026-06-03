@@ -231,7 +231,7 @@ export default function ManowarPage() {
 
     if (isLoading) {
         return (
-            <div className="flex flex-col h-[calc(100vh-120px)]">
+            <div className="cm-chat-workspace">
                 <div className="shrink-0 mb-3 flex items-center justify-between">
                     <Skeleton className="h-8 w-32" />
                     <Skeleton className="h-6 w-24" />
@@ -250,7 +250,7 @@ export default function ManowarPage() {
 
     if (workflowError || !workflow) {
         return (
-            <div className="flex flex-col h-[calc(100vh-120px)]">
+            <div className="cm-chat-workspace">
                 <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-fuchsia-400 -ml-2 mb-3" onClick={() => history.back()}>
                     <ArrowLeft className="w-4 h-4 mr-2" />
                     Back
@@ -268,7 +268,7 @@ export default function ManowarPage() {
     }
 
     return (
-        <div className="flex flex-col h-[calc(100vh-120px)]">
+        <div className="cm-chat-workspace">
             {/* Compact Header */}
             <div className="shrink-0 mb-3 flex items-center justify-between">
                 <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-fuchsia-400 -ml-2 h-7 px-2" onClick={() => history.back()}>

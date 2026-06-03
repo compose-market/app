@@ -72,22 +72,21 @@ export function NetworkSelector({
             <Select value={currentChainId.toString()} onValueChange={handleChange}>
                 <SelectTrigger
                     className={cn(
-                        "h-8 w-full border bg-sidebar-accent/50 font-mono text-xs",
+                        "cm-hud-button font-mono text-xs",
                         colorClass,
                         className
                     )}
                 >
-                    <div className="flex items-center gap-2 truncate">
+                    <div className="flex min-w-0 items-center gap-2 truncate">
                         <span
-                            className={cn(
-                                "w-2 h-2 rounded-full animate-pulse",
-                                currentChain?.color === "red" ? "bg-red-400" : "bg-blue-400"
-                            )}
+                            className="cm-hud-status"
+                            data-tone={currentChain?.color === "red" ? "red" : "blue"}
+                            aria-hidden="true"
                         />
-                        <span className="truncate">{currentChain?.name || "Select"}</span>
+                        <span className="cm-hud-value">{currentChain?.name || "Select"}</span>
                     </div>
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="cm-hud-menu">
                     {SUPPORTED_CHAINS.map(({ id }) => {
                         const config = CHAIN_CONFIG[id];
                         const balance = balances?.find(b => b.chainId === id);

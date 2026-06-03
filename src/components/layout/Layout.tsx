@@ -1,211 +1,249 @@
-import { useState, useEffect } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation } from "wouter";
-import { Sidebar } from "./Sidebar";
-import { TopBar } from "./TopBar";
-import { Menu, X, Home, Box, Layers, PlusCircle, Sparkles, Activity, Vault } from "lucide-react";
-import { ComposeLogo } from "@/components/brand/Logo";
+import {
+  Activity,
+  Bell,
+  Box,
+  Layers,
+  MoreHorizontal,
+  PlusCircle,
+  Search,
+  Sparkles,
+  Vault,
+} from "lucide-react";
+import { ComposeAppShell } from "@compose-market/theme/app";
 import { WalletConnector, useWalletAccount } from "@/components/connector";
 import { BackpackDialog } from "@/components/backpack";
 import { SessionIndicator } from "@/components/session";
 import { DispenserButton } from "@/components/dispenser";
 import { NetworkSelector } from "@/components/ui/network-selector";
-import { cn } from "@/lib/utils";
-import { ComposeAppShell } from "@compose-market/theme/app";
 
 interface LayoutProps {
-  children: React.ReactNode;
+  children: ReactNode;
 }
 
-const moduleLinks = [
-  { href: "/", icon: Home, label: "HOME" },
-  { href: "/market", icon: Box, label: "MARKET" },
-  { href: "/compose", icon: Layers, label: "COMPOSE" },
-  { href: "/create-agent", icon: PlusCircle, label: "CREATE AGENT" },
-  { href: "/playground", icon: Sparkles, label: "PLAYGROUND" },
-];
-
-const networkLinks = [
-  { href: "/my-assets", icon: Activity, label: "MY ASSETS" },
+const links = [
+  { href: "/market", icon: Box, label: "Market" },
+  { href: "/compose", icon: Layers, label: "Compose" },
+  { href: "/create-agent", icon: PlusCircle, label: "Create Agent" },
+  { href: "/playground", icon: Sparkles, label: "Playground" },
+  { href: "/my-assets", icon: Activity, label: "My Assets" },
 ];
 
 export function Layout({ children }: LayoutProps) {
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [location] = useLocation();
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [mobileVaultOpen, setMobileVaultOpen] = useState(false);
+  const [vaultOpen, setVaultOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [overflowOpen, setOverflowOpen] = useState(false);
+  const hudRef = useRef<HTMLDivElement | null>(null);
   const { isConnected } = useWalletAccount();
 
   useEffect(() => {
-    const checkCollapsed = () => {
-      setSidebarCollapsed(localStorage.getItem("sidebar_collapsed") === "true");
-    };
-
-    checkCollapsed();
-    window.addEventListener("sidebarCollapsedChange", checkCollapsed);
-    window.addEventListener("storage", checkCollapsed);
-
-    return () => {
-      window.removeEventListener("sidebarCollapsedChange", checkCollapsed);
-      window.removeEventListener("storage", checkCollapsed);
-    };
-  }, []);
-
-  useEffect(() => {
-    setIsMenuOpen(false);
+    setSearchOpen(false);
+    setOverflowOpen(false);
   }, [location]);
 
   useEffect(() => {
-    document.body.style.overflow = isMenuOpen ? "hidden" : "";
-    return () => {
-      document.body.style.overflow = "";
-    };
-  }, [isMenuOpen]);
+    if (!searchOpen && !overflowOpen) {
+      return;
+    }
+
+    function close(event: MouseEvent): void {
+      if (hudRef.current?.contains(event.target as Node)) {
+        return;
+      }
+      setSearchOpen(false);
+      setOverflowOpen(false);
+    }
+
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
+  }, [overflowOpen, searchOpen]);
 
   return (
     <ComposeAppShell
-      contentClassName="min-h-screen text-foreground font-sans selection:bg-fuchsia-500/30 selection:text-fuchsia-200 overflow-x-hidden"
+      className="cm-app-shell--luminescent"
+      contentClassName="h-dvh min-h-0 text-foreground font-sans selection:bg-fuchsia-500/30 selection:text-fuchsia-200 overflow-hidden"
     >
-      <div className="hidden md:block">
-        <Sidebar />
-      </div>
+      <div className="cm-app-chrome">
+        <Nav location={location} onVault={() => setVaultOpen(true)} />
 
-      <div
-        className={cn(
-          "fixed inset-0 bg-black/60 backdrop-blur-sm z-40 md:hidden transition-opacity duration-300",
-          isMenuOpen ? "opacity-100" : "opacity-0 pointer-events-none"
-        )}
-        onClick={() => setIsMenuOpen(false)}
-        aria-hidden="true"
-      />
+        <div className="cm-app-chrome__hud" ref={hudRef} aria-label="Workspace controls">
+          <div className="cm-app-chrome__hud-group" data-search-open={searchOpen}>
+            <SearchControl
+              open={searchOpen}
+              onOpenChange={(open) => {
+                setSearchOpen(open);
+                if (open) {
+                  setOverflowOpen(false);
+                }
+              }}
+            />
 
-      <aside
-        className={cn(
-          "fixed md:hidden w-[280px] max-w-[85vw] h-full bg-background/98 border-r border-sidebar-border flex flex-col backdrop-blur-md transition-transform duration-300 ease-out z-50",
-          isMenuOpen ? "translate-x-0" : "-translate-x-full"
-        )}
-      >
-        <div className="p-5 border-b border-sidebar-border flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <ComposeLogo className="w-9 h-9 text-cyan-400 drop-shadow-[0_0_15px_rgba(6,182,212,0.5)]" />
-            <div>
-              <h1 className="font-display font-black text-lg tracking-tighter text-foreground leading-none">
-                COMPOSE<br />
-                <span className="text-cyan-400">.MARKET</span>
-              </h1>
-              <p className="font-mono text-[7px] text-fuchsia-500 tracking-widest mt-0.5">POWERED BY MANOWAR</p>
+            <div className="cm-app-chrome__hud-item" data-priority="low">
+              <DispenserButton />
             </div>
-          </div>
-          <button
-            onClick={() => setIsMenuOpen(false)}
-            className="p-2 text-muted-foreground hover:text-foreground transition-colors"
-            aria-label="Close menu"
-          >
-            <X size={20} />
-          </button>
-        </div>
 
-        <nav className="flex-1 py-4 overflow-y-auto">
-          <div className="px-4 mb-2 text-[10px] font-mono text-muted-foreground uppercase tracking-widest">Modules</div>
-          {moduleLinks.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className={cn(
-                "w-full flex items-center gap-3 px-4 py-3.5 text-sm font-medium transition-all border-l-2 group active:bg-cyan-950/40",
-                location === link.href
-                  ? "border-cyan-400 bg-cyan-950/30 text-cyan-400"
-                  : "border-transparent text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
-              )}
-            >
-              <link.icon className={cn(
-                "w-5 h-5",
-                location === link.href
-                  ? "text-cyan-400 drop-shadow-[0_0_10px_cyan]"
-                  : "group-hover:text-cyan-400"
-              )} />
-              <span className="font-mono tracking-wider">{link.label}</span>
-              {location === link.href ? (
-                <div className="ml-auto w-1.5 h-1.5 bg-cyan-400 rounded-full animate-ping" />
-              ) : null}
-            </Link>
-          ))}
+            {isConnected ? (
+              <div className="cm-app-chrome__hud-item" data-priority="medium">
+                <SessionIndicator />
+              </div>
+            ) : null}
 
-          <div className="px-4 mt-5 mb-2 text-[10px] font-mono text-muted-foreground uppercase tracking-widest">Network</div>
-          {networkLinks.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className={cn(
-                "w-full flex items-center gap-3 px-4 py-3.5 text-sm font-medium transition-all border-l-2 group active:bg-cyan-950/40",
-                location === link.href
-                  ? "border-cyan-400 bg-cyan-950/30 text-cyan-400"
-                  : "border-transparent text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
-              )}
-            >
-              <link.icon className={cn(
-                "w-5 h-5",
-                location === link.href
-                  ? "text-cyan-400 drop-shadow-[0_0_10px_cyan]"
-                  : "group-hover:text-cyan-400"
-              )} />
-              <span className="font-mono tracking-wider">{link.label}</span>
-              {location === link.href ? (
-                <div className="ml-auto w-1.5 h-1.5 bg-cyan-400 rounded-full animate-ping" />
-              ) : null}
-            </Link>
-          ))}
+            <div className="cm-app-chrome__hud-item" data-priority="medium">
+              <WalletConnector compact className="cm-hud-button" />
+            </div>
 
-          <button
-            onClick={() => setMobileVaultOpen(true)}
-            className="w-full flex items-center gap-3 px-4 py-3.5 text-sm font-medium transition-all border-l-2 group active:bg-cyan-950/40 border-transparent text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
-          >
-            <Vault className="w-5 h-5 group-hover:text-cyan-400" />
-            <span className="font-mono tracking-wider">VAULT</span>
-          </button>
-          <BackpackDialog open={mobileVaultOpen} onOpenChange={setMobileVaultOpen} showTrigger={false} />
-        </nav>
-
-        <div className="p-4 border-t border-sidebar-border">
-          <div className="space-y-2">
-            <span className="text-xs text-muted-foreground font-mono">NETWORK</span>
-            <NetworkSelector compact showBalance />
+            <OverflowControl
+              open={overflowOpen}
+              onOpenChange={(open) => {
+                setOverflowOpen(open);
+                if (open) {
+                  setSearchOpen(false);
+                }
+              }}
+            />
           </div>
         </div>
-      </aside>
 
-      <div className="md:hidden fixed top-0 left-0 right-0 h-14 bg-background/95 backdrop-blur-md border-b border-sidebar-border flex items-center justify-between px-3 z-30 safe-area-top">
-        <div className="flex items-center gap-2 min-w-0 flex-1">
-          <button
-            onClick={() => setIsMenuOpen(!isMenuOpen)}
-            className="p-2 text-muted-foreground border border-sidebar-border rounded-sm hover:border-cyan-500/50 active:bg-cyan-500/10 transition-colors touch-manipulation shrink-0"
-            aria-label="Toggle menu"
-            aria-expanded={isMenuOpen}
-          >
-            {isMenuOpen ? <X size={18} /> : <Menu size={18} />}
-          </button>
-          <ComposeLogo className="w-6 h-6 text-cyan-400 shrink-0" />
-          <span className="font-display font-bold text-white tracking-tight text-xs truncate hidden xs:block">COMPOSE.MARKET</span>
-        </div>
+        <BackpackDialog open={vaultOpen} onOpenChange={setVaultOpen} showTrigger={false} />
 
-        <div className="flex items-center gap-2 shrink-0">
-          <DispenserButton />
-          {isConnected ? <SessionIndicator /> : null}
-          <WalletConnector compact />
-        </div>
+        <main className="cm-app-chrome__main cm-web-main">
+          <div className="cm-shell-page cm-web-workspace animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {children}
+          </div>
+        </main>
       </div>
-
-      <div className="hidden md:block">
-        <TopBar sidebarCollapsed={sidebarCollapsed} />
-      </div>
-
-      <main className={cn(
-        "pl-0 pt-14 md:pt-16 min-h-screen relative overflow-hidden transition-all duration-300",
-        sidebarCollapsed ? "md:pl-16" : "md:pl-64"
-      )}>
-        <div className="relative z-10 p-4 md:p-6 max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
-          {children}
-        </div>
-      </main>
     </ComposeAppShell>
+  );
+}
+
+function Nav({ location, onVault }: { location: string; onVault: () => void }) {
+  return (
+    <nav className="cm-app-chrome__navdock" aria-label="Primary navigation">
+      <div className="cm-app-chrome__navgroup">
+        {links.map((link) => {
+          const active = location === link.href || (link.href === "/market" && location === "/");
+          return (
+            <Link
+              key={link.href}
+              href={link.href}
+              className="cm-app-chrome__navitem"
+              data-active={active}
+              aria-current={active ? "page" : undefined}
+              aria-label={link.label}
+              title={link.label}
+            >
+              <span className="cm-app-chrome__navitem-icon" aria-hidden="true">
+                <link.icon size={18} />
+              </span>
+              <span className="cm-app-chrome__tooltip">{link.label}</span>
+            </Link>
+          );
+        })}
+        <button
+          type="button"
+          className="cm-app-chrome__navitem"
+          onClick={onVault}
+          aria-label="Vault"
+          title="Vault"
+        >
+          <span className="cm-app-chrome__navitem-icon" aria-hidden="true">
+            <Vault size={18} />
+          </span>
+          <span className="cm-app-chrome__tooltip">Vault</span>
+        </button>
+      </div>
+      <div className="cm-app-chrome__navutility" aria-label="Network">
+        <NetworkSelector compact showBalance className="cm-app-chrome__navselect" />
+      </div>
+    </nav>
+  );
+}
+
+function SearchControl({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => inputRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [open]);
+
+  return (
+    <div className="cm-app-chrome__search" data-open={open}>
+      <label className="cm-search cm-search--hud" aria-label="Search agents and workflows" aria-hidden={!open}>
+        <Search size={16} aria-hidden="true" />
+        <input
+          ref={inputRef}
+          className="cm-search__input"
+          type="search"
+          placeholder="Search agents, workflows..."
+          disabled={!open}
+          tabIndex={open ? 0 : -1}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              onOpenChange(false);
+            }
+          }}
+        />
+      </label>
+
+      <button
+        type="button"
+        className="cm-hud-button cm-hud-button--icon cm-app-chrome__search-toggle"
+        aria-label="Search"
+        aria-expanded={open}
+        onClick={() => onOpenChange(!open)}
+      >
+        <Search className="cm-hud-icon" size={17} />
+      </button>
+    </div>
+  );
+}
+
+function OverflowControl({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <div className="cm-app-chrome__hud-fold">
+      <button
+        type="button"
+        className="cm-hud-button cm-hud-button--icon cm-hud-overflow"
+        aria-label="More controls"
+        aria-expanded={open}
+        onClick={() => onOpenChange(!open)}
+      >
+        <MoreHorizontal className="cm-hud-icon" size={18} />
+      </button>
+
+      {open ? (
+        <div className="cm-app-chrome__hud-popover">
+          <div className="cm-app-chrome__hud-popover-body">
+            <div className="cm-app-chrome__hud-row">
+              <span className="cm-app-chrome__hud-popover-title">Funds</span>
+              <DispenserButton />
+            </div>
+            <button type="button" className="cm-hud-button">
+              <Bell className="cm-hud-icon" size={16} />
+              <span className="cm-hud-label">Alerts</span>
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }

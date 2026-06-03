@@ -38,6 +38,7 @@ export const AgentFactoryABI = [
         { name: "licenses", type: "uint256" },
         { name: "licensesMinted", type: "uint256" },
         { name: "licensePrice", type: "uint256" },
+        { name: "creatorFee", type: "uint256" },
         { name: "creator", type: "address" },
         { name: "cloneable", type: "bool" },
         { name: "isClone", type: "bool" },
@@ -123,6 +124,7 @@ export const AgentFactoryABI = [
       { name: "dnaHash", type: "bytes32" },
       { name: "licenses", type: "uint256" },
       { name: "licensePrice", type: "uint256" },
+      { name: "creatorFee", type: "uint256" },
       { name: "cloneable", type: "bool" },
       { name: "agentCardUri", type: "string" },
     ],
@@ -148,6 +150,7 @@ export const AgentFactoryABI = [
       { name: "dnaHash", type: "bytes32", indexed: false },
       { name: "licenses", type: "uint256", indexed: false },
       { name: "licensePrice", type: "uint256", indexed: false },
+      { name: "creatorFee", type: "uint256", indexed: false },
       { name: "cloneable", type: "bool", indexed: false },
     ],
   },
@@ -608,6 +611,7 @@ export function prepareMintAgentCall(
     dnaHash: `0x${string}`;
     licenses: bigint;
     licensePrice: bigint;
+    creatorFee?: bigint | number;
     cloneable: boolean;
     agentCardUri: string;
   },
@@ -619,6 +623,7 @@ export function prepareMintAgentCall(
       args.dnaHash,
       args.licenses,
       args.licensePrice,
+      BigInt(args.creatorFee ?? 1),
       args.cloneable,
       args.agentCardUri,
     ],
@@ -841,6 +846,7 @@ export interface AgentData {
   licenses: bigint;
   licensesMinted: bigint;
   licensePrice: bigint;
+  creatorFee: bigint;
   creator: Address;
   cloneable: boolean;
   isClone: boolean;
@@ -872,6 +878,7 @@ export interface MintAgentParams {
   model: string;
   licenses: number; // 0 = infinite (Renamed from units)
   licensePrice: number; // USDC (Renamed from price)
+  creatorFee?: number;
   cloneable: boolean;
   agentCardUri: string;
 }

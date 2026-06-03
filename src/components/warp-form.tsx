@@ -338,6 +338,7 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
         chain: chainId,
         model: "warped", // Warped agents use their original model
         licensePrice: usdcToWei(parseFloat(values.licensePrice)).toString(),
+        creatorFee: 1,
         licenses: values.licenses ? parseInt(values.licenses) : 0,
         cloneable: false, // Warped agents are not cloneable by default
         protocols: agent.protocols || [{ name: "manowar", version: "1.0" }],
@@ -448,7 +449,9 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
   const isProcessing = mintStep !== "idle" && mintStep !== "done";
 
   return (
-    <div className="max-w-3xl mx-auto pb-20">
+    <div className="cm-web-page">
+      <div className="cm-web-page__canvas cm-workspace-canvas--fade">
+        <div className="cm-web-page__body cm-web-page__body--narrow">
       {/* Page Header */}
       <div className="mb-8 space-y-2 border-b border-sidebar-border pb-6">
         <Button
@@ -964,6 +967,8 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+        </div>
+      </div>
     </div>
   );
 }

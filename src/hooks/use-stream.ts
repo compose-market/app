@@ -28,13 +28,12 @@ import type {
     ChatCompletionsCreateParams,
     ComposeAttachmentInput,
     ComposeCallOptions,
-    ComposeReceipt,
+    Receipt,
     ResponseStreamEvent,
     ResponsesCreateParams,
     SessionBudgetSnapshot,
     SessionInvalidReason,
     ToolCallLifecycleEvent,
-    VideoStatusStreamEvent,
     WorkflowRuntimeEvent,
 } from "@compose-market/sdk";
 
@@ -42,7 +41,7 @@ import { sdk } from "@/lib/sdk";
 import type { UseChatReturn } from "@/hooks/use-chat";
 
 export interface ComposeStreamCallbacks {
-    onReceipt?: (receipt: ComposeReceipt) => void;
+    onReceipt?: (receipt: Receipt) => void;
     onBudget?: (snapshot: SessionBudgetSnapshot) => void;
     onSessionInvalid?: (reason: SessionInvalidReason) => void;
     onError?: (err: { code?: string; message: string }) => void;
@@ -58,7 +57,47 @@ type StreamCallOptions = Pick<
     "x402MaxAmountWei" | "idempotencyKey" | "composeRunId" | "composeKey" | "userAddress" | "chainId" | "timeoutMs"
 >;
 
-type AgentStreamEvent = AgentRuntimeEvent | { type: "reasoning-delta"; delta: string };
+interface AgentChildStreamEvent {
+    type: "child";
+    event: "start" | "delta" | "tool-start" | "tool-end" | "done" | "error";
+    agentWallet?: string;
+    subId?: string;
+    toolName?: string;
+    delta?: string;
+    failed?: boolean;
+    error?: string;
+    display?: { name?: string };
+}
+
+interface AgentTraceStreamEvent {
+    type: "trace";
+    source: "capability" | "model" | "tool" | "agent" | "harness" | "route";
+    stage?: string;
+    action?: string;
+    message?: string;
+    display?: { kind?: string; name?: string; target?: string; summary?: string };
+}
+
+type AgentStreamEvent =
+    | AgentRuntimeEvent
+    | { type: "reasoning-delta"; delta: string }
+    | AgentChildStreamEvent
+    | AgentTraceStreamEvent;
+
+interface ResponseOutputItem {
+    type: string;
+    role?: "assistant";
+    text?: string;
+    image_url?: string;
+    audio_url?: string;
+    video_url?: string;
+    embedding?: number[];
+    job_id?: string;
+    status?: string;
+    progress?: number;
+    mime_type?: string;
+    [key: string]: unknown;
+}
 
 export interface AgentStreamArgs {
     agentWallet: string;
@@ -101,19 +140,11 @@ export interface ResponsesStreamArgs {
     options?: StreamCallOptions;
 }
 
-export interface VideoPollArgs {
-    videoId: string;
-    assistantId: string;
-    signal?: AbortSignal;
-    options?: StreamCallOptions & { pollIntervalMs?: number };
-}
-
 export interface UseComposeStream {
     runAgent: (args: AgentStreamArgs) => Promise<void>;
     runWorkflow: (args: WorkflowStreamArgs) => Promise<void>;
     runChat: (args: ChatStreamArgs) => Promise<void>;
     runResponses: (args: ResponsesStreamArgs) => Promise<void>;
-    runVideo: (args: VideoPollArgs) => Promise<void>;
 }
 
 export function useComposeStream(
@@ -133,13 +164,25 @@ export function useComposeStream(
             sdk.events.on("budget", (event) => callbacksRef.current.onBudget?.(event.snapshot)),
             sdk.events.on("sessionInvalid", (event) => callbacksRef.current.onSessionInvalid?.(event.reason)),
             sdk.events.on("toolCallStart", (event: ToolCallLifecycleEvent) => {
-                chat.startToolActivity(event.toolName, event.summary);
-                chat.setActivityPhase("tool", `Using ${event.toolName}...`);
+                const meta = event as ToolCallLifecycleEvent & {
+                    displayName?: string;
+                    targetKind?: string;
+                    target?: string;
+                    display?: { kind?: string; target?: string };
+                };
+                const displayName = meta.displayName;
+                const targetKind = meta.targetKind ?? meta.display?.kind;
+                const target = meta.target ?? meta.display?.target;
+                chat.startToolActivity(event.toolName, event.summary, displayName);
+                chat.setActivityPhase("tool", `Using ${targetKind || displayName || event.toolName}...`);
                 const assistantId = chat.currentAssistantIdRef.current;
                 if (assistantId) {
                     chat.upsertAssistantToolCall(assistantId, {
                         id: event.toolCallId,
                         name: event.toolName,
+                        displayName,
+                        targetKind,
+                        target,
                         source: event.source,
                         summary: event.summary,
                         arguments: event.arguments,
@@ -148,12 +191,24 @@ export function useComposeStream(
                 }
             }),
             sdk.events.on("toolCallEnd", (event: ToolCallLifecycleEvent) => {
-                chat.finishToolActivity(event.toolName, event.summary, event.failed ?? false);
+                const meta = event as ToolCallLifecycleEvent & {
+                    displayName?: string;
+                    targetKind?: string;
+                    target?: string;
+                    display?: { kind?: string; target?: string };
+                };
+                const displayName = meta.displayName;
+                const targetKind = meta.targetKind ?? meta.display?.kind;
+                const target = meta.target ?? meta.display?.target;
+                chat.finishToolActivity(event.toolName, event.summary, event.failed ?? false, displayName);
                 const assistantId = chat.currentAssistantIdRef.current;
                 if (assistantId) {
                     chat.upsertAssistantToolCall(assistantId, {
                         id: event.toolCallId,
                         name: event.toolName,
+                        displayName,
+                        targetKind,
+                        target,
                         source: event.source,
                         summary: event.summary,
                         arguments: event.arguments,
@@ -162,9 +217,9 @@ export function useComposeStream(
                     });
                 }
                 if (event.failed) {
-                    chat.setActivityPhase("error", event.error ?? `${event.toolName} failed`);
+                    chat.setActivityPhase("error", event.error ?? `${displayName || event.toolName} failed`);
                 } else {
-                    chat.setActivityPhase("thinking", `Processed ${event.toolName}`);
+                    chat.setActivityPhase("thinking", `Processed ${displayName || event.toolName}`);
                 }
             }),
         ];
@@ -328,43 +383,7 @@ export function useComposeStream(
         }
     }, [chat]);
 
-    const runVideo = useCallback(async (args: VideoPollArgs): Promise<void> => {
-        const stream = sdk.inference.videos.stream(args.videoId, { ...(args.options ?? {}), signal: args.signal });
-        try {
-            for await (const event of stream as AsyncIterable<VideoStatusStreamEvent>) {
-                if (event.type === "compose.video.status") {
-                    callbacksRef.current.onVideoStatus?.(event);
-                    if (event.status === "completed" && event.url) {
-                        chat.updateAssistantMessage(args.assistantId, {
-                            content: "Video generated:",
-                            type: "video",
-                            videoUrl: event.url,
-                        });
-                        chat.clearActivityState();
-                    } else if (event.status === "failed") {
-                        chat.updateAssistantMessage(args.assistantId, {
-                            content: `Error: ${event.error ?? "Video generation failed"}`,
-                            type: "video",
-                        });
-                        chat.setActivityPhase("error", event.error ?? "Video generation failed");
-                    } else {
-                        chat.updateAssistantMessage(args.assistantId, {
-                            content: `Video generating... (${event.status}${event.progress ? ` - ${event.progress}%` : ""})`,
-                            type: "video",
-                        });
-                        chat.setActivityPhase("thinking", `Video ${event.status}${event.progress ? ` (${event.progress}%)` : ""}`);
-                    }
-                } else if (event.type === "compose.error") {
-                    callbacksRef.current.onError?.({ code: event.code, message: event.message });
-                    chat.setActivityPhase("error", event.message);
-                }
-            }
-        } catch (err) {
-            handleStreamError(err, chat, args.assistantId, callbacksRef);
-        }
-    }, [chat]);
-
-    return { runAgent, runWorkflow, runChat, runResponses, runVideo };
+    return { runAgent, runWorkflow, runChat, runResponses };
 }
 
 function completeStreamTurn(
@@ -426,6 +445,36 @@ function dispatchAgentEvent(
         case "tool-start":
         case "tool-end":
             return;
+        case "child": {
+            const message = childMessage(event);
+            if (message) {
+                const assistantId = chat.currentAssistantIdRef.current;
+                if (assistantId) {
+                    chat.appendAssistantProgressEvent(assistantId, {
+                        id: crypto.randomUUID(),
+                        phase: "agent",
+                        message,
+                    });
+                }
+                chat.setActivityPhase(event.event === "error" ? "error" : "thinking", message);
+            }
+            return;
+        }
+        case "trace": {
+            const message = traceMessage(event);
+            if (message) {
+                const assistantId = chat.currentAssistantIdRef.current;
+                if (assistantId) {
+                    chat.appendAssistantProgressEvent(assistantId, {
+                        id: crypto.randomUUID(),
+                        phase: "thinking",
+                        message,
+                    });
+                }
+                chat.setActivityPhase("thinking", message);
+            }
+            return;
+        }
         case "error": {
             chat.setActivityPhase("error", event.message);
             chat.streamedTextRef.current += event.message;
@@ -437,6 +486,53 @@ function dispatchAgentEvent(
             chat.clearActivityState();
             return;
     }
+}
+
+type AgentChildEvent = Extract<AgentStreamEvent, { type: "child" }>;
+
+function brief(value: string, max = 160): string {
+    const normalized = value.replace(/\s+/g, " ").trim();
+    if (!normalized) return "";
+    return normalized.length <= max ? normalized : `${normalized.slice(0, max - 3)}...`;
+}
+
+function childLabel(event: AgentChildEvent): string {
+    if (event.display?.name) return event.display.name;
+    if (event.subId) return event.subId;
+    if (event.agentWallet && event.agentWallet.length > 12) {
+        return `${event.agentWallet.slice(0, 6)}...${event.agentWallet.slice(-4)}`;
+    }
+    return event.agentWallet || "Child agent";
+}
+
+function childMessage(event: AgentChildEvent): string | null {
+    const label = childLabel(event);
+    if (event.event === "start") return `${label} started`;
+    if (event.event === "delta") {
+        const delta = brief(event.delta || "");
+        return delta ? `${label}: ${delta}` : null;
+    }
+    if (event.event === "tool-start") return `${label} using ${event.toolName || "tool"}`;
+    if (event.event === "tool-end") {
+        const status = event.failed ? "failed" : "finished";
+        return `${label} ${status} ${event.toolName || "tool"}`;
+    }
+    if (event.event === "done") return `${label} completed`;
+    if (event.event === "error") return `${label} failed${event.error ? `: ${brief(event.error)}` : ""}`;
+    return null;
+}
+
+type AgentTraceEvent = Extract<AgentStreamEvent, { type: "trace" }>;
+
+function traceMessage(event: AgentTraceEvent): string | null {
+    const label = event.display?.summary
+        || event.display?.name
+        || event.display?.target
+        || event.source;
+    const stage = event.stage ? ` ${event.stage}` : "";
+    const action = event.action ? ` ${event.action}` : "";
+    const message = event.message ? `: ${brief(event.message)}` : "";
+    return `Trace ${label}${stage}${action}${message}`;
 }
 
 function dispatchWorkflowEvent(
@@ -469,7 +565,9 @@ function dispatchWorkflowEvent(
             const output = event.output;
             if (output && typeof output === "object" && "type" in output && ("url" in output || "data" in output || "base64" in output)) {
                 const assistantId = chat.currentAssistantIdRef.current;
-                if (assistantId) chat.handleJsonResponse(assistantId, output);
+                if (assistantId) {
+                    applyOutputItem(chat, assistantId, legacyOutputItem(output as Record<string, unknown>));
+                }
                 chat.setActivityPhase("streaming", `Generated ${String((output as { type?: unknown }).type ?? "output")}...`);
                 return true;
             }
@@ -524,7 +622,9 @@ function dispatchChatChunk(chunk: ChatCompletionChunk, chat: UseChatReturn): voi
 }
 
 function dispatchResponsesEvent(event: ResponseStreamEvent | Record<string, unknown>, chat: UseChatReturn): void {
-    if (event.type === "response.output_text.delta" && event.delta) {
+    if (event.type === "response.created") {
+        return;
+    } else if (event.type === "response.output_text.delta" && event.delta) {
         chat.streamedTextRef.current += event.delta;
         chat.scheduleStreamUpdate(chat.streamedTextRef.current);
         chat.setActivityPhase("streaming", "Responding...");
@@ -565,8 +665,116 @@ function dispatchResponsesEvent(event: ResponseStreamEvent | Record<string, unkn
             });
         }
         chat.clearActivityState();
+    } else if ((event as { type?: unknown }).type === "response.output_item.completed") {
+        const outputEvent = event as { item?: ResponseOutputItem };
+        const assistantId = chat.currentAssistantIdRef.current;
+        if (assistantId && outputEvent.item) {
+            applyOutputItem(chat, assistantId, outputEvent.item);
+        }
+        chat.clearActivityState();
+    } else if ((event as { type?: unknown }).type === "response.output_video.status") {
+        const videoEvent = event as {
+            job_id?: string;
+            status?: "queued" | "processing" | "completed" | "failed";
+            progress?: number;
+            url?: string;
+            error?: string;
+        };
+        const assistantId = chat.currentAssistantIdRef.current;
+        if (!assistantId) return;
+        if (videoEvent.status === "completed" && videoEvent.url) {
+            chat.updateAssistantMessage(assistantId, {
+                type: "video",
+                content: "Video generated:",
+                videoUrl: videoEvent.url,
+            });
+            chat.clearActivityState();
+        } else if (videoEvent.status === "failed") {
+            chat.updateAssistantMessage(assistantId, {
+                type: "video",
+                content: "Video generation failed.",
+            });
+            chat.setActivityPhase("error", videoEvent.error ?? "Video generation failed");
+        } else {
+            chat.updateAssistantMessage(assistantId, {
+                type: "video",
+                content: videoEvent.progress ? `Video ${videoEvent.status ?? "processing"} (${videoEvent.progress}%)` : `Video ${videoEvent.status ?? "processing"}`,
+            });
+        }
     } else if (event.type === "response.completed") {
         chat.clearActivityState();
+    }
+}
+
+function legacyOutputItem(output: Record<string, unknown>): ResponseOutputItem {
+    const type = String(output.type || "text");
+    const url = typeof output.url === "string" ? output.url : undefined;
+    const base64 = typeof output.base64 === "string" ? output.base64 : undefined;
+    const mimeType = typeof output.mimeType === "string" ? output.mimeType : undefined;
+    if (type === "image") {
+        return { type: "output_image", image_url: url ?? (base64 ? `data:${mimeType || "image/png"};base64,${base64}` : undefined) };
+    }
+    if (type === "audio") {
+        return { type: "output_audio", audio_url: url ?? (base64 ? `data:${mimeType || "audio/mpeg"};base64,${base64}` : undefined) };
+    }
+    if (type === "video") {
+        return { type: "output_video", video_url: url ?? (base64 ? `data:${mimeType || "video/mp4"};base64,${base64}` : undefined) };
+    }
+    if (type === "embedding") {
+        const embedding = Array.isArray(output.embedding)
+            ? output.embedding as number[]
+            : Array.isArray(output.embeddings) && Array.isArray(output.embeddings[0])
+                ? output.embeddings[0] as number[]
+                : undefined;
+        return { type: "output_embedding", embedding };
+    }
+    return { type: "output_text", text: typeof output.content === "string" ? output.content : "" };
+}
+
+function applyOutputItem(chat: UseChatReturn, assistantId: string, item: ResponseOutputItem): void {
+    if (item.type === "output_image") {
+        chat.updateAssistantMessage(assistantId, {
+            type: "image",
+            content: typeof item.text === "string" ? item.text : "Generated image:",
+            imageUrl: typeof item.image_url === "string" ? item.image_url : undefined,
+            partialImage: false,
+        });
+        return;
+    }
+
+    if (item.type === "output_audio") {
+        chat.updateAssistantMessage(assistantId, {
+            type: "audio",
+            content: "Generated audio:",
+            audioUrl: typeof item.audio_url === "string" ? item.audio_url : undefined,
+        });
+        return;
+    }
+
+    if (item.type === "output_video") {
+        chat.updateAssistantMessage(assistantId, {
+            type: "video",
+            content: item.status && item.status !== "completed" ? `Video ${item.status}` : "Generated video:",
+            videoUrl: typeof item.video_url === "string" ? item.video_url : undefined,
+        });
+        return;
+    }
+
+    if (item.type === "output_embedding") {
+        const content = Array.isArray(item.embedding) ? JSON.stringify(item.embedding) : "";
+        chat.updateAssistantMessage(assistantId, {
+            type: "embedding",
+            content,
+        });
+        return;
+    }
+
+    if (item.type === "output_text") {
+        const text = typeof item.text === "string" ? item.text : "";
+        chat.updateAssistantMessage(assistantId, {
+            type: "text",
+            content: text,
+        });
     }
 }
 

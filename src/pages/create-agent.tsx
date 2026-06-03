@@ -19,7 +19,6 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { sdk } from "@/lib/sdk";
 import { Switch } from "@/components/ui/switch";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -42,6 +41,7 @@ import {
 } from "@/components/ui/tooltip";
 import { WarpAgentForm, type WarpAgentData } from "@/components/warp-form";
 import { ModelSelector } from "@/components/model-selector";
+import { ShellModelBadge } from "@compose-market/theme/shell";
 import {
   clearSelectedCatalogModel,
   loadSelectedCatalogModel,
@@ -64,7 +64,6 @@ import {
 } from "@/lib/contracts";
 import { CHAIN_CONFIG } from "@/lib/chains";
 import { useChain } from "@/contexts/ChainContext";
-import { NetworkSelector } from "@/components/ui/network-selector";
 import { useActiveAccount, useSendTransaction } from "thirdweb/react";
 import { getAgentFactoryContractForChain, prepareMintAgentCall } from "@/lib/contracts";
 import { saveMintSuccessForShare } from "@/lib/share";
@@ -81,6 +80,7 @@ const formSchema = z.object({
   description: z.string().min(10),
   model: z.string(),
   licensePrice: z.string(),
+  creatorFee: z.string(),
   isCloneable: z.boolean(),
   licenses: z.string().optional(),
 });
@@ -223,6 +223,7 @@ export default function CreateAgent() {
       description: "",
       model: "gemini-3.1-pro-preview",
       licensePrice: "0.01",
+      creatorFee: "1",
       isCloneable: false,
       licenses: "",
     },
@@ -406,6 +407,7 @@ export default function CreateAgent() {
     walletTimestamp: number;
     licenses: bigint;
     licensePrice: bigint;
+    creatorFee: bigint;
     cloneable: boolean;
     agentCardUri: string;
   } | null> => {
@@ -461,6 +463,7 @@ export default function CreateAgent() {
         model: modelId,
         framework: "manowar",
         licensePrice: usdcToWei(parseFloat(values.licensePrice)).toString(),
+        creatorFee: Number.parseInt(values.creatorFee || "1", 10) || 1,
         licenses: values.licenses ? parseInt(values.licenses) : 0,
         cloneable: values.isCloneable,
         ...(identityUploads.length > 0 ? { knowledge: identityUploads.map((item) => item.uri) } : {}),
@@ -478,6 +481,7 @@ export default function CreateAgent() {
       const agentCardUri = getIpfsUri(cardCid);
 
       const licensePrice = usdcToWei(parseFloat(values.licensePrice));
+      const creatorFee = BigInt(Number.parseInt(values.creatorFee || "1", 10) || 1);
       const licenses = values.licenses ? BigInt(values.licenses) : BigInt(0);
 
       const txData = {
@@ -487,6 +491,7 @@ export default function CreateAgent() {
         walletTimestamp: timestamp,
         licenses,
         licensePrice,
+        creatorFee,
         cloneable: values.isCloneable,
         agentCardUri,
       };
@@ -629,116 +634,117 @@ export default function CreateAgent() {
   // =============================================================================
   if (mode === "choice") {
     return (
-      <div className="max-w-3xl mx-auto pb-20 px-1">
-        {/* Page Header */}
-        <div className="mb-6 sm:mb-8 space-y-2 border-b border-sidebar-border pb-4 sm:pb-6">
-          <div className="flex items-center gap-4">
-            <h1 className="text-xl sm:text-2xl font-display font-bold text-white">
-              <span className="text-fuchsia-500 mr-2">//</span>
-              CREATE AGENT
-            </h1>
-            <div className="hidden md:flex h-px w-32 bg-gradient-to-r from-fuchsia-500 to-transparent"></div>
-          </div>
-          <p className="text-muted-foreground font-mono text-xs sm:text-sm">
-            Choose how you want to create your agent.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
-          {/* Create from Scratch */}
-          <Card
-            className="glass-panel border-cyan-500/20 cursor-pointer hover:border-cyan-500/50 transition-all group active:bg-cyan-500/5"
-            onClick={handleSelectScratch}
-          >
-            <CardContent className="p-5 sm:p-8 text-center space-y-3 sm:space-y-4">
-              <div className="w-12 h-12 sm:w-16 sm:h-16 mx-auto rounded-full bg-cyan-500/10 flex items-center justify-center border-2 border-cyan-500/30 group-hover:border-cyan-500/50 group-hover:bg-cyan-500/20 transition-colors">
-                <Plus className="w-6 h-6 sm:w-8 sm:h-8 text-cyan-400" />
-              </div>
-              <div>
-                <h2 className="text-lg sm:text-xl font-display font-bold text-cyan-400 mb-1 sm:mb-2">
-                  CREATE FROM SCRATCH
-                </h2>
-                <p className="text-xs sm:text-sm text-muted-foreground">
-                  Build a new agent with custom plugins, models, and pricing.
+      <div className="cm-web-page">
+        <div className="cm-web-page__canvas cm-workspace-canvas--fade">
+          <div className="cm-web-page__body cm-web-page__body--narrow cm-create-choice">
+            <div className="cm-shell-page-header px-0">
+              <div className="cm-shell-page-header__copy">
+                <h1 className="cm-shell-page-header__title">
+                  <span className="text-fuchsia-500 mr-2">//</span>
+                  CREATE AGENT
+                </h1>
+                <p className="cm-shell-page-header__subtitle">
+                  Choose how you want to create your agent.
                 </p>
               </div>
-              <div className="flex flex-wrap justify-center gap-1.5 sm:gap-2">
-                <Badge variant="outline" className="text-[9px] sm:text-[10px] border-cyan-500/30 text-cyan-400">
-                  Custom Model
-                </Badge>
-                <Badge variant="outline" className="text-[9px] sm:text-[10px] border-cyan-500/30 text-cyan-400">
-                  200+ Plugins
-                </Badge>
-                <Badge variant="outline" className="text-[9px] sm:text-[10px] border-cyan-500/30 text-cyan-400">
-                  ERC8004
-                </Badge>
-              </div>
-              <Button className="w-full bg-cyan-500 text-black hover:bg-cyan-400 font-bold font-mono text-xs sm:text-sm h-9 sm:h-10">
-                <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
-                START BUILDING
-              </Button>
-            </CardContent>
-          </Card>
-
-          {/* Warp Existing */}
-          <Card
-            className="glass-panel border-fuchsia-500/20 cursor-pointer hover:border-fuchsia-500/50 transition-all group active:bg-fuchsia-500/5"
-            onClick={handleSelectWarp}
-          >
-            <CardContent className="p-5 sm:p-8 text-center space-y-3 sm:space-y-4">
-              <div className="w-12 h-12 sm:w-16 sm:h-16 mx-auto rounded-full bg-fuchsia-500/10 flex items-center justify-center border-2 border-fuchsia-500/30 group-hover:border-fuchsia-500/50 group-hover:bg-fuchsia-500/20 transition-colors">
-                <ArrowRightLeft className="w-6 h-6 sm:w-8 sm:h-8 text-fuchsia-400" />
-              </div>
-              <div>
-                <h2 className="text-lg sm:text-xl font-display font-bold text-fuchsia-400 mb-1 sm:mb-2">
-                  WARP EXISTING
-                </h2>
-                <p className="text-xs sm:text-sm text-muted-foreground">
-                  Port an agent from external registries into Manowar. Earn 80% royalties.
-                </p>
-              </div>
-              <div className="flex flex-wrap justify-center gap-1.5 sm:gap-2">
-                <Badge variant="outline" className="text-[9px] sm:text-[10px] border-fuchsia-500/30 text-fuchsia-400">
-                  80% Royalties
-                </Badge>
-                <Badge variant="outline" className="text-[9px] sm:text-[10px] border-fuchsia-500/30 text-fuchsia-400">
-                  On-chain Identity
-                </Badge>
-                <Badge variant="outline" className="text-[9px] sm:text-[10px] border-fuchsia-500/30 text-fuchsia-400">
-                  x402 Payments
-                </Badge>
-              </div>
-              <Button className="w-full bg-fuchsia-500 text-white hover:bg-fuchsia-400 font-bold font-mono text-xs sm:text-sm h-9 sm:h-10">
-                <Globe className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
-                BROWSE AGENTS
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Info Box */}
-        <div className="mt-6 sm:mt-8 p-3 sm:p-4 rounded-sm bg-sidebar-accent border border-sidebar-border">
-          <h3 className="font-bold font-display text-foreground mb-2 text-sm sm:text-base">
-            <Sparkles className="w-3.5 h-3.5 sm:w-4 sm:h-4 inline mr-1.5 sm:mr-2 text-cyan-400" />
-            What's the difference?
-          </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-xs sm:text-sm text-muted-foreground">
-            <div>
-              <p className="font-mono text-cyan-400 mb-1">Create from Scratch:</p>
-              <ul className="list-disc list-inside space-y-0.5 sm:space-y-1">
-                <li>You are the original creator</li>
-                <li>Full control over plugins & model</li>
-                <li>100% of earnings (minus protocol fee)</li>
-              </ul>
             </div>
-            <div>
-              <p className="font-mono text-fuchsia-400 mb-1">Warp Existing:</p>
-              <ul className="list-disc list-inside space-y-0.5 sm:space-y-1">
-                <li>Port agents from other ecosystems</li>
-                <li>Original creator gets 10% royalties</li>
-                <li>You (warper) earn 80% of usage fees</li>
-              </ul>
+
+            <div className="cm-create-choice__grid">
+              <button
+                type="button"
+                className="cm-choice-card group"
+                data-tone="cyan"
+                onClick={handleSelectScratch}
+              >
+                <span className="cm-choice-card__icon">
+                  <Plus className="w-6 h-6 sm:w-8 sm:h-8" />
+                </span>
+                <span>
+                  <span className="cm-choice-card__title block text-cyan-400">
+                    CREATE FROM SCRATCH
+                  </span>
+                  <span className="cm-choice-card__copy mt-2 block">
+                    Build a new agent with custom plugins, models, and pricing.
+                  </span>
+                </span>
+                <span className="flex flex-wrap gap-1.5 sm:gap-2">
+                  <Badge variant="outline" className="text-[9px] sm:text-[10px] border-cyan-500/30 text-cyan-400">
+                    Custom Model
+                  </Badge>
+                  <Badge variant="outline" className="text-[9px] sm:text-[10px] border-cyan-500/30 text-cyan-400">
+                    200+ Plugins
+                  </Badge>
+                  <Badge variant="outline" className="text-[9px] sm:text-[10px] border-cyan-500/30 text-cyan-400">
+                    ERC8004
+                  </Badge>
+                </span>
+                <span className="cm-shell-button cm-shell-button--primary w-full">
+                  <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                  START BUILDING
+                </span>
+              </button>
+
+              <button
+                type="button"
+                className="cm-choice-card group"
+                data-tone="fuchsia"
+                onClick={handleSelectWarp}
+              >
+                <span className="cm-choice-card__icon">
+                  <ArrowRightLeft className="w-6 h-6 sm:w-8 sm:h-8" />
+                </span>
+                <span>
+                  <span className="cm-choice-card__title block text-fuchsia-400">
+                    WARP EXISTING
+                  </span>
+                  <span className="cm-choice-card__copy mt-2 block">
+                    Port an agent from external registries into Manowar. Earn 80% royalties.
+                  </span>
+                </span>
+                <span className="flex flex-wrap gap-1.5 sm:gap-2">
+                  <Badge variant="outline" className="text-[9px] sm:text-[10px] border-fuchsia-500/30 text-fuchsia-400">
+                    80% Royalties
+                  </Badge>
+                  <Badge variant="outline" className="text-[9px] sm:text-[10px] border-fuchsia-500/30 text-fuchsia-400">
+                    On-chain Identity
+                  </Badge>
+                  <Badge variant="outline" className="text-[9px] sm:text-[10px] border-fuchsia-500/30 text-fuchsia-400">
+                    x402 Payments
+                  </Badge>
+                </span>
+                <span className="cm-shell-button cm-shell-button--secondary w-full">
+                  <Globe className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                  BROWSE AGENTS
+                </span>
+              </button>
             </div>
+
+            <details className="cm-fold">
+              <summary className="cm-fold__summary">
+                <Sparkles className="w-4 h-4 text-cyan-400" />
+                What's the difference?
+              </summary>
+              <div className="cm-fold__body">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                  <div>
+                    <p className="font-mono text-cyan-400 mb-1">Create from Scratch:</p>
+                    <ul className="list-disc list-inside space-y-0.5 sm:space-y-1">
+                      <li>You are the original creator</li>
+                      <li>Full control over plugins & model</li>
+                      <li>100% of earnings minus protocol fee</li>
+                    </ul>
+                  </div>
+                  <div>
+                    <p className="font-mono text-fuchsia-400 mb-1">Warp Existing:</p>
+                    <ul className="list-disc list-inside space-y-0.5 sm:space-y-1">
+                      <li>Port agents from other ecosystems</li>
+                      <li>Original creator gets 10% royalties</li>
+                      <li>You earn 80% of usage fees</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </details>
           </div>
         </div>
       </div>
@@ -756,128 +762,113 @@ export default function CreateAgent() {
   // Render Create from Scratch Form
   // =============================================================================
   return (
-    <div className="flex flex-col h-[calc(100vh-120px)]">
-      {/* Compact Header */}
-      <div className="shrink-0 mb-2 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setMode("choice")}
-            className="text-muted-foreground hover:text-cyan-400 -ml-2 h-7 px-2"
-          >
-            <ChevronRight className="w-3.5 h-3.5 mr-1 rotate-180" />
-            <span className="hidden sm:inline">Back</span>
-          </Button>
-          <h1 className="text-lg font-display font-bold text-white">
-            <span className="text-fuchsia-500 mr-1">//</span>
-            MINT AGENT
-          </h1>
-          <Badge variant="outline" className="text-[9px] border-orange-500/30 text-orange-400 hidden sm:inline-flex">
-            Manowar · LangGraph · Memory · RAG
-          </Badge>
-        </div>
-        <div className="flex items-center gap-2">
-          {account ? (
-            <Badge className="bg-green-500/20 text-green-400 border-green-500/30 text-[10px]">
-              <CheckCircle2 className="w-3 h-3 mr-1" />
-              {account.address.slice(0, 6)}…{account.address.slice(-4)}
-            </Badge>
-          ) : (
-            <Badge variant="outline" className="text-[10px] border-yellow-500/30 text-yellow-400">
-              <AlertCircle className="w-3 h-3 mr-1" />
-              Sign in to mint
-            </Badge>
-          )}
-        </div>
-      </div>
+    <div className="cm-web-page cm-create-page">
+      <div className="cm-web-page__canvas cm-workspace-canvas--fade">
+        <div className="cm-web-page__body cm-web-page__body--wide cm-create-builder">
+          {/* Compact Header */}
+          <div className="cm-control-rail">
+            <div className="cm-control-rail__main">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setMode("choice")}
+                className="text-muted-foreground hover:text-cyan-400 h-8 px-2"
+              >
+                <ChevronRight className="w-3.5 h-3.5 mr-1 rotate-180" />
+                <span className="hidden sm:inline">Back</span>
+              </Button>
+              <h1 className="cm-shell-page-header__title text-lg">
+                <span className="text-fuchsia-500 mr-1">//</span>
+                MINT AGENT
+              </h1>
+            </div>
+            <div className="cm-control-rail__actions">
+              {account ? (
+                <Badge className="bg-green-500/20 text-green-400 border-green-500/30 text-[10px]">
+                  <CheckCircle2 className="w-3 h-3 mr-1" />
+                  {account.address.slice(0, 6)}...{account.address.slice(-4)}
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="text-[10px] border-yellow-500/30 text-yellow-400">
+                  <AlertCircle className="w-3 h-3 mr-1" />
+                  Sign in to mint
+                </Badge>
+              )}
+            </div>
+          </div>
 
-      {/* Main Content */}
-      <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-4">
-        {/* Left: Form */}
-        <div className="min-h-0 flex flex-col pr-1">
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col flex-1 min-h-0 gap-3">
-              {/* Identity: Name + Model row */}
-              <div className="glass-panel border border-cyan-500/20 rounded-sm p-4 space-y-3 flex-1 flex flex-col min-h-0 overflow-y-auto">
-                <div className="flex items-center gap-2 text-cyan-400 text-sm font-display font-bold uppercase">
-                  <Cpu className="w-4 h-4" />
-                  Identity
-                </div>
-                <input
-                  ref={identityInputRef}
-                  type="file"
-                  multiple
-                  accept=".pdf,.txt,.md,.json,.csv,.html,.xml,text/*,application/json,application/pdf"
-                  onChange={handleIdentitySelect}
-                  className="hidden"
-                />
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <FormField
-                    control={form.control}
-                    name="name"
-                    render={({ field }: { field: ControllerRenderProps<FormValues, "name"> }) => (
-                      <FormItem>
-                        <FormLabel className="font-mono text-foreground text-sm">Agent Name</FormLabel>
-                        <FormControl>
-                          <Input placeholder="e.g. Alpha Sniper V1" {...field} className="bg-background/50 font-mono border-sidebar-border focus:border-cyan-500" />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
+          {/* Main Content */}
+          <div className="cm-create-builder__pair">
+            {/* Left: Form */}
+            <Form {...form}>
+              <form onSubmit={form.handleSubmit(onSubmit)} className="cm-create-builder__form">
+                {/* Identity: Name + Model row */}
+                <div className="cm-builder-panel cm-create-builder__section">
+                  <div className="cm-builder-panel__title">
+                    <Cpu className="w-4 h-4" />
+                    Identity
+                  </div>
+                  <input
+                    ref={identityInputRef}
+                    type="file"
+                    multiple
+                    accept=".pdf,.txt,.md,.json,.csv,.html,.xml,text/*,application/json,application/pdf"
+                    onChange={handleIdentitySelect}
+                    className="hidden"
                   />
-                  <FormField
-                    control={form.control}
-                    name="model"
-                    render={({ field }: { field: ControllerRenderProps<FormValues, "model"> }) => (
-                      <FormItem>
-                        <FormLabel className="font-mono text-foreground text-sm">LLM Model</FormLabel>
-                        {selectedCatalogModel ? (
-                          <div className="p-2.5 rounded-sm bg-cyan-500/10 border border-cyan-500/30">
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <p className="font-mono font-bold text-cyan-400 text-sm">{selectedCatalogModel.name || selectedCatalogModel.modelId}</p>
-                                <p className="text-[10px] text-muted-foreground font-mono">
-                                  via {selectedCatalogModel.provider} · x402
-                                </p>
-                              </div>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setSelectedCatalogModel(null)}
-                                className="text-[10px] text-muted-foreground hover:text-foreground h-5 px-1"
-                              >
-                                Change
-                              </Button>
-                            </div>
-                          </div>
-                        ) : (
-                          <ModelSelector
-                            value={field.value}
-                            onChange={field.onChange}
-                            placeholder="Search 1300+ models..."
-                            showTypeFilter
-                          />
-                        )}
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <FormField
+                      control={form.control}
+                      name="name"
+                      render={({ field }: { field: ControllerRenderProps<FormValues, "name"> }) => (
+                        <FormItem className="cm-field">
+                          <FormLabel className="font-mono text-foreground text-sm">Agent Name</FormLabel>
+                          <FormControl>
+                            <Input placeholder="e.g. Alpha Sniper V1" {...field} className="bg-background/50 font-mono border-primary/20 focus:border-cyan-500" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="model"
+                      render={({ field }: { field: ControllerRenderProps<FormValues, "model"> }) => (
+                        <FormItem className="cm-field">
+                          <FormLabel className="font-mono text-foreground text-sm">LLM Model</FormLabel>
+                          {selectedCatalogModel ? (
+                            <ShellModelBadge
+                              className="w-full max-w-full"
+                              label={selectedCatalogModel.name || selectedCatalogModel.modelId}
+                              price={`via ${selectedCatalogModel.provider} · x402`}
+                              shortcut="Change"
+                              onClick={() => setSelectedCatalogModel(null)}
+                              title="Change selected model"
+                            />
+                          ) : (
+                            <ModelSelector
+                              value={field.value}
+                              onChange={field.onChange}
+                              placeholder="Search 1300+ models..."
+                              showTypeFilter
+                            />
+                          )}
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
 
-                {/* Description + Knowledge side by side */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <FormField
                     control={form.control}
                     name="description"
                     render={({ field }: { field: ControllerRenderProps<FormValues, "description"> }) => (
-                      <FormItem className="flex flex-col">
+                      <FormItem className="cm-field cm-create-description">
                         <FormLabel className="font-mono text-foreground text-sm">Purpose & Capabilities</FormLabel>
                         <FormControl>
                           <Textarea
                             placeholder="Describe what this agent does..."
-                            className="resize-none bg-background/50 flex-1 min-h-[90px] border-sidebar-border focus:border-cyan-500"
+                            className="resize-none bg-background/50 border-primary/20 focus:border-cyan-500"
                             {...field}
                           />
                         </FormControl>
@@ -885,62 +876,12 @@ export default function CreateAgent() {
                       </FormItem>
                     )}
                   />
-                  <div className="rounded-sm border border-sidebar-border bg-background/30 p-3 space-y-2 flex flex-col">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="font-mono text-xs text-cyan-400 uppercase flex items-center gap-1.5">
-                        <BookOpen className="w-3.5 h-3.5" />
-                        Identity Knowledge
-                      </p>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => identityInputRef.current?.click()}
-                        className="border-cyan-500/40 text-cyan-300 hover:text-cyan-200 shrink-0 h-7 text-xs"
-                      >
-                        <Upload className="w-3 h-3 mr-1.5" />
-                        Add files
-                      </Button>
-                    </div>
-                    {identityFiles.length > 0 ? (
-                      <div className="space-y-1 flex-1 overflow-y-auto max-h-[100px]">
-                        {identityFiles.map((file) => (
-                          <div
-                            key={`${file.name}:${file.size}:${file.lastModified}`}
-                            className="flex items-center justify-between gap-2 rounded-sm border border-sidebar-border px-2.5 py-1.5"
-                          >
-                            <div className="min-w-0">
-                              <p className="truncate font-mono text-xs text-foreground">{file.name}</p>
-                              <p className="text-[10px] text-muted-foreground">
-                                {Math.max(1, Math.round(file.size / 1024))} KB
-                              </p>
-                            </div>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => removeIdentityFile(file)}
-                              className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-foreground shrink-0"
-                            >
-                              Remove
-                            </Button>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-[11px] text-muted-foreground flex-1">
-                        Optional Filecoin-backed <code className="text-cyan-500/70">ipfs://</code> URIs added to the minted agent card. The agent reads this material via the knowledge tool.
-                      </p>
-                    )}
-                  </div>
                 </div>
-              </div>
-
               {/* Plugins + Financial side by side */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="cm-create-builder__lower">
                 {/* Plugins */}
-                <div className="glass-panel border border-green-500/20 rounded-sm p-3 space-y-2 relative z-10">
-                  <div className="flex items-center gap-2 text-green-400 text-sm font-display font-bold uppercase">
+                <div className="cm-builder-panel relative z-10" data-tone="green">
+                  <div className="cm-builder-panel__title">
                     <Plug className="w-4 h-4" />
                     Plugins
                   </div>
@@ -975,13 +916,13 @@ export default function CreateAgent() {
                           setShowPluginPicker(true);
                         }}
                         onFocus={() => setShowPluginPicker(true)}
-                        className="pl-10 bg-background/50 font-mono border-sidebar-border focus:border-green-500"
+                        className="pl-10 bg-background/50 font-mono border-primary/20 focus:border-green-500"
                       />
                     </div>
                     {showPluginPicker && (
-                      <div className="absolute z-50 w-full mt-1 bg-sidebar border border-sidebar-border rounded-sm shadow-lg">
-                        <div className="flex items-center justify-between px-3 py-1.5 border-b border-sidebar-border">
-                          <span className="text-[10px] font-mono text-muted-foreground uppercase">
+                      <div className="cm-popover-panel absolute z-50 w-full mt-1">
+                        <div className="cm-popover-panel__header">
+                          <span className="cm-popover-panel__label">
                             {pluginSearch ? "Search Results" : "Popular Connectors"}
                           </span>
                           <Link href="/registry">
@@ -1028,29 +969,85 @@ export default function CreateAgent() {
                             </div>
                           )}
                         </ScrollArea>
-                        <div className="px-3 py-1.5 border-t border-sidebar-border">
+                        <div className="cm-popover-panel__footer">
                           <button type="button" onClick={() => setShowPluginPicker(false)} className="text-[10px] text-muted-foreground hover:text-foreground">Close</button>
                         </div>
                       </div>
                     )}
                   </div>
+                  <div className="cm-setting-row cm-knowledge-row">
+                    <div className="cm-setting-row__icon">
+                      <BookOpen className="w-4 h-4" />
+                    </div>
+                    <div className="cm-setting-row__copy">
+                      <div className="cm-setting-row__label">Knowledge</div>
+                      <div className="cm-setting-row__description">
+                        Optional Filecoin-backed <code className="text-cyan-500/70">ipfs://</code> files attached to the minted agent card.
+                      </div>
+                      {identityFiles.length > 0 ? (
+                        <div className="cm-knowledge-row__files">
+                          {identityFiles.map((file) => (
+                            <span
+                              key={`${file.name}:${file.size}:${file.lastModified}`}
+                              className="cm-knowledge-row__file"
+                            >
+                              <span className="truncate">{file.name}</span>
+                              <button
+                                type="button"
+                                onClick={() => removeIdentityFile(file)}
+                                className="rounded-full px-1 text-muted-foreground hover:text-foreground"
+                                aria-label={`Remove ${file.name}`}
+                              >
+                                <X className="w-2.5 h-2.5" />
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="cm-setting-row__control">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => identityInputRef.current?.click()}
+                        className="border-cyan-500/40 text-cyan-300 hover:text-cyan-200 shrink-0 h-8 text-xs"
+                      >
+                        <Upload className="w-3 h-3 mr-1.5" />
+                        Attach
+                      </Button>
+                    </div>
+                  </div>
                 </div>
 
                 {/* Financial */}
-                <div className="glass-panel border border-fuchsia-500/20 rounded-sm p-3 space-y-2">
-                  <div className="flex items-center gap-2 text-fuchsia-400 text-sm font-display font-bold uppercase">
+                <div className="cm-builder-panel" data-tone="fuchsia">
+                  <div className="cm-builder-panel__title">
                     <DollarSign className="w-4 h-4" />
                     Financial (x402)
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="cm-financial-grid">
                     <FormField
                       control={form.control}
                       name="licensePrice"
                       render={({ field }: { field: ControllerRenderProps<FormValues, "licensePrice"> }) => (
-                        <FormItem>
-                          <FormLabel className="font-mono text-foreground text-sm">Price (USDC)</FormLabel>
+                        <FormItem className="cm-field">
+                          <FormLabel className="font-mono text-foreground text-sm">Price</FormLabel>
                           <FormControl>
-                            <Input type="number" step="0.001" {...field} className="bg-background/50 font-mono border-sidebar-border focus:border-fuchsia-500" />
+                            <Input type="number" step="0.001" {...field} className="bg-background/50 font-mono border-primary/20 focus:border-fuchsia-500" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="creatorFee"
+                      render={({ field }: { field: ControllerRenderProps<FormValues, "creatorFee"> }) => (
+                        <FormItem className="cm-field">
+                          <FormLabel className="font-mono text-foreground text-sm">Fee</FormLabel>
+                          <FormControl>
+                            <Input type="number" min="0" step="1" {...field} className="bg-background/50 font-mono border-primary/20 focus:border-fuchsia-500" />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -1060,10 +1057,10 @@ export default function CreateAgent() {
                       control={form.control}
                       name="licenses"
                       render={({ field }: { field: ControllerRenderProps<FormValues, "licenses"> }) => (
-                        <FormItem>
+                        <FormItem className="cm-field">
                           <FormLabel className="font-mono text-foreground text-sm">Supply</FormLabel>
                           <FormControl>
-                            <Input type="number" placeholder="∞" {...field} className="bg-background/50 font-mono border-sidebar-border focus:border-fuchsia-500" />
+                            <Input type="number" placeholder="∞" {...field} className="bg-background/50 font-mono border-primary/20 focus:border-fuchsia-500" />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -1074,14 +1071,19 @@ export default function CreateAgent() {
                     control={form.control}
                     name="isCloneable"
                     render={({ field }: { field: ControllerRenderProps<FormValues, "isCloneable"> }) => (
-                      <FormItem className="flex items-center justify-between rounded-sm border border-sidebar-border px-3 py-2 bg-background/30">
+                      <FormItem className="cm-setting-row">
+                        <div className="cm-setting-row__copy">
                         <FormLabel className="text-sm font-mono text-foreground cursor-pointer">Allow Cloning</FormLabel>
+                          <FormDescription>Let other builders mint derivative agents with attribution.</FormDescription>
+                        </div>
+                        <div className="cm-setting-row__control">
                         <FormControl>
                           <Switch
                             checked={field.value}
                             onCheckedChange={field.onChange}
                           />
                         </FormControl>
+                        </div>
                       </FormItem>
                     )}
                   />
@@ -1115,18 +1117,17 @@ export default function CreateAgent() {
               </Button>
             </form>
           </Form>
-        </div>
 
         {/* Right Sidebar: Avatar + Mint */}
-        <div className="hidden lg:flex flex-col gap-4">
+        <div className="cm-create-builder__sidebar">
           {/* Avatar */}
-          <div className="glass-panel border border-fuchsia-500/20 rounded-sm p-4 space-y-3">
+          <div className="cm-builder-panel" data-tone="fuchsia">
             <input ref={fileInputRef} type="file" accept="image/*" onChange={handleAvatarSelect} className="hidden" />
             <div className="relative w-full aspect-square max-w-[180px] mx-auto">
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="w-full h-full rounded-sm bg-background/50 border border-sidebar-border border-dashed flex flex-col items-center justify-center text-muted-foreground cursor-pointer hover:border-cyan-500 hover:text-cyan-400 transition-colors overflow-hidden"
+                className="w-full h-full rounded-sm bg-background/50 border border-primary/25 border-dashed flex flex-col items-center justify-center text-muted-foreground cursor-pointer hover:border-cyan-500 hover:text-cyan-400 transition-colors overflow-hidden"
               >
                 {isGeneratingAvatar ? (
                   <div className="flex flex-col items-center gap-1">
@@ -1201,10 +1202,12 @@ export default function CreateAgent() {
           </div>
 
           {/* Mint Info */}
-          <div className="glass-panel border border-sidebar-border rounded-sm p-4 space-y-2 text-sm">
-            <div className="space-y-1">
-              <span className="text-muted-foreground font-mono text-xs">Network</span>
-              <NetworkSelector showBalance={false} compact />
+          <div className="cm-builder-panel text-sm">
+            <div className="flex justify-between gap-3">
+              <span className="text-muted-foreground font-mono">Network</span>
+              <span className="font-mono text-cyan-400 truncate">
+                {CHAIN_CONFIG[selectedChainId]?.name || "Unknown"}
+              </span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground font-mono">Contract</span>
@@ -1239,7 +1242,7 @@ export default function CreateAgent() {
 
       {/* Confirmation Dialog */}
       <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
-        <AlertDialogContent className="bg-background border-sidebar-border max-w-md">
+        <AlertDialogContent className="cm-surface-card max-w-md">
           <AlertDialogHeader>
             <AlertDialogTitle className="font-display text-xl">
               <Sparkles className="w-5 h-5 inline mr-2 text-cyan-400" />
@@ -1251,7 +1254,7 @@ export default function CreateAgent() {
           </AlertDialogHeader>
 
           {pendingValues && (
-            <div className="space-y-3 py-4 border-y border-sidebar-border">
+            <div className="space-y-3 py-4 border-y border-primary/15">
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Name</span>
                 <span className="font-mono text-foreground">{pendingValues.name}</span>
@@ -1294,7 +1297,7 @@ export default function CreateAgent() {
           )}
 
           <AlertDialogFooter>
-            <AlertDialogCancel className="border-sidebar-border">Cancel</AlertDialogCancel>
+            <AlertDialogCancel className="border-primary/20">Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleConfirmedMint}
               className="bg-cyan-500 text-black hover:bg-cyan-400 font-bold"
@@ -1304,7 +1307,9 @@ export default function CreateAgent() {
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
-      </AlertDialog>
+          </AlertDialog>
+        </div>
+      </div>
     </div>
   );
 }

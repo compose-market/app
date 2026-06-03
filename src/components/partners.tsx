@@ -30,29 +30,6 @@ interface PartnershipBadgeProps {
   link?: string;
 }
 
-const glowColors = {
-  cyan: {
-    border: "border-cyan-500/40",
-    cornerColor: "hsl(188 95% 43%)",
-    pulseColor: "rgba(6,182,212,0.4)",
-  },
-  green: {
-    border: "border-green-500/40",
-    cornerColor: "hsl(142 71% 45%)",
-    pulseColor: "rgba(34,197,94,0.4)",
-  },
-  purple: {
-    border: "border-purple-500/40",
-    cornerColor: "hsl(270 91% 65%)",
-    pulseColor: "rgba(168,85,247,0.4)",
-  },
-  blue: {
-    border: "border-blue-500/40",
-    cornerColor: "hsl(217 91% 60%)",
-    pulseColor: "rgba(59,130,246,0.4)",
-  },
-};
-
 export function PartnershipBadge({
   src,
   alt,
@@ -60,107 +37,21 @@ export function PartnershipBadge({
   glowColor = "cyan",
   link,
 }: PartnershipBadgeProps) {
-  const colors = glowColors[glowColor];
-
   const content = (
-    <div
-      className={cn(
-        "relative group cursor-pointer transition-all duration-500",
-        className
-      )}
-    >
-      {/* Outer glow */}
-      <div
-        className="absolute -inset-1 rounded-lg opacity-60 group-hover:opacity-100 blur transition-opacity duration-500"
-        style={{
-          background: `radial-gradient(ellipse at center, ${colors.pulseColor}, transparent 70%)`,
-        }}
-      />
-
-      {/* Badge container — image-only, uniform height */}
-      <div
-        className={cn(
-          "relative overflow-hidden rounded-lg",
-          "glass-panel",
-          colors.border,
-          "transition-all duration-500",
-          "w-full h-full flex items-center justify-center"
-        )}
-      >
-        {/* Hover shine */}
-        <div
-          className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500"
-          style={{
-            background: `linear-gradient(135deg, ${colors.pulseColor}, transparent 50%)`,
-          }}
-        />
-
-        {/* Scanline effect */}
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div
-            className="absolute w-full h-[100px] opacity-[0.04]"
-            style={{
-              background: "linear-gradient(180deg, transparent, rgba(255,255,255,0.08), transparent)",
-              animation: "partner-scanline 4s linear infinite",
-            }}
-          />
-        </div>
-
-        {/* Corner decorations */}
-        <div className="relative p-2.5 sm:p-3 md:p-4 flex items-center justify-center w-full h-full">
-          <div
-            className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 transition-all duration-300 group-hover:w-6 group-hover:h-6"
-            style={{ borderColor: colors.cornerColor, opacity: 0.6 }}
-          />
-          <div
-            className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 transition-all duration-300 group-hover:w-6 group-hover:h-6"
-            style={{ borderColor: colors.cornerColor, opacity: 0.6 }}
-          />
-          <div
-            className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 transition-all duration-300 group-hover:w-6 group-hover:h-6"
-            style={{ borderColor: colors.cornerColor, opacity: 0.6 }}
-          />
-          <div
-            className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 transition-all duration-300 group-hover:w-6 group-hover:h-6"
-            style={{ borderColor: colors.cornerColor, opacity: 0.6 }}
-          />
-
-          {/* Badge image — centered, uniform */}
-          <img
-            src={src}
-            alt={alt}
-            loading="lazy"
-            decoding="async"
-            fetchPriority="low"
-            className="relative h-10 sm:h-12 md:h-14 w-auto max-w-[90%] object-contain brightness-100 group-hover:brightness-110 transition-all duration-300"
-          />
-        </div>
-
-        {/* Shimmer line */}
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/[0.05] to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1500 ease-in-out" />
-        </div>
-
-        {/* Bottom glow line */}
-        <div
-          className="absolute bottom-0 left-0 right-0 h-px opacity-30 group-hover:opacity-60 transition-opacity"
-          style={{
-            background: `linear-gradient(90deg, transparent, ${colors.cornerColor}, transparent)`,
-          }}
-        />
-      </div>
-    </div>
+    <img
+      src={src}
+      alt={alt}
+      loading="lazy"
+      decoding="async"
+      fetchPriority="low"
+    />
   );
 
   if (link) {
-    return (
-      <a href={link} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-0">
-        {content}
-      </a>
-    );
+    return <a href={link} target="_blank" rel="noopener noreferrer" className={cn("cm-partner-badge", className)} data-tone={glowColor}>{content}</a>;
   }
 
-  return content;
+  return <div className={cn("cm-partner-badge", className)} data-tone={glowColor}>{content}</div>;
 }
 
 /* ── Partner Logo Data ─────────────────────────────────────────────── */
@@ -227,9 +118,7 @@ const partnerLogos: PartnerLogo[] = [
 
 function LogoItem({ logo }: { logo: PartnerLogo }) {
   return (
-    <div
-      className="group flex h-10 sm:h-11 items-center justify-center rounded-lg border border-sidebar-border/70 bg-black/20 px-4 sm:px-5 transition-all duration-300 hover:border-cyan-400/60 hover:bg-black/35 shrink-0"
-    >
+    <div className="cm-partner-logo">
       <img
         src={logo.src}
         alt={logo.alt}
@@ -238,7 +127,6 @@ function LogoItem({ logo }: { logo: PartnerLogo }) {
         loading="lazy"
         decoding="async"
         fetchPriority="low"
-        className="h-[clamp(0.85rem,1.8vw,1.25rem)] w-auto max-w-[100px] object-contain opacity-75 grayscale transition-all duration-300 group-hover:opacity-100 group-hover:grayscale-0"
       />
     </div>
   );
@@ -256,26 +144,12 @@ function PartnerLogoMarquee() {
   return (
     <div
       ref={containerRef}
-      className="marquee-container relative w-full overflow-hidden"
+      className="cm-partner-marquee"
       onMouseEnter={() => setIsPaused(true)}
       onMouseLeave={() => setIsPaused(false)}
       onTouchStart={() => setIsPaused(true)}
       onTouchEnd={() => setIsPaused(false)}
     >
-      {/* Fade masks — left and right */}
-      <div
-        className="pointer-events-none absolute inset-y-0 left-0 w-12 sm:w-16 md:w-24 z-10"
-        style={{
-          background: "linear-gradient(to right, hsl(222 47% 3%), transparent)",
-        }}
-      />
-      <div
-        className="pointer-events-none absolute inset-y-0 right-0 w-12 sm:w-16 md:w-24 z-10"
-        style={{
-          background: "linear-gradient(to left, hsl(222 47% 3%), transparent)",
-        }}
-      />
-
       {/* Top row — scrolls left */}
       <div className="flex w-max">
         <div
@@ -329,26 +203,21 @@ export function PartnershipSection({ className }: { className?: string }) {
   }, []);
 
   return (
-    <section className={cn("w-full", className)}>
+    <section className={cn("cm-partners w-full", className)}>
       {/* Badges row — "Backed by" text (1/4 left) + badges (3/4 right) */}
-      <div className="w-full border-t border-sidebar-border bg-card/10">
+      <div className="cm-glass neon-border w-full">
         <div className="px-4 sm:px-6 md:px-8 lg:px-12 py-3 sm:py-4 md:py-5">
-          <div className="flex flex-col lg:flex-row lg:items-center gap-4 sm:gap-5 lg:gap-8">
+          <div className="cm-partners__backing">
             {/* Left — "Backed By" title — takes ~1/4 */}
-            <div className="flex flex-col gap-1 sm:gap-1.5 shrink-0 lg:basis-1/4">
-              <div className="flex items-center gap-3 w-full">
-                <span className="text-[10px] sm:text-xs md:text-sm font-mono uppercase tracking-[0.2em] text-muted-foreground/80 whitespace-nowrap">
-                  Backed By
-                </span>
-                <div className="h-px grow bg-gradient-to-r from-cyan-500/50 to-transparent" />
-              </div>
-              <div className="text-base sm:text-lg md:text-xl lg:text-2xl font-display font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-white/90 to-fuchsia-400 tracking-wide whitespace-nowrap leading-none">
+            <div className="cm-partners__copy">
+              <span className="cm-partners__label">Backed By</span>
+              <div className="cm-partners__title">
                 THE LEADERS BUILDING AI
               </div>
             </div>
 
             {/* Right — Badge images (equal sized) — takes ~2/4 */}
-            <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:basis-2/4 h-16 sm:h-[4.5rem] md:h-20">
+            <div className="cm-partners__badges">
               <PartnershipBadge
                 src="/partners/badges/nvidia-badge.png"
                 alt="NVIDIA Inception Program"
@@ -369,7 +238,7 @@ export function PartnershipSection({ className }: { className?: string }) {
       </div>
 
       {/* Partner logos marquee — full width, edge to edge */}
-      <div className="w-full border-t border-sidebar-border/50 py-3 sm:py-4 md:py-5 pb-4 sm:pb-5 md:pb-6 bg-card/5">
+      <div className="w-full py-3 sm:py-4 md:py-5 pb-4 sm:pb-5 md:pb-6">
         {showMarquee ? (
           <PartnerLogoMarquee />
         ) : (

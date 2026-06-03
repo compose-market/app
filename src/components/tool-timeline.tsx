@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, Loader2, XCircle, Wrench } from "lucide-react";
+import { Bot, CheckCircle2, Cpu, GitBranch, Layers, Loader2, Plug, Route, Search, Wrench, XCircle } from "lucide-react";
 import { sdk } from "@/lib/sdk";
 
 type ToolStatus = "running" | "success" | "failed";
@@ -15,6 +15,9 @@ type ToolStatus = "running" | "success" | "failed";
 interface ToolTimelineEntry {
     id: string;
     toolName: string;
+    displayName?: string;
+    targetKind?: string;
+    target?: string;
     source: "chat" | "responses" | "agent" | "workflow";
     summary?: string;
     status: ToolStatus;
@@ -26,6 +29,7 @@ const MAX_VISIBLE = 8;
 
 export function ToolTimeline({ className }: { className?: string }) {
     const [entries, setEntries] = useState<ToolTimelineEntry[]>([]);
+    const [open, setOpen] = useState<Record<string, boolean>>({});
 
     useEffect(() => {
         const upsert = (id: string, mutate: (e: ToolTimelineEntry) => ToolTimelineEntry) => {
@@ -41,9 +45,18 @@ export function ToolTimeline({ className }: { className?: string }) {
         const unsubStart = sdk.events.on("toolCallStart", (event) => {
             setEntries((prev) => {
                 if (prev.some((e) => e.id === event.toolCallId)) return prev;
+                const meta = event as typeof event & {
+                    displayName?: string;
+                    targetKind?: string;
+                    target?: string;
+                    display?: { kind?: string; target?: string };
+                };
                 const entry: ToolTimelineEntry = {
                     id: event.toolCallId,
                     toolName: event.toolName,
+                    displayName: meta.displayName,
+                    targetKind: meta.targetKind ?? meta.display?.kind,
+                    target: meta.target ?? meta.display?.target,
                     source: event.source,
                     summary: event.summary,
                     status: "running",
@@ -54,10 +67,19 @@ export function ToolTimeline({ className }: { className?: string }) {
         });
 
         const unsubEnd = sdk.events.on("toolCallEnd", (event) => {
+            const meta = event as typeof event & {
+                displayName?: string;
+                targetKind?: string;
+                target?: string;
+                display?: { kind?: string; target?: string };
+            };
             upsert(event.toolCallId, (existing) => ({
                 ...existing,
                 status: event.failed ? "failed" : "success",
                 error: event.error,
+                displayName: meta.displayName || existing.displayName,
+                targetKind: meta.targetKind ?? meta.display?.kind ?? existing.targetKind,
+                target: meta.target ?? meta.display?.target ?? existing.target,
                 summary: event.summary ?? existing.summary,
             }));
         });
@@ -84,22 +106,49 @@ export function ToolTimeline({ className }: { className?: string }) {
                         ? "border-red-500/30 bg-red-500/5 text-red-300"
                         : "border-emerald-500/30 bg-emerald-500/5 text-emerald-300";
                 const title = entry.error
-                    ? `${entry.toolName} (${entry.source}) — ${entry.error}`
+                    ? `${entry.displayName || entry.toolName} (${entry.source}) — ${entry.error}`
                     : entry.summary
-                        ? `${entry.toolName} (${entry.source}) — ${entry.summary}`
-                        : `${entry.toolName} (${entry.source})`;
+                        ? `${entry.displayName || entry.toolName} (${entry.source}) — ${entry.summary}`
+                        : `${entry.displayName || entry.toolName} (${entry.source})`;
+                const expanded = open[entry.id] === true;
+                const label = entry.targetKind || entry.displayName || entry.toolName;
+                const target = entry.target || entry.displayName;
+                const badgeIcon = kindIcon(entry.targetKind);
                 return (
-                    <span
+                    <button
                         key={entry.id}
-                        className={`inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 text-[10px] font-mono ${borderClass}`}
+                        type="button"
+                        onClick={() => setOpen((prev) => ({ ...prev, [entry.id]: !prev[entry.id] }))}
+                        className={`inline-flex min-h-6 max-w-full items-center gap-1 rounded-sm border px-1.5 py-0.5 text-left text-[10px] font-mono ${borderClass}`}
                         title={title}
+                        aria-expanded={expanded}
                     >
-                        <Wrench className="h-2.5 w-2.5 opacity-60" aria-hidden="true" />
+                        {badgeIcon}
                         {icon}
-                        <span>{entry.toolName}</span>
-                    </span>
+                        <span className="truncate">{label}</span>
+                        {expanded && (
+                            <span className="ml-1 inline-flex min-w-0 max-w-[16rem] items-center gap-1 border-l border-current/20 pl-1.5 opacity-80">
+                                {target && <span className="truncate">{target}</span>}
+                                <span className="shrink-0 opacity-60">raw:{entry.toolName}</span>
+                            </span>
+                        )}
+                    </button>
                 );
             })}
         </div>
     );
+}
+
+function kindIcon(kind?: string) {
+    const className = "h-2.5 w-2.5 shrink-0 opacity-70";
+    switch (kind) {
+        case "model": return <Cpu className={className} aria-hidden="true" />;
+        case "connector": return <Plug className={className} aria-hidden="true" />;
+        case "agent": return <Bot className={className} aria-hidden="true" />;
+        case "search": return <Search className={className} aria-hidden="true" />;
+        case "harness": return <GitBranch className={className} aria-hidden="true" />;
+        case "conclave": return <Layers className={className} aria-hidden="true" />;
+        case "route": return <Route className={className} aria-hidden="true" />;
+        default: return <Wrench className={className} aria-hidden="true" />;
+    }
 }

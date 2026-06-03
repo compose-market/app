@@ -5,6 +5,7 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { readContract } from "thirdweb";
+import { sdk } from "@/lib/sdk";
 import {
   getAgentFactoryContract,
   getWorkflowContract,
@@ -35,6 +36,7 @@ export interface OnchainAgent {
   licensesAvailable: number;
   licensePrice: string;
   licensePriceFormatted: string;
+  creatorFee: number;
   creator: string;
   cloneable: boolean;
   isClone: boolean;
@@ -74,6 +76,20 @@ export interface OnchainWorkflow {
   chainId?: number;
 }
 
+type AgentDirectoryResponse = {
+  agents?: AgentCard[];
+  nextCursor?: string | null;
+  hasMore?: boolean;
+};
+
+type DirectoryAgentCard = AgentCard & {
+  licensesMinted?: number;
+  licensesAvailable?: number;
+  isClone?: boolean;
+  parentAgentId?: number;
+  cid?: string;
+};
+
 // =============================================================================
 // Contract Read Helpers
 // =============================================================================
@@ -86,7 +102,7 @@ async function fetchAgentData(agentWallet: number, chainId?: number): Promise<On
       : getAgentFactoryContract();
     const data = await readContract({
       contract: factoryContract,
-      method: "function getAgentData(uint256 agentWallet) view returns ((bytes32 dnaHash, uint256 licenses, uint256 licensesMinted, uint256 licensePrice, address creator, bool cloneable, bool isClone, uint256 parentAgentId, string agentCardUri))",
+      method: "function getAgentData(uint256 agentWallet) view returns ((bytes32 dnaHash, uint256 licenses, uint256 licensesMinted, uint256 licensePrice, uint256 creatorFee, address creator, bool cloneable, bool isClone, uint256 parentAgentId, string agentCardUri))",
       params: [BigInt(agentWallet)],
     }) as AgentData;
 
@@ -120,6 +136,7 @@ async function fetchAgentData(agentWallet: number, chainId?: number): Promise<On
       licensesAvailable: licenses === 0 ? Infinity : licenses - licensesMinted,
       licensePrice: weiToUsdc(data.licensePrice),
       licensePriceFormatted: formatUsdcPrice(data.licensePrice),
+      creatorFee: Number(data.creatorFee ?? 1n),
       creator: data.creator,
       cloneable: data.cloneable,
       isClone: data.isClone,
@@ -131,6 +148,155 @@ async function fetchAgentData(agentWallet: number, chainId?: number): Promise<On
     console.error(`Failed to fetch agent ${agentWallet} on chain ${chainId}:`, error);
     return null;
   }
+}
+
+function price(value: string | undefined): bigint {
+  const raw = value?.trim();
+  if (!raw) return 0n;
+  if (/^\d+$/.test(raw)) return BigInt(raw);
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? BigInt(Math.round(parsed * 1_000_000)) : 0n;
+}
+function finite(value: unknown): number | null {
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function fromCard(card: DirectoryAgentCard): OnchainAgent {
+  const amount = price(card.licensePrice);
+  const licenses = Number.isFinite(Number(card.licenses)) ? Number(card.licenses) : 0;
+  const minted = Number.isFinite(Number(card.licensesMinted)) ? Number(card.licensesMinted) : 0;
+  const available = Number.isFinite(Number(card.licensesAvailable))
+    ? Number(card.licensesAvailable)
+    : licenses === 0 ? Infinity : Math.max(0, licenses - minted);
+  const creatorFee = finite(card.creatorFee) ?? 1;
+
+  return {
+    id: 0,
+    dnaHash: card.dnaHash || "",
+    walletAddress: card.walletAddress || "",
+    licenses,
+    licensesMinted: minted,
+    licensesAvailable: available,
+    licensePrice: weiToUsdc(amount),
+    licensePriceFormatted: formatUsdcPrice(amount),
+    creatorFee,
+    creator: card.creator || "",
+    cloneable: Boolean(card.cloneable),
+    isClone: Boolean(card.isClone),
+    parentAgentId: Number.isFinite(Number(card.parentAgentId)) ? Number(card.parentAgentId) : 0,
+    agentCardUri: card.cid ? `ipfs://${card.cid}` : "",
+    metadata: {
+      ...card,
+      creatorFee,
+    },
+    isWarped: false,
+  };
+}
+
+async function fetchApiAgents(): Promise<OnchainAgent[]> {
+  const cards: AgentCard[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < 100; page += 1) {
+    const params = new URLSearchParams({ limit: "60" });
+    if (cursor) params.set("cursor", cursor);
+    const response = await sdk.fetch(`/agents?${params.toString()}`, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) {
+      throw new Error(`Agent lookup failed with status ${response.status}`);
+    }
+    const data = await response.json() as AgentDirectoryResponse;
+    if (Array.isArray(data.agents)) {
+      cards.push(...data.agents);
+    }
+    if (!data.hasMore || !data.nextCursor) break;
+    cursor = data.nextCursor;
+  }
+  return cards
+    .filter((card): card is DirectoryAgentCard => typeof card.walletAddress === "string" && card.walletAddress.startsWith("0x"))
+    .map(fromCard);
+}
+
+async function fetchCatalogAgentByWallet(walletAddress: string): Promise<OnchainAgent | null> {
+  const controller = new AbortController();
+  const timeout = globalThis.setTimeout(() => controller.abort(), 5_000);
+  try {
+    const response = await sdk.fetch(`/agent/${encodeURIComponent(walletAddress)}`, {
+      headers: { Accept: "application/json" },
+      signal: controller.signal,
+    });
+    if (!response.ok) return null;
+    const card = await response.json() as DirectoryAgentCard;
+    return typeof card.walletAddress === "string" && card.walletAddress.startsWith("0x")
+      ? fromCard(card)
+      : null;
+  } finally {
+    globalThis.clearTimeout(timeout);
+  }
+}
+
+async function fetchChainAgents(includeMetadata: boolean): Promise<OnchainAgent[]> {
+  const chainPromises = SUPPORTED_CHAINS.map(async ({ id: chainId }) => {
+    try {
+      const contract = getAgentFactoryContractForChain(chainId);
+      const total = await readContract({
+        contract,
+        method: "function totalAgents() view returns (uint256)",
+        params: [],
+      }) as bigint;
+
+      const totalNum = Number(total);
+      if (totalNum === 0) return [];
+
+      const agentPromises = Array.from({ length: totalNum }, (_, i) =>
+        fetchAgentData(i + 1, chainId)
+      );
+
+      let agents = (await Promise.all(agentPromises)).filter((a): a is OnchainAgent => a !== null);
+
+      if (includeMetadata) {
+        agents = await Promise.all(agents.map(fetchAgentMetadata));
+      }
+
+      return agents;
+    } catch (error) {
+      console.warn(`Failed to fetch agents from chain ${chainId}:`, error);
+      return [];
+    }
+  });
+
+  const chainsAgents = await Promise.all(chainPromises);
+  return chainsAgents.flat();
+}
+
+function mergeAgents(apiAgents: OnchainAgent[], chainAgents: OnchainAgent[]): OnchainAgent[] {
+  const byWallet = new Map<string, OnchainAgent>();
+  for (const agent of apiAgents) {
+    byWallet.set(agent.walletAddress.toLowerCase(), agent);
+  }
+  for (const chain of chainAgents) {
+    const key = chain.walletAddress.toLowerCase();
+    const catalog = byWallet.get(key);
+    if (!catalog) {
+      byWallet.set(key, chain);
+      continue;
+    }
+    byWallet.set(key, {
+      ...catalog,
+      id: chain.id || catalog.id,
+      creator: catalog.creator || chain.creator,
+      licensesMinted: chain.licensesMinted,
+      licensesAvailable: chain.licensesAvailable,
+      cloneable: catalog.cloneable || chain.cloneable,
+      isClone: chain.isClone,
+      parentAgentId: chain.parentAgentId,
+      agentCardUri: catalog.agentCardUri || chain.agentCardUri,
+      isWarped: chain.isWarped,
+    });
+  }
+  return Array.from(byWallet.values());
 }
 
 async function fetchAgentMetadata(agent: OnchainAgent): Promise<OnchainAgent> {
@@ -156,8 +322,9 @@ async function fetchAgentMetadata(agent: OnchainAgent): Promise<OnchainAgent> {
     // walletAddress comes from IPFS metadata - this is the SINGLE SOURCE OF TRUTH
     // Frontend and backend both read this, neither derives it
     const walletAddress = metadata.walletAddress || agent.walletAddress;
+    const creatorFee = finite(metadata.creatorFee) ?? agent.creatorFee;
 
-    return { ...agent, metadata, walletAddress };
+    return { ...agent, metadata: { ...metadata, creatorFee }, walletAddress, creatorFee };
   } catch (error) {
     console.error(`Failed to fetch metadata for agent ${agent.id}:`, error);
     return agent;
@@ -306,51 +473,39 @@ async function fetchWorkflowMetadata(workflow: OnchainWorkflow, chainId?: number
 export function useOnchainAgents(options?: { includeMetadata?: boolean }) {
   const { includeMetadata = true } = options || {};
 
-  return useQuery({
-    queryKey: ["onchain-agents", "all-chains", includeMetadata],
-    queryFn: async () => {
-      // Fetch from all supported chains in parallel
-      const chainPromises = SUPPORTED_CHAINS.map(async ({ id: chainId }) => {
-        try {
-          const contract = getAgentFactoryContractForChain(chainId);
-
-          // Get total agents count for this chain
-          const total = await readContract({
-            contract,
-            method: "function totalAgents() view returns (uint256)",
-            params: [],
-          }) as bigint;
-
-          const totalNum = Number(total);
-          if (totalNum === 0) return [];
-
-          // Fetch all agents from this chain (IDs start at 1)
-          const agentPromises = Array.from({ length: totalNum }, (_, i) =>
-            fetchAgentData(i + 1, chainId)
-          );
-
-          let agents = (await Promise.all(agentPromises)).filter((a): a is OnchainAgent => a !== null);
-
-          // Optionally fetch metadata (which includes the chain field)
-          if (includeMetadata) {
-            agents = await Promise.all(agents.map(fetchAgentMetadata));
-          }
-
-          return agents;
-        } catch (error) {
-          console.warn(`Failed to fetch agents from chain ${chainId}:`, error);
-          return [];
-        }
-      });
-
-      // Merge all agents from all chains
-      const chainsAgents = await Promise.all(chainPromises);
-      return chainsAgents.flat();
-    },
+  const api = useQuery({
+    queryKey: ["agents-api", includeMetadata],
+    queryFn: fetchApiAgents,
     staleTime: 30 * 1000,
-    gcTime: 5 * 60 * 1000, // Keep in cache 5 minutes // 30 seconds
+    gcTime: 5 * 60 * 1000,
     retry: 2,
   });
+  const apiSettled = api.isSuccess || api.isError;
+  const chain = useQuery({
+    queryKey: ["onchain-agents", "all-chains", includeMetadata],
+    queryFn: () => fetchChainAgents(includeMetadata),
+    enabled: apiSettled,
+    staleTime: 30 * 1000,
+    gcTime: 5 * 60 * 1000,
+    retry: 1,
+  });
+  const apiAgents = api.data || [];
+  const chainAgents = chain.data || [];
+  const data = apiAgents.length > 0 ? mergeAgents(apiAgents, chainAgents) : chainAgents;
+
+  return {
+    ...api,
+    data,
+    isLoading: api.isLoading && data.length === 0,
+    error: api.error && data.length === 0 ? api.error : chain.error && data.length === 0 ? chain.error : null,
+    refetch: async () => {
+      const apiResult = await api.refetch();
+      if (apiResult.isError || (apiResult.data?.length ?? 0) === 0) {
+        await chain.refetch();
+      }
+      return apiResult;
+    },
+  };
 }
 
 /**
@@ -377,35 +532,27 @@ export function useOnchainAgent(agentWallet: number | null) {
  */
 export function useOnchainAgentByWallet(walletAddress: string | null) {
   return useQuery({
-    queryKey: ["onchain-agent-wallet", walletAddress?.toLowerCase()],
+    queryKey: ["agent-wallet", walletAddress?.toLowerCase()],
     queryFn: async () => {
       if (!walletAddress) return null;
-      return fetchAgentByWalletAddress(walletAddress);
+      return fetchCatalogAgentByWallet(walletAddress);
     },
-    enabled: !!walletAddress && walletAddress.startsWith("0x"),
+    enabled: !!walletAddress,
     staleTime: 30 * 1000,
     gcTime: 5 * 60 * 1000, // Keep in cache 5 minutes
   });
 }
 
 /**
- * Fetch a single agent by either ID or wallet address
- * Automatically detects the identifier type
+ * Fetch a single agent by wallet address from the Cloudflare agent catalog.
+ * Agent detail pages must not scan contracts; new mints appear through the
+ * catalog worker once indexed.
  */
 export function useOnchainAgentByIdentifier(identifier: string | null) {
-  // Determine if identifier is a wallet address (0x...) or numeric ID
-  // Wallet address = 0x + 40 hex chars = 42 total
-  const isWalletAddress = identifier?.startsWith("0x") && identifier.length === 42;
-  const numericId = !isWalletAddress && identifier ? parseInt(identifier) : null;
-  const walletAddress = isWalletAddress ? identifier : null;
+  const value = identifier ? decodeURIComponent(identifier).trim() : "";
+  const walletAddress = /^0x[a-fA-F0-9]{40}$/.test(value) ? value : null;
 
-  const byIdQuery = useOnchainAgent(!isWalletAddress ? numericId : null);
-  const byWalletQuery = useOnchainAgentByWallet(isWalletAddress ? walletAddress : null);
-
-  if (isWalletAddress) {
-    return byWalletQuery;
-  }
-  return byIdQuery;
+  return useOnchainAgentByWallet(walletAddress);
 }
 
 /**

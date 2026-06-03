@@ -9,7 +9,11 @@
  * Provides O(1) message updates, RAF-batched streaming, and stick-to-bottom scroll.
  */
 import { useState, useRef, useCallback, useEffect } from "react";
-import type { ComposeAttachmentInput } from "@compose-market/sdk";
+import type {
+    ChatMessage as ComposeMessage,
+    ChatMessageContentPart,
+    ComposeAttachmentInput,
+} from "@compose-market/sdk";
 import { uploadConversationFile, cleanupConversationFiles } from "@/lib/pinata";
 import {
     createObjectUrlPreview,
@@ -37,6 +41,9 @@ export interface ChatMessage {
     toolCalls?: Array<{
         id: string;
         name: string;
+        displayName?: string;
+        targetKind?: string;
+        target?: string;
         source?: "chat" | "responses" | "agent" | "workflow";
         summary?: string;
         arguments?: string;
@@ -72,6 +79,19 @@ export function toComposeAttachment(attached: Pick<AttachedFile, "type" | "url" 
     };
 }
 
+export function toComposeMessage(message: ChatMessage): ComposeMessage {
+    const parts: ChatMessageContentPart[] = [];
+    if (message.content.trim().length > 0) {
+        parts.push({ type: "text", text: message.content });
+    }
+    if (message.imageUrl) parts.push({ type: "image_url", image_url: { url: message.imageUrl } });
+    if (message.audioUrl) parts.push({ type: "input_audio", input_audio: { url: message.audioUrl } });
+    if (message.videoUrl) parts.push({ type: "video_url", video_url: { url: message.videoUrl } });
+    if (parts.length === 0) return { role: message.role, content: "" };
+    if (parts.length === 1 && parts[0].type === "text") return { role: message.role, content: message.content };
+    return { role: message.role, content: parts };
+}
+
 export interface UseChatOptions {
     /** Conversation ID for Pinata grouping */
     conversationId?: string;
@@ -88,6 +108,7 @@ export type ChatActivityPhase = "idle" | "thinking" | "tool" | "streaming" | "er
 export interface ChatToolActivity {
     id: string;
     toolName: string;
+    displayName?: string;
     status: "running" | "completed" | "error";
     summary?: string;
     startedAt: number;
@@ -129,8 +150,6 @@ export interface UseChatReturn {
     upsertAssistantToolCall: (id: string, tool: NonNullable<ChatMessage["toolCalls"]>[number]) => void;
     /** Append a workflow / agent progress breadcrumb to an assistant message. */
     appendAssistantProgressEvent: (id: string, event: NonNullable<ChatMessage["progressEvents"]>[number]) => void;
-    /** Parse OpenAI-format JSON response and update assistant message */
-    handleJsonResponse: (id: string, data: unknown) => void;
     /** Clear all messages */
     clearMessages: () => void;
 
@@ -144,8 +163,8 @@ export interface UseChatReturn {
     activityState: ChatActivityState;
     clearActivityState: () => void;
     setActivityPhase: (phase: ChatActivityPhase, label?: string) => void;
-    startToolActivity: (toolName: string, summary?: string) => void;
-    finishToolActivity: (toolName: string, summary?: string, failed?: boolean) => void;
+    startToolActivity: (toolName: string, summary?: string, displayName?: string) => void;
+    finishToolActivity: (toolName: string, summary?: string, failed?: boolean, displayName?: string) => void;
 
     // === Scroll ===
     scrollContainerRef: React.RefObject<HTMLDivElement | null>;
@@ -218,6 +237,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     // === Scroll Refs ===
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const stickToBottomRef = useRef(true);
 
     // Check if recording is supported on mount
     useEffect(() => {
@@ -385,15 +405,16 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         }));
     }, []);
 
-    const startToolActivity = useCallback((toolName: string, summary?: string) => {
+    const startToolActivity = useCallback((toolName: string, summary?: string, displayName?: string) => {
         setActivityState((prev) => ({
             phase: "tool",
-            label: `Using ${toolName}`,
+            label: `Using ${displayName || toolName}`,
             tools: [
                 ...prev.tools,
                 {
                     id: crypto.randomUUID(),
                     toolName,
+                    displayName,
                     status: "running",
                     summary: summarizeActivity(summary),
                     startedAt: Date.now(),
@@ -403,7 +424,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         }));
     }, []);
 
-    const finishToolActivity = useCallback((toolName: string, summary?: string, failed = false) => {
+    const finishToolActivity = useCallback((toolName: string, summary?: string, failed = false, displayName?: string) => {
         setActivityState((prev) => {
             const nextTools = [...prev.tools];
             const index = [...nextTools]
@@ -415,6 +436,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
                 nextTools[resolvedIndex] = {
                     ...nextTools[resolvedIndex],
                     status: failed ? "error" : "completed",
+                    displayName: displayName || nextTools[resolvedIndex].displayName,
                     summary: summarizeActivity(summary) || nextTools[resolvedIndex].summary,
                     endedAt: Date.now(),
                 };
@@ -422,6 +444,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
                 nextTools.push({
                     id: crypto.randomUUID(),
                     toolName,
+                    displayName,
                     status: failed ? "error" : "completed",
                     summary: summarizeActivity(summary),
                     startedAt: Date.now(),
@@ -431,7 +454,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
 
             return {
                 phase: failed ? "error" : "thinking",
-                label: failed ? `${toolName} failed` : `Processed ${toolName}`,
+                label: failed ? `${displayName || toolName} failed` : `Processed ${displayName || toolName}`,
                 tools: nextTools,
                 updatedAt: Date.now(),
             };
@@ -460,51 +483,6 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     }, [updateAssistantMessage]);
 
     // ==========================================================================
-    // JSON Response Handler (delegates to centralized parseJsonResponse)
-    // ==========================================================================
-
-    const handleJsonResponse = useCallback((id: string, data: unknown) => {
-        // Import dynamically to avoid circular dependencies
-        import("@/lib/multimodal").then(async ({ parseJsonResponse, uploadBase64ToPinata }) => {
-            const result = parseJsonResponse(data);
-
-            if (!result.success) {
-                updateAssistantMessage(id, { content: `Error: ${result.error || "Unknown error"}` });
-                return;
-            }
-
-            // Upload base64 to Pinata if present and no URL
-            let url = result.url;
-            if (!url && result.base64 && (result.type === "image" || result.type === "audio" || result.type === "video")) {
-                try {
-                    url = await uploadBase64ToPinata(result.base64, result.type, conversationIdRef.current);
-                } catch (err) {
-                    console.error("[use-chat] Pinata upload failed:", err);
-                }
-            }
-
-            // Determine content
-            // Fix: Only apply fallback if non-text media
-            let finalContent = result.content;
-            if (!finalContent) {
-                if (result.type !== "text") {
-                    finalContent = `Generated ${result.type}`;
-                } else {
-                    finalContent = ""; // Empty string for text (e.g. tool-only)
-                }
-            }
-
-            updateAssistantMessage(id, {
-                content: finalContent,
-                type: result.type,
-                imageUrl: result.type === "image" ? url : undefined,
-                audioUrl: result.type === "audio" ? url : undefined,
-                videoUrl: result.type === "video" ? url : undefined,
-            });
-        });
-    }, [updateAssistantMessage]);
-
-    // ==========================================================================
     // Scroll Functions
     // ==========================================================================
 
@@ -515,9 +493,20 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     }, []);
 
     useEffect(() => {
-        if (!isNearBottom()) return;
+        const el = scrollContainerRef.current;
+        if (!el) return;
+        const updateStickiness = () => {
+            stickToBottomRef.current = isNearBottom();
+        };
+        updateStickiness();
+        el.addEventListener("scroll", updateStickiness, { passive: true });
+        return () => el.removeEventListener("scroll", updateStickiness);
+    }, [isNearBottom]);
+
+    useEffect(() => {
+        if (!stickToBottomRef.current) return;
         messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
-    }, [messages, isNearBottom]);
+    }, [messages]);
 
     // ==========================================================================
     // File Attachment Functions
@@ -744,7 +733,6 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         appendAssistantReasoning,
         upsertAssistantToolCall,
         appendAssistantProgressEvent,
-        handleJsonResponse,
         clearMessages,
         // Streaming
         streamedTextRef,

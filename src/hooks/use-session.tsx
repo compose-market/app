@@ -251,12 +251,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     // Subscribe to the live `/api/session/events` SSE stream. The SDK drives
     // reconnection; we just own the lifetime.
     useEffect(() => {
-        if (!account?.address || !session.isActive) return;
+        const chainId = session.chainId ?? paymentChainId;
+        if (!account?.address || !session.isActive || !chainId) return;
 
         const controller = new AbortController();
         (async () => {
             try {
-                const iter = sdk.session.subscribe({ signal: controller.signal });
+                const iter = sdk.session.subscribe({
+                    userAddress: account.address,
+                    chainId,
+                    signal: controller.signal,
+                });
                 for await (const _event of iter) {
                     // Events are already dispatched onto `sdk.events`; nothing
                     // to do here beyond keeping the iterator alive.
@@ -269,7 +274,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         })();
 
         return () => controller.abort();
-    }, [account?.address, session.isActive]);
+    }, [account?.address, paymentChainId, session.chainId, session.isActive]);
 
     useEffect(() => {
         if (!account?.address || !session.isActive) return;

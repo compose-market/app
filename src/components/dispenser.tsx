@@ -352,25 +352,24 @@ export function DispenserButton() {
     const needsFunding = allConfigured.length > 0 && availableDispensers.length === 0;
 
     return (
-        <div className="relative" ref={dropdownRef}>
-            <Button
-                variant="outline"
-                size="sm"
+        <div className="cm-app-chrome__hud-fold" ref={dropdownRef}>
+            <button
+                type="button"
                 onClick={() => setIsOpen(!isOpen)}
-                className="gap-2 border-cyan-500/30 hover:border-cyan-500/50 hover:bg-cyan-500/10"
+                className="cm-hud-button"
+                aria-label={hasClaimed ? "USDC claimed" : "Claim 1 USDC"}
+                aria-expanded={isOpen}
             >
-                <Droplets className="w-4 h-4 text-cyan-400" />
-                <span className="hidden sm:inline">{hasClaimed ? "Claimed" : "Dispenser"}</span>
+                <Droplets className="cm-hud-icon" size={16} />
                 {!hasClaimed && availableDispensers.length > 0 && (
-                    <Badge variant="secondary" className="ml-1 text-xs px-1.5 bg-cyan-500/20 text-cyan-400">
-                        1 USDC
-                    </Badge>
+                    <span className="cm-hud-value">1 USDC</span>
                 )}
-            </Button>
+                {hasClaimed ? <span className="cm-hud-status" data-state="muted" aria-hidden="true" /> : null}
+            </button>
 
             {isOpen && (
-                <div className="absolute top-full mt-2 right-0 w-72 bg-sidebar border border-sidebar-border rounded-sm shadow-lg z-50">
-                    <div className="p-3 border-b border-sidebar-border">
+                <div className="cm-app-chrome__hud-popover">
+                    <div className="p-3 border-b border-cyan-400/15">
                         <h4 className="font-medium text-sm flex items-center gap-2">
                             <Droplets className="w-4 h-4 text-cyan-400" />
                             Claim 1 USDC

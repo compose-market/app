@@ -8,7 +8,7 @@
  * 
  * Used by: agent.tsx, workflow.tsx, playground.tsx
  */
-import React, { Suspense, lazy, useState, memo, useCallback } from "react";
+import React, { Suspense, lazy, useState, memo, useCallback, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { GenerationCanvas } from "@/components/blur";
 import { Button } from "@/components/ui/button";
@@ -41,9 +41,14 @@ import {
     ChevronDown,
     ChevronUp,
     FileText,
-    Image as ImageIcon,
-    Wrench,
-} from "lucide-react";
+	    Image as ImageIcon,
+	    Wrench,
+	    Cpu,
+	    Plug,
+	    Search,
+	    GitBranch,
+	    Route,
+	} from "lucide-react";
 import type { AttachedFile, ChatActivityState, ChatMessage } from "@/hooks/use-chat";
 
 // Re-export for convenience
@@ -132,6 +137,69 @@ function AudioBlock({ src, content }: { src: string; content?: string }) {
     );
 }
 
+function ToolBadge({ tool }: { tool: NonNullable<ChatMessage["toolCalls"]>[number] }) {
+    const [open, setOpen] = useState(false);
+    const label = tool.targetKind || tool.displayName || tool.name;
+    const target = tool.target || tool.displayName;
+    const title = tool.error
+        ? `${tool.displayName || tool.name}: ${tool.error}`
+        : (tool.summary || tool.arguments || target || tool.name);
+    const icon = toolIcon(tool.targetKind);
+    return (
+        <button
+            type="button"
+            onClick={() => setOpen((value) => !value)}
+            className={cn(
+                "cm-tool-chip min-h-6 max-w-full px-2 py-0.5 text-left text-[10px] normal-case",
+                tool.status === "running" && "border-cyan-500/30 bg-cyan-500/10 text-cyan-200",
+	                tool.status === "completed" && "border-emerald-500/30 bg-emerald-500/10 text-emerald-200",
+	                tool.status === "error" && "border-red-500/30 bg-red-500/10 text-red-200",
+	                toolKindClass(tool.targetKind),
+	            )}
+            title={title}
+            aria-expanded={open}
+        >
+	            {icon}
+            <span className="truncate">{label}</span>
+            <span className="shrink-0 opacity-70">{tool.status}</span>
+            {open ? <ChevronUp className="h-3 w-3 shrink-0 opacity-70" /> : <ChevronDown className="h-3 w-3 shrink-0 opacity-70" />}
+            {open && (
+                <span className="ml-1 inline-flex min-w-0 max-w-[18rem] items-center gap-1 border-l border-current/20 pl-1.5 opacity-80">
+                    {target && <span className="truncate">{target}</span>}
+                    <span className="shrink-0 opacity-60">raw:{tool.name}</span>
+                </span>
+            )}
+        </button>
+    );
+}
+
+function toolIcon(kind?: string) {
+    const className = "h-2.5 w-2.5 shrink-0 opacity-75";
+    switch (kind) {
+        case "model": return <Cpu className={className} />;
+        case "connector": return <Plug className={className} />;
+        case "agent": return <Bot className={className} />;
+        case "search": return <Search className={className} />;
+        case "harness": return <GitBranch className={className} />;
+        case "conclave": return <Layers className={className} />;
+        case "route": return <Route className={className} />;
+        default: return <Wrench className={className} />;
+    }
+}
+
+function toolKindClass(kind?: string): string {
+    switch (kind) {
+        case "model": return "shadow-[inset_0_0_0_1px_rgba(56,189,248,0.12)]";
+        case "connector": return "shadow-[inset_0_0_0_1px_rgba(168,85,247,0.14)]";
+        case "agent": return "shadow-[inset_0_0_0_1px_rgba(244,114,182,0.14)]";
+        case "search": return "shadow-[inset_0_0_0_1px_rgba(34,197,94,0.12)]";
+        case "harness": return "shadow-[inset_0_0_0_1px_rgba(251,191,36,0.18)]";
+        case "conclave": return "shadow-[inset_0_0_0_1px_rgba(45,212,191,0.14)]";
+        case "route": return "shadow-[inset_0_0_0_1px_rgba(148,163,184,0.16)]";
+        default: return "";
+    }
+}
+
 
 // =============================================================================
 // Chat Message Item
@@ -151,19 +219,19 @@ const messageVariantStyles = {
     agent: {
         user: "bg-fuchsia-500/20 text-fuchsia-100",
         userAvatar: "bg-fuchsia-500/20 text-fuchsia-400",
-        assistant: "bg-sidebar-accent text-foreground",
+        assistant: "",
         assistantAvatar: "bg-cyan-500/20 text-cyan-400",
     },
     workflow: {
         user: "bg-cyan-500/20 text-cyan-100",
         userAvatar: "bg-cyan-500/20 text-cyan-400",
-        assistant: "bg-sidebar-accent text-foreground font-mono text-sm",
+        assistant: "font-mono text-sm",
         assistantAvatar: "bg-fuchsia-500/20 text-fuchsia-400",
     },
     playground: {
-        user: "bg-cyan-600 text-white",
-        userAvatar: "bg-zinc-700 text-zinc-300",
-        assistant: "bg-zinc-800 text-zinc-100",
+        user: "cm-chat-message__bubble--user",
+        userAvatar: "cm-chat-message__avatar-user",
+        assistant: "",
         assistantAvatar: "bg-cyan-500/20 text-cyan-400",
     },
 };
@@ -197,20 +265,20 @@ function ChatMessageItemInner({
     };
 
     return (
-        <div className={cn("flex gap-3", isUser && "justify-end")}>
+        <div className={cn("cm-chat-message", isUser && "cm-chat-message--user")}>
             {!isUser && (
-                <Avatar className="w-8 h-8 shrink-0">
-                    <AvatarFallback className={styles.assistantAvatar}>{getAssistantIcon()}</AvatarFallback>
+                <Avatar className="cm-chat-message__avatar">
+                    <AvatarFallback className={cn("cm-chat-message__avatar-assistant", styles.assistantAvatar)}>{getAssistantIcon()}</AvatarFallback>
                 </Avatar>
             )}
 
-            <div className={cn("max-w-[80%] p-3 rounded-lg relative group", isUser ? styles.user : styles.assistant)}>
+            <div className={cn("cm-chat-message__bubble group", isUser ? styles.user : styles.assistant, isUser && "cm-chat-message__bubble--user")}>
                 {showActions && (
-                    <div className="absolute -top-8 right-0 hidden group-hover:flex items-center gap-1 bg-card/90 backdrop-blur-sm border border-sidebar-border rounded-md p-1 shadow-lg z-10">
+                    <div className="cm-chat-message__actions">
                         {onCopy && (
                             <button
                                 onClick={() => onCopy(message.content)}
-                                className="p-1 rounded hover:bg-sidebar-accent text-muted-foreground hover:text-foreground transition-colors"
+                                className="cm-chat__icon-action rounded-full p-1 transition-colors"
                                 title="Copy message"
                             >
                                 <Copy className="w-3.5 h-3.5" />
@@ -219,7 +287,7 @@ function ChatMessageItemInner({
                         {isUser && onRetry && (
                             <button
                                 onClick={() => onRetry(message.content)}
-                                className="p-1 rounded hover:bg-sidebar-accent text-muted-foreground hover:text-foreground transition-colors"
+                                className="cm-chat__icon-action rounded-full p-1 transition-colors"
                                 title="Retry this message"
                             >
                                 <RefreshCw className="w-3.5 h-3.5" />
@@ -228,7 +296,7 @@ function ChatMessageItemInner({
                         {onDelete && (
                             <button
                                 onClick={() => onDelete(message.id)}
-                                className="p-1 rounded hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-colors"
+                                className="cm-chat__icon-action rounded-full p-1 transition-colors hover:text-red-400"
                                 title="Delete message"
                             >
                                 <Trash2 className="w-3.5 h-3.5" />
@@ -271,20 +339,7 @@ function ChatMessageItemInner({
                 {!!message.toolCalls?.length && (
                     <div className="mb-2 flex flex-wrap gap-1.5">
                         {message.toolCalls.map((tool) => (
-                            <span
-                                key={tool.id}
-                                className={cn(
-                                    "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-mono",
-                                    tool.status === "running" && "border-cyan-500/30 bg-cyan-500/10 text-cyan-200",
-                                    tool.status === "completed" && "border-emerald-500/30 bg-emerald-500/10 text-emerald-200",
-                                    tool.status === "error" && "border-red-500/30 bg-red-500/10 text-red-200",
-                                )}
-                                title={tool.error ? `${tool.name}: ${tool.error}` : (tool.summary || tool.arguments || tool.name)}
-                            >
-                                <Wrench className="h-2.5 w-2.5 opacity-70" />
-                                <span>{tool.name}</span>
-                                <span className="opacity-70">{tool.status}</span>
-                            </span>
+                            <ToolBadge key={tool.id} tool={tool} />
                         ))}
                     </div>
                 )}
@@ -306,8 +361,8 @@ function ChatMessageItemInner({
             </div>
 
             {isUser && (
-                <Avatar className="w-8 h-8 shrink-0">
-                    <AvatarFallback className={styles.userAvatar}><User className="w-4 h-4" /></AvatarFallback>
+                <Avatar className="cm-chat-message__avatar">
+                    <AvatarFallback className={cn("cm-chat-message__avatar-user", styles.userAvatar)}><User className="w-4 h-4" /></AvatarFallback>
                 </Avatar>
             )}
         </div>
@@ -377,8 +432,8 @@ const canvasVariantConfig = {
         accentColor: "fuchsia",
     },
     playground: {
-        border: "border-zinc-700",
-        headerBg: "bg-zinc-900/50",
+        border: "border-cyan-500/20",
+        headerBg: "bg-cyan-500/5",
         headerText: "text-cyan-400",
         headerIcon: <Bot className="w-4 h-4 text-cyan-400" />,
         sendButton: "bg-cyan-500 hover:bg-cyan-600 text-black",
@@ -425,6 +480,8 @@ export function MultimodalCanvas({
     const config = canvasVariantConfig[variant];
     const activeTools = activityState?.tools.slice(-3) || [];
     const shouldShowActivity = status !== "idle" || Boolean(activityState && activityState.phase !== "idle");
+    const nearBottomRef = useRef(true);
+    const [showJump, setShowJump] = useState(false);
 
     const handleSend = useCallback(() => {
         onSend();
@@ -440,16 +497,51 @@ export function MultimodalCanvas({
     const canSend = !sending && (inputValue.trim() || attachedFiles.length > 0);
     const isUploading = attachedFiles.some(f => f.uploading);
 
+    const isNearBottom = useCallback(() => {
+        const el = scrollContainerRef?.current;
+        if (!el) return true;
+        return el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    }, [scrollContainerRef]);
+
+    const scrollToBottom = useCallback(() => {
+        messagesEndRef?.current?.scrollIntoView({ behavior: "smooth" });
+        nearBottomRef.current = true;
+        setShowJump(false);
+    }, [messagesEndRef]);
+
+    useEffect(() => {
+        const el = scrollContainerRef?.current;
+        if (!el) return;
+        const update = () => {
+            const near = isNearBottom();
+            nearBottomRef.current = near;
+            if (near) setShowJump(false);
+        };
+        update();
+        el.addEventListener("scroll", update, { passive: true });
+        return () => el.removeEventListener("scroll", update);
+    }, [isNearBottom, scrollContainerRef]);
+
+    useEffect(() => {
+        if (nearBottomRef.current) {
+            setShowJump(false);
+            return;
+        }
+        if (messages.length > 0) {
+            setShowJump(true);
+        }
+    }, [messages]);
+
     return (
         <div className={cn(
-            "border rounded-lg bg-background/50 overflow-hidden flex flex-col",
+            "cm-chat",
             config.border,
             variant === "workflow" && "shadow-[0_0_30px_-5px_hsl(292_85%_55%/0.1)]",
-            !showHeader && "border-0 rounded-none bg-transparent",
+            !showHeader && "cm-chat--bare",
             height
         )}>
             {showHeader && (
-                <div className={cn("p-3 border-b border-sidebar-border flex items-center shrink-0", config.headerBg)}>
+                <div className={cn("cm-chat__header", config.headerBg)}>
                     <div className="flex items-center gap-2">
                         {icon || config.headerIcon}
                         <span className={cn("text-sm font-mono", config.headerText)}>{title || "Chat"}</span>
@@ -457,9 +549,9 @@ export function MultimodalCanvas({
                 </div>
             )}
 
-            <div ref={scrollContainerRef} className="flex-1 min-h-0 p-4 overflow-y-auto">
+            <div ref={scrollContainerRef} className="cm-chat__body">
                 {messages.length === 0 ? (
-                    <div className="text-center text-muted-foreground text-sm py-8">
+                    <div className="cm-chat__empty text-sm">
                         {emptyStateIcon || (variant === "workflow" ? (
                             <Play className={cn("w-12 h-12 mx-auto mb-4 opacity-50", config.headerText)} />
                         ) : (
@@ -469,7 +561,7 @@ export function MultimodalCanvas({
                         {emptyStateSubtext && <p className="text-xs mt-1 text-muted-foreground/70">{emptyStateSubtext}</p>}
                     </div>
                 ) : (
-                    <div className="space-y-4">
+                    <div className="cm-chat__messages">
                         {messages.map((msg) => (
                             <React.Fragment key={msg.id}>
                                 <ChatMessageItem
@@ -485,10 +577,16 @@ export function MultimodalCanvas({
                         <div ref={messagesEndRef} />
                     </div>
                 )}
+                {showJump ? (
+                    <button type="button" className="cm-chat__jump" onClick={scrollToBottom}>
+                        <ChevronDown className="h-3.5 w-3.5" />
+                        New messages
+                    </button>
+                ) : null}
             </div>
 
             {shouldShowActivity && (
-                <div className="shrink-0 px-3 py-2 border-t border-dashed border-sidebar-border bg-sidebar-accent/30 flex items-center gap-2 text-xs font-mono">
+                <div className="cm-chat__activity">
                     <Loader2 className={cn("w-3 h-3", (status === "paying" || status === "waiting" || status === "streaming" || activityState?.phase === "thinking" || activityState?.phase === "tool" || activityState?.phase === "streaming") && "animate-spin", config.headerText)} />
                     <span className="text-muted-foreground">
                         {status === "paying" && <><span className="text-yellow-400">Paying...</span> Processing x402 payment</>}
@@ -511,9 +609,9 @@ export function MultimodalCanvas({
                                         tool.status === "completed" && "border-emerald-500/40 bg-emerald-500/10 text-emerald-200",
                                         tool.status === "error" && "border-red-500/40 bg-red-500/10 text-red-200",
                                     )}
-                                    title={tool.summary || tool.toolName}
+                                    title={tool.summary || tool.displayName || tool.toolName}
                                 >
-                                    {tool.toolName}
+                                    {tool.displayName || tool.toolName}
                                 </span>
                             ))}
                         </div>
@@ -521,24 +619,24 @@ export function MultimodalCanvas({
                 </div>
             )}
 
-            <div className="shrink-0 p-3 border-t border-sidebar-border">
+            <div className="cm-chat__composer">
                 {error && <div className="text-xs text-red-400 mb-2 p-2 bg-red-500/10 rounded">{error}</div>}
 
                 {attachedFiles.length > 0 && (
-                    <div className="flex flex-wrap gap-2 mb-2">
+                    <div className="cm-chat__attachments">
                         {attachedFiles.map((file, index) => (
                             <div key={file.file.name + index} className="relative group">
-                                <div className="h-12 w-12 rounded-md overflow-hidden bg-zinc-900 border border-zinc-700 flex items-center justify-center">
+                                <div className="cm-chat__attachment">
                                     {file.type === "image" ? (
                                         <img src={file.preview} alt="Preview" className="h-full w-full object-cover" />
                                     ) : file.type === "video" ? (
                                         file.preview ? <video src={file.preview} className="h-full w-full object-cover" muted /> : <Video className="h-6 w-6 text-pink-500" />
                                     ) : file.type === "pdf" ? (
-                                        <FileText className="h-6 w-6 text-zinc-500" />
+                                        <FileText className="h-6 w-6 text-muted-foreground" />
                                     ) : file.type === "file" ? (
-                                        <Paperclip className="h-6 w-6 text-zinc-500" />
+                                        <Paperclip className="h-6 w-6 text-muted-foreground" />
                                     ) : (
-                                        <Music className="h-6 w-6 text-zinc-500" />
+                                        <Music className="h-6 w-6 text-muted-foreground" />
                                     )}
                                     {file.uploading && (
                                         <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
@@ -549,7 +647,7 @@ export function MultimodalCanvas({
                                 {onRemoveFile && (
                                     <button
                                         onClick={() => onRemoveFile(file.file)}
-                                        className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-zinc-800 border border-zinc-600 flex items-center justify-center text-zinc-400 hover:text-white hover:bg-zinc-700"
+                                        className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full border border-primary/20 bg-background/90 text-muted-foreground hover:text-foreground"
                                     >
                                         <X className="h-2.5 w-2.5" />
                                     </button>
@@ -559,15 +657,15 @@ export function MultimodalCanvas({
                     </div>
                 )}
 
-                <div className="flex gap-2">
+                <div className="cm-chat__composer-row">
                     {onClearChat && (
-                        <Button variant="ghost" size="icon" onClick={onClearChat} disabled={sending} className="text-zinc-400 hover:text-white shrink-0" title="Clear chat">
+                        <Button variant="ghost" size="icon" onClick={onClearChat} disabled={sending} className="cm-chat__icon-action shrink-0" title="Clear chat">
                             <Trash2 className="w-4 h-4" />
                         </Button>
                     )}
 
                     {onFileSelect && (
-                        <Button variant="ghost" size="icon" onClick={onFileSelect} disabled={sending || isRecording} className={cn("text-zinc-400 shrink-0 cursor-pointer", `hover:text-${config.accentColor}-400`)} title="Attach file">
+                        <Button variant="ghost" size="icon" onClick={onFileSelect} disabled={sending || isRecording} className="cm-chat__icon-action shrink-0 cursor-pointer" title="Attach file">
                             <Paperclip className="w-4 h-4" />
                         </Button>
                     )}
@@ -578,7 +676,7 @@ export function MultimodalCanvas({
                             size="icon"
                             onClick={isRecording ? onStopRecording : onStartRecording}
                             disabled={sending || !recordingSupported}
-                            className={cn("shrink-0 transition-colors cursor-pointer", isRecording ? "text-red-500 hover:text-red-400 animate-pulse" : cn("text-zinc-400", `hover:text-${config.accentColor}-400`))}
+                            className={cn("cm-chat__icon-action shrink-0 cursor-pointer transition-colors", isRecording && "text-red-500 hover:text-red-400 animate-pulse")}
                             title={isRecording ? "Stop recording" : "Record audio"}
                         >
                             {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
@@ -589,7 +687,7 @@ export function MultimodalCanvas({
                         <TooltipProvider>
                             <Tooltip>
                                 <TooltipTrigger asChild>
-                                    <Button variant="ghost" size="icon" onClick={onKnowledgeUpload} disabled={sending} className={cn("shrink-0 cursor-pointer text-zinc-400", `hover:text-${config.accentColor}-400`)}>
+                                    <Button variant="ghost" size="icon" onClick={onKnowledgeUpload} disabled={sending} className="cm-chat__icon-action shrink-0 cursor-pointer">
                                         <BookOpen className="w-4 h-4" />
                                     </Button>
                                 </TooltipTrigger>

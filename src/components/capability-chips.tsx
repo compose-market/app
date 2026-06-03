@@ -6,6 +6,21 @@
  * Separated by a labeled divider.
  */
 import { useMemo } from "react";
+import {
+  Binary,
+  Braces,
+  Cpu,
+  FileText,
+  Image as ImageIcon,
+  Languages,
+  ListTree,
+  MessageSquare,
+  Mic,
+  Search,
+  Sparkles,
+  Tags,
+  Video,
+} from "lucide-react";
 import type { ModelCategory } from "@/lib/models";
 
 interface CapabilityChipsProps {
@@ -35,6 +50,23 @@ function getTypeColorClass(typeId: string): string {
   return "";
 }
 
+function getTypeIcon(typeId: string) {
+  const className = "cm-playground__chip-icon";
+  if (typeId === "all") return <Sparkles className={className} />;
+  const id = typeId.toLowerCase();
+  if (id.includes("image")) return <ImageIcon className={className} />;
+  if (id.includes("audio") || id.includes("speech")) return <Mic className={className} />;
+  if (id.includes("video")) return <Video className={className} />;
+  if (id.includes("embedding") || id.includes("feature")) return <Braces className={className} />;
+  if (id.includes("classification")) return <Tags className={className} />;
+  if (id.includes("translation")) return <Languages className={className} />;
+  if (id.includes("summarization")) return <ListTree className={className} />;
+  if (id.includes("research")) return <Search className={className} />;
+  if (id.includes("conversational") || id.includes("chat")) return <MessageSquare className={className} />;
+  if (id.includes("text-generation") || id.includes("text2text")) return <FileText className={className} />;
+  return <Binary className={className} />;
+}
+
 function compactTypeLabel(label: string): string {
   if (label === "All Models") return "All";
   // Shorten common long labels
@@ -59,6 +91,10 @@ function compactProviderLabel(label: string): string {
   if (label === "All Providers") return "All";
   // Capitalize first letter
   return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+function providerIcon() {
+  return <Cpu className="cm-playground__chip-icon" />;
 }
 
 export function CapabilityChips({
@@ -94,6 +130,7 @@ export function CapabilityChips({
               onClick={() => onTypeChange(cat.id)}
               type="button"
             >
+              {getTypeIcon(cat.id)}
               {compactTypeLabel(cat.label)}
               <span className="cm-playground__chip-count">{cat.count}</span>
             </button>
@@ -120,6 +157,7 @@ export function CapabilityChips({
               onClick={() => onProviderChange(cat.id)}
               type="button"
             >
+              {providerIcon()}
               {compactProviderLabel(cat.label)}
               <span className="cm-playground__chip-count">{cat.count}</span>
             </button>

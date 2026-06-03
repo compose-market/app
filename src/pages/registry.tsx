@@ -441,10 +441,12 @@ export default function RegistryPage() {
   };
 
   return (
-    <div className="container mx-auto px-4 py-6 max-w-7xl">
+    <div className="cm-web-page">
+      <div className="cm-web-page__canvas cm-workspace-canvas--fade">
+        <div className="cm-web-page__body cm-web-page__body--wide cm-page-stack">
       {/* Header */}
-      <div className="mb-6">
-        <div className="flex items-center justify-between mb-4">
+      <div className="cm-page-stack__header">
+        <div className="flex items-center justify-between gap-3 mb-3">
           <div>
             <h1 className="text-2xl font-display font-bold text-cyan-400 neon-text">
               CONNECTOR REGISTRY
@@ -472,7 +474,10 @@ export default function RegistryPage() {
         </div>
 
         {/* Search and Filters */}
-        <div className="flex flex-col sm:flex-row gap-3">
+      </div>
+
+      <div className="cm-page-stack__controls">
+        <div className="cm-control-rail cm-control-rail--compact flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input
@@ -514,6 +519,8 @@ export default function RegistryPage() {
         </div>
       </div>
 
+      <div className="cm-page-list cm-workspace-canvas--fade">
+
       {/* Results */}
       {isLoading ? (
         <div className="flex items-center justify-center py-20">
@@ -549,6 +556,7 @@ export default function RegistryPage() {
           </div>
         </>
       )}
+      </div>
 
       {/* Detail Dialog */}
       <ServerDetailDialog
@@ -556,6 +564,8 @@ export default function RegistryPage() {
         open={detailOpen}
         onOpenChange={setDetailOpen}
       />
+        </div>
+      </div>
     </div>
   );
 }

@@ -268,7 +268,7 @@ function MintWorkflowDialog({
         try {
           const agentData = await readContract({
             contract: agentFactoryContract,
-            method: "function getAgentData(uint256 agentId) view returns ((bytes32 dnaHash, uint256 licenses, uint256 licensesMinted, uint256 licensePrice, address creator, bool cloneable, bool isClone, uint256 parentAgentId, string agentCardUri))",
+            method: "function getAgentData(uint256 agentId) view returns ((bytes32 dnaHash, uint256 licenses, uint256 licensesMinted, uint256 licensePrice, uint256 creatorFee, address creator, bool cloneable, bool isClone, uint256 parentAgentId, string agentCardUri))",
             params: [BigInt(agentId)],
           }) as { agentCardUri: string };
           if (agentData.agentCardUri?.startsWith("ipfs://")) {
@@ -827,7 +827,7 @@ function ComposeFlow() {
   }, [currentWorkflow, inputJson, nodes, edges, setNodes, toast, wallet, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, paymentChainId]);
 
   return (
-    <div className="min-h-[calc(100vh-120px)] lg:h-[calc(100vh-100px)] flex flex-col lg:flex-row gap-3 lg:gap-4 pb-4">
+    <div className="cm-compose-workspace">
       {/* Sidebar - Picker Tabs */}
       <Card className="w-full lg:w-80 h-auto max-h-[40vh] lg:max-h-none lg:h-full flex flex-col glass-panel border-cyan-500/20 shrink-0 overflow-hidden">
         <CardHeader className="pb-2 border-b border-sidebar-border shrink-0">

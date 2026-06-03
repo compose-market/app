@@ -5,6 +5,7 @@
     "tests/app-routes.test.ts",
     "tests/object-url.test.ts",
     "tests/chains-data.test.ts",
+    "tests/market-agents.test.ts",
     "tests/cronos-removal.test.ts",
     "tests/payment.test.ts",
     "tests/sdk.integration.test.ts"

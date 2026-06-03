@@ -15,12 +15,14 @@ import { useSession } from "@/hooks/use-session.tsx";
 import { useWalletAccount } from "@/components/connector";
 import { toast } from "sonner";
 import { sdk } from "@/lib/sdk";
+import { cn } from "@/lib/utils";
 import type { ComposeKeyRecord } from "@compose-market/sdk";
 
 interface SessionBudgetDialogProps {
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   showTrigger?: boolean;
+  triggerClassName?: string;
 }
 
 interface SessionManageDialogProps {
@@ -90,6 +92,7 @@ export function SessionBudgetDialog({
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   showTrigger = true,
+  triggerClassName,
 }: SessionBudgetDialogProps = {}) {
   const { isConnected } = useWalletAccount();
   const { session, isCreating, error, createSession, budgetPresets } = useSession();
@@ -119,6 +122,7 @@ export function SessionBudgetDialog({
         <ShellButton
           tone={session.isActive ? "secondary" : "primary"}
           size="sm"
+          className={cn("cm-session-trigger", triggerClassName)}
           onClick={() => setOpen(true)}
         >
           <Zap size={14} />
@@ -155,13 +159,19 @@ export function SessionBudgetDialog({
   );
 }
 
-export function SessionIndicator() {
+export function SessionIndicator({
+  className,
+  triggerClassName,
+}: {
+  className?: string;
+  triggerClassName?: string;
+} = {}) {
   const { session } = useSession();
   const [keyDialogOpen, setKeyDialogOpen] = useState(false);
   const [manageDialogOpen, setManageDialogOpen] = useState(false);
 
   if (!session.isActive) {
-    return <SessionBudgetDialog />;
+    return <SessionBudgetDialog triggerClassName={triggerClassName ?? className} />;
   }
 
   const remainingUsdc = session.budgetRemaining / 1_000_000;
@@ -169,6 +179,7 @@ export function SessionIndicator() {
   return (
     <>
       <SessionIndicatorShell
+        className={className}
         active
         budgetLabel={`$${remainingUsdc.toFixed(2)}`}
         expiresLabel={session.expiresAt ? formatTimeRemaining(session.expiresAt) : "Never"}

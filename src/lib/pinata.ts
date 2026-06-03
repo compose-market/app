@@ -191,6 +191,7 @@ export interface AgentCard {
   model: string;
   framework?: "manowar"; // Agent runtime framework
   licensePrice: string; // USDC in smallest unit (6 decimals) - cost to nest into Workflow
+  creatorFee?: number;
   licenses: number; // License supply cap (0 = infinite)
   cloneable: boolean;
   knowledge?: string[]; // Filecoin-backed ipfs:// URIs for creator knowledge docs

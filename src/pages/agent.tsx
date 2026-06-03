@@ -349,7 +349,7 @@ export default function AgentDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="flex flex-col h-[calc(100vh-120px)]">
+      <div className="cm-chat-workspace">
         {/* Header */}
         <div className="shrink-0 mb-3 flex items-center justify-between">
           <Skeleton className="h-8 w-32" />
@@ -370,7 +370,7 @@ export default function AgentDetailPage() {
 
   if (error || !agent) {
     return (
-      <div className="flex flex-col h-[calc(100vh-120px)]">
+      <div className="cm-chat-workspace">
         <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-fuchsia-400 -ml-2 mb-3" onClick={() => history.back()}>
           <ArrowLeft className="w-4 h-4 mr-2" />
           Back
@@ -387,8 +387,11 @@ export default function AgentDetailPage() {
     );
   }
 
+  const agentLabel = agent.metadata?.name
+    || (agentWallet ? `${agentWallet.slice(0, 6)}...${agentWallet.slice(-4)}` : agent.id > 0 ? `Agent #${agent.id}` : "Agent");
+
   return (
-    <div className="flex flex-col h-[calc(100vh-120px)]">
+    <div className="cm-chat-workspace">
       {/* Compact Header */}
       <div className="shrink-0 mb-3 flex items-center justify-between">
         <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-fuchsia-400 -ml-2 h-7 px-2" onClick={() => history.back()}>
@@ -412,7 +415,7 @@ export default function AgentDetailPage() {
           </Button>
           <Badge className="bg-cyan-500/20 text-cyan-400 border-cyan-500/30 text-xs">
             <Sparkles className="w-3 h-3 mr-1" />
-            Agent #{agent.id}
+            {agentLabel}
           </Badge>
         </div>
 
@@ -434,7 +437,7 @@ export default function AgentDetailPage() {
         <div className="lg:col-span-2 min-h-0 flex flex-col">
           <MultimodalCanvas
             variant="agent"
-            title={`Chat with ${agent.metadata?.name || `Agent #${agent.id}`}`}
+            title={`Chat with ${agentLabel}`}
             messages={messages}
             inputValue={inputValue}
             onInputChange={setInputValue}
@@ -475,10 +478,11 @@ export default function AgentDetailPage() {
         </div>
 
         {/* Agent Card (1/3 width on desktop, hidden on mobile by default) */}
-        <div className="lg:col-span-1 hidden lg:flex flex-col min-h-0">
+        <div className="lg:col-span-1 hidden lg:flex flex-col min-h-0 overflow-hidden pr-1">
           <AgentCard
             agent={agent}
             onCopyEndpoint={copyEndpoint}
+            className="cm-agent-card--match-chat"
           />
         </div>
       </div>
@@ -554,10 +558,11 @@ export default function AgentDetailPage() {
               Agent Details
             </SheetTitle>
           </SheetHeader>
-          <div className="flex-1 min-h-0 overflow-hidden p-4">
+          <div className="flex-1 min-h-0 overflow-y-auto p-4">
             <AgentCard
               agent={agent}
               onCopyEndpoint={copyEndpoint}
+              className="cm-agent-card--match-chat"
             />
           </div>
         </SheetContent>

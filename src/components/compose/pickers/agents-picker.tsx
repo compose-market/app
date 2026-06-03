@@ -55,10 +55,9 @@ export function AgentsPicker({ onSelect }: AgentsPickerProps) {
                 }
             }
             return {
-                id: `manowar-${a.id}`,
-                onchainAgentId: a.id, // Preserve numeric ID for price lookup
-                address: a.creator,
-                name: a.metadata?.name || `Agent #${a.id}`,
+                id: `manowar-${a.walletAddress || a.id}`,
+                address: a.walletAddress || a.creator,
+                name: a.metadata?.name || (a.walletAddress ? `${a.walletAddress.slice(0, 6)}...${a.walletAddress.slice(-4)}` : `Agent #${a.id}`),
                 description: a.metadata?.description || "",
                 registry: "manowar" as AgentRegistryId,
                 protocols: a.metadata?.protocols || [{ name: "Manowar", version: "1.0" }],

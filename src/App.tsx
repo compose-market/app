@@ -1,6 +1,6 @@
 import { lazy, Suspense } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { Route, Switch, useLocation } from "wouter";
+import { Redirect, Route, Switch, useLocation } from "wouter";
 import { ThirdwebProvider } from "thirdweb/react";
 import { Layout } from "@/components/layout/Layout";
 import { ChainProvider } from "@/contexts/ChainContext";
@@ -10,7 +10,6 @@ import { isStandaloneAppRoute } from "@/lib/utils";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/toaster";
 
-const Home = lazy(() => import("@/pages/home"));
 const Market = lazy(() => import("@/pages/market"));
 const CreateAgent = lazy(() => import("@/pages/create-agent"));
 const Compose = lazy(() => import("@/pages/compose"));
@@ -57,7 +56,9 @@ function AppRouter() {
     <Layout>
       <Suspense fallback={<PageFallback />}>
         <Switch>
-          <Route path="/" component={Home} />
+          <Route path="/">
+            <Redirect to="/market" replace />
+          </Route>
           <Route path="/market" component={Market} />
           <Route path="/create-agent" component={CreateAgent} />
           <Route path="/compose" component={Compose} />

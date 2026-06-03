@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { ComposeSDK } from "@compose-market/sdk";
-import { resolveOperation } from "../src/lib/multimodal";
 import type { CatalogModel } from "../src/lib/models";
 
 test("web consumes @compose-market/sdk as a third-party integrator", async () => {
@@ -44,7 +43,7 @@ test("web consumes @compose-market/sdk as a third-party integrator", async () =>
   );
 });
 
-test("web inference routing is driven by SDK catalog operations", () => {
+test("web catalog models can carry API-owned operations without local routing", () => {
   const model: CatalogModel = {
     modelId: "misleading-model",
     provider: "openai",
@@ -66,5 +65,6 @@ test("web inference routing is driven by SDK catalog operations", () => {
     }],
   };
 
-  assert.equal(resolveOperation(model)?.operation, "text-to-speech");
+  assert.equal(Array.isArray(model.operations), true);
+  assert.equal((model.operations?.[0] as { operation?: string }).operation, "text-to-speech");
 });

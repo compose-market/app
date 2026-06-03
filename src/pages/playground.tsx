@@ -10,7 +10,6 @@
  *
  * Shared hooks: useChat, useModels, useSession
  */
-import "@/styles/playground.css";
 import { Suspense, lazy, useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { usePostHog } from "@posthog/react";
 import { mpTrack } from "@/lib/mixpanel";
@@ -18,8 +17,8 @@ import { useActiveWallet, useActiveAccount } from "thirdweb/react";
 import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
 import { sdk } from "@/lib/sdk";
-import { toComposeAttachment } from "@/hooks/use-chat";
-import type { ChatMessage, ComposeAttachmentInput, ComposeCallOptions } from "@compose-market/sdk";
+import { toComposeAttachment, toComposeMessage } from "@/hooks/use-chat";
+import type { ChatMessage, ComposeCallOptions } from "@compose-market/sdk";
 import { useChain } from "@/contexts/ChainContext";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -34,8 +33,6 @@ import {
   Settings2,
   Sparkles,
   RefreshCw,
-  Image as ImageIcon,
-  Music,
   Plug,
   ChevronLeft,
   ChevronRight,
@@ -44,6 +41,7 @@ import { MultimodalCanvas } from "@/components/chat";
 import { MirrorPane, type ModelParamsSchema } from "@/components/mirror-pane";
 import { CommandBar } from "@/components/command-bar";
 import { ModelBadge } from "@/components/model-badge";
+import { CapabilityChips } from "@/components/capability-chips";
 import { useChat } from "@/hooks/use-chat";
 import { useModels } from "@/hooks/use-model";
 import { CostReceiptIndicator } from "@/components/receipt-indicator";
@@ -51,21 +49,10 @@ import { ToolTimeline } from "@/components/tool-timeline";
 import { useToast } from "@/hooks/use-toast";
 import { useComposeStream } from "@/hooks/use-stream";
 import {
-  attachmentUrl,
-  audioResponseResult,
-  operationIcon,
-  operationLabel,
-  operationOutputType,
-  parseJsonResponse,
-  resolveOperation,
-  toChatMessage,
-} from "@/lib/multimodal";
-import {
   buildProviderCategories,
   buildTypeCategories,
   formatModelTypeLabel,
   getModelTypeValues,
-  isGoogleModel as isGoogleCatalogModel,
 } from "@/lib/models";
 
 const PANE_COLLAPSED_KEY = "playground_pane_collapsed";
@@ -174,12 +161,6 @@ export default function PlaygroundPage() {
     localStorage.setItem(PANE_COLLAPSED_KEY, String(paneCollapsed));
   }, [paneCollapsed]);
 
-  // Google Tools State
-  const [enableGoogleSearch, setEnableGoogleSearch] = useState(false);
-  const [enableCodeExecution, setEnableCodeExecution] = useState(false);
-  const [enableMapsGrounding, setEnableMapsGrounding] = useState(false);
-  const [urlContextUrls, setUrlContextUrls] = useState<string>("");
-
   // Model Parameters State
   const [modelParams, setModelParams] = useState<ModelParamsSchema | null>(null);
   const [paramValues, setParamValues] = useState<Record<string, unknown>>({});
@@ -237,17 +218,6 @@ export default function PlaygroundPage() {
     () => models.find((m) => m.modelId === selectedModel) || null,
     [models, selectedModel],
   );
-  const isGoogleModel = useMemo(() => isGoogleCatalogModel(selectedModelInfo), [selectedModelInfo]);
-  const pendingAttachments = useMemo(() => (
-    attachedFiles
-      .map(toComposeAttachment)
-      .filter((attachment): attachment is ComposeAttachmentInput => Boolean(attachment))
-  ), [attachedFiles]);
-  const selectedOperation = useMemo(
-    () => resolveOperation(selectedModelInfo, pendingAttachments),
-    [selectedModelInfo, pendingAttachments],
-  );
-
   // Fetch model params
   useEffect(() => {
     if (!selectedModel || !selectedModelInfo) {
@@ -282,19 +252,6 @@ export default function PlaygroundPage() {
     return () => { abortController.abort(); };
   }, [selectedModel, selectedModelInfo]);
 
-  // Google tools
-  const activeGoogleTools = useMemo(() => {
-    if (!isGoogleModel) return undefined;
-    const tools: Record<string, unknown> = {};
-    if (enableGoogleSearch) tools.googleSearch = true;
-    if (enableCodeExecution) tools.codeExecution = true;
-    if (enableMapsGrounding) tools.mapsGrounding = true;
-    if (urlContextUrls.trim()) {
-      tools.urlContext = { urls: urlContextUrls.split("\n").filter(u => u.trim()) };
-    }
-    return Object.keys(tools).length > 0 ? tools : undefined;
-  }, [isGoogleModel, enableGoogleSearch, enableCodeExecution, enableMapsGrounding, urlContextUrls]);
-
   // ==========================================================================
   // Handlers (unchanged from original)
   // ==========================================================================
@@ -317,18 +274,6 @@ export default function PlaygroundPage() {
     const attachments = attachedFiles
       .map(toComposeAttachment)
       .filter((attachment): attachment is NonNullable<typeof attachment> => Boolean(attachment));
-    const operation = resolveOperation(selectedModelInfo, attachments);
-    if (!operation) {
-      const errorMsg = `No SDK catalog operation is available for ${selectedModelInfo.modelId}`;
-      setInferenceError(errorMsg);
-      toast({
-        title: "Unsupported Input",
-        description: errorMsg,
-        variant: "destructive",
-      });
-      return;
-    }
-    const outputType = operationOutputType(operation);
     const userMessage = {
       id: crypto.randomUUID(),
       role: "user" as const,
@@ -344,7 +289,6 @@ export default function PlaygroundPage() {
       model_id: selectedModel,
       has_attachment: attachedFiles.length > 0,
       attachment_type: attachedFiles[0]?.type ?? null,
-      inference_operation: operation,
       chain_id: paymentChainId,
     });
 
@@ -366,7 +310,7 @@ export default function PlaygroundPage() {
 
     setMessages((prev) => [
       ...prev,
-      { id: assistantId, role: "assistant", content: "", timestamp: Date.now(), type: outputType },
+      { id: assistantId, role: "assistant", content: "", timestamp: Date.now(), type: "text" },
     ]);
 
     try {
@@ -383,7 +327,7 @@ export default function PlaygroundPage() {
       }
 
       const history = [...messages.slice(conversationStartIndex), userMessage];
-      const input: ChatMessage[] = history.map(toChatMessage);
+      const input: ChatMessage[] = history.map(toComposeMessage);
       if (systemPrompt.trim()) input.unshift({ role: "system", content: systemPrompt.trim() });
 
       const callOptions: ComposeCallOptions = {
@@ -391,121 +335,20 @@ export default function PlaygroundPage() {
         userAddress: account.address,
         chainId: paymentChainId,
       };
-      const customParams = {
-        ...(activeGoogleTools ? { google_tools: activeGoogleTools } : {}),
-        ...paramValues,
-      };
-
-      if (operation.modality === "embedding" || outputType === "embedding") {
-        const result = await sdk.inference.embeddings.create({
-          model: selectedModelInfo.modelId,
-          input: userMessage.content,
-          ...(attachments.length > 0 ? { attachments } : {}),
-          provider: selectedModelInfo.provider,
-          ...customParams,
-        }, callOptions);
-        const parsed = parseJsonResponse(result.data);
-        if (!parsed.success) throw new Error(parsed.error || "Embedding request failed");
-        chat.updateAssistantMessage(assistantId, {
-          type: "embedding",
-          content: parsed.content ?? JSON.stringify(parsed.embeddings ?? []),
-        });
-        chat.clearActivityState();
-        return;
-      }
-
-      if (operation.modality === "audio" && outputType === "audio") {
-        const result = await sdk.inference.audio.speech({
-          model: selectedModelInfo.modelId,
-          input: userMessage.content,
-          ...(attachments.length > 0 ? { attachments } : {}),
-          provider: selectedModelInfo.provider,
-          ...customParams,
-        }, callOptions);
-        const parsed = await audioResponseResult(result.response);
-        const audioUrl = parsed.objectUrl
-          ?? parsed.url
-          ?? (parsed.base64 ? `data:${parsed.mimeType || "audio/mpeg"};base64,${parsed.base64}` : undefined);
-        if (!audioUrl) throw new Error("Audio response did not include playable media");
-        chat.updateAssistantMessage(assistantId, {
-          type: "audio",
-          content: "Generated audio:",
-          audioUrl,
-        });
-        chat.clearActivityState();
-        return;
-      }
-
-      if (operation.modality === "audio" && outputType === "text") {
-        const file = attachmentUrl(attachments, "audio");
-        if (!file) throw new Error("This model requires an audio file input");
-        const result = await sdk.inference.audio.transcriptions({
-          model: selectedModelInfo.modelId,
-          file,
-          ...(attachments.length > 0 ? { attachments } : {}),
-          provider: selectedModelInfo.provider,
-          ...customParams,
-        }, callOptions);
-        const parsed = parseJsonResponse(result.data);
-        if (!parsed.success) throw new Error(parsed.error || "Audio transcription failed");
-        chat.updateAssistantMessage(assistantId, {
-          type: "text",
-          content: parsed.content ?? "",
-        });
-        chat.clearActivityState();
-        return;
-      }
-
-      if (operation.modality === "video" && outputType === "video") {
-        const imageUrl = attachmentUrl(attachments, "image");
-        const result = await sdk.inference.videos.generate({
-          model: selectedModelInfo.modelId,
-          prompt: userMessage.content,
-          ...(imageUrl ? { image_url: imageUrl } : {}),
-          ...(attachments.length > 0 ? { attachments } : {}),
-          provider: selectedModelInfo.provider,
-          ...customParams,
-        }, callOptions);
-        const parsed = parseJsonResponse(result.data);
-        if (!parsed.success) throw new Error(parsed.error || "Video generation failed");
-        const jobId = parsed.jobId ?? result.data.id ?? result.data.job_id;
-        chat.updateAssistantMessage(assistantId, {
-          type: "video",
-          content: parsed.content ?? (parsed.url ? "Generated video:" : ""),
-          videoUrl: parsed.url,
-        });
-        if (jobId && !parsed.url) {
-          await streamer.runVideo({
-            videoId: jobId,
-            assistantId,
-            options: {
-              ...callOptions,
-              pollIntervalMs: 1500,
-              timeoutMs: 120000,
-            },
-          });
-        } else {
-          chat.clearActivityState();
-        }
-        return;
-      }
-
-      const responseModality = outputType === "image" ? "image" : "text";
       await streamer.runResponses({
         params: {
           model: selectedModelInfo.modelId,
           input,
-          modalities: [responseModality],
           stream: true,
           ...(attachments.length > 0 ? { attachments } : {}),
-          provider: selectedModelInfo.provider,
-          ...customParams,
+          ...paramValues,
         },
         assistantId,
         options: callOptions,
       });
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "Unknown error";
+      const errorMsg = "This request could not be completed.";
+      console.error("[playground] inference failed:", err);
       setInferenceError(errorMsg);
       chat.setActivityPhase("error", errorMsg);
       setMessages((prev) =>
@@ -514,7 +357,7 @@ export default function PlaygroundPage() {
     } finally {
       setStreaming(false);
     }
-  }, [inputValue, streaming, selectedModel, selectedModelInfo, messages, systemPrompt, wallet, account, budgetRemaining, attachedFiles, clearFiles, sessionActive, composeKeyToken, ensureComposeKeyToken, activeGoogleTools, paymentChainId, paramValues, toast, setShowSessionDialog, posthog, chat, setMessages, conversationStartIndex, streamer]);
+  }, [inputValue, streaming, selectedModel, selectedModelInfo, messages, systemPrompt, wallet, account, budgetRemaining, attachedFiles, clearFiles, sessionActive, composeKeyToken, ensureComposeKeyToken, paymentChainId, paramValues, toast, setShowSessionDialog, posthog, chat, setMessages, conversationStartIndex, streamer]);
   const handleClearChat = useCallback(() => {
     clearMessages();
     setInferenceError(null);
@@ -537,13 +380,13 @@ export default function PlaygroundPage() {
         </div>
 
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "model" | "plugins")}>
-          <TabsList className="bg-zinc-900/80" style={{ height: 'clamp(1.375rem, 1.1rem + 0.5vw, 2.125rem)' }}>
-            <TabsTrigger value="model" className="gap-1 px-2" style={{ fontSize: 'clamp(0.5rem, 0.4rem + 0.25vw, 0.75rem)', height: 'clamp(1.125rem, 0.9rem + 0.45vw, 1.875rem)' }}>
-              <Bot style={{ width: 'clamp(0.625rem, 0.5rem + 0.25vw, 1rem)', height: 'clamp(0.625rem, 0.5rem + 0.25vw, 1rem)' }} />
+          <TabsList className="cm-shell-tab-strip">
+            <TabsTrigger value="model" className="cm-shell-tab">
+              <Bot className="h-4 w-4" />
               Models
             </TabsTrigger>
-            <TabsTrigger value="plugins" className="gap-1 px-2" style={{ fontSize: 'clamp(0.5rem, 0.4rem + 0.25vw, 0.75rem)', height: 'clamp(1.125rem, 0.9rem + 0.45vw, 1.875rem)' }}>
-              <Plug style={{ width: 'clamp(0.625rem, 0.5rem + 0.25vw, 1rem)', height: 'clamp(0.625rem, 0.5rem + 0.25vw, 1rem)' }} />
+            <TabsTrigger value="plugins" className="cm-shell-tab">
+              <Plug className="h-4 w-4" />
               Plugins
             </TabsTrigger>
           </TabsList>
@@ -557,10 +400,9 @@ export default function PlaygroundPage() {
               variant="ghost"
               size="icon"
               onClick={() => setMobilePaneOpen(true)}
-              className="lg:hidden text-zinc-400 hover:text-white"
-              style={{ width: 'clamp(1.25rem, 1rem + 0.5vw, 1.875rem)', height: 'clamp(1.25rem, 1rem + 0.5vw, 1.875rem)' }}
+              className="cm-shell-button cm-shell-button--ghost cm-shell-button--icon lg:hidden"
             >
-              <Settings2 style={{ width: 'clamp(0.625rem, 0.5rem + 0.25vw, 1rem)', height: 'clamp(0.625rem, 0.5rem + 0.25vw, 1rem)' }} />
+              <Settings2 className="h-4 w-4" />
             </Button>
           )}
         </div>
@@ -578,31 +420,14 @@ export default function PlaygroundPage() {
                 onClick={() => setCommandBarOpen(true)}
               />
 
-              <div className="cm-playground__filter-wrap">
-                <select
-                  className={`cm-playground__filter-select ${selectedType !== "all" ? "cm-playground__filter-select--active" : ""}`}
-                  value={selectedType}
-                  onChange={(e) => setSelectedType(e.target.value)}
-                >
-                  {typeCategories.map((cat) => (
-                    <option key={cat.id} value={cat.id}>
-                      {cat.label} ({cat.count})
-                    </option>
-                  ))}
-                </select>
-
-                <select
-                  className={`cm-playground__filter-select ${selectedProvider !== "all" ? "cm-playground__filter-select--active" : ""}`}
-                  value={selectedProvider}
-                  onChange={(e) => setSelectedProvider(e.target.value)}
-                >
-                  {providerCategories.map((cat) => (
-                    <option key={cat.id} value={cat.id}>
-                      {cat.label} ({cat.count})
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <CapabilityChips
+                selectedType={selectedType}
+                onTypeChange={setSelectedType}
+                typeCategories={typeCategories}
+                selectedProvider={selectedProvider}
+                onProviderChange={setSelectedProvider}
+                providerCategories={providerCategories}
+              />
 
               <span className="cm-playground__model-count">
                 {filteredModels.length}/{models.length}
@@ -613,10 +438,9 @@ export default function PlaygroundPage() {
                 size="icon"
                 onClick={() => forceRefreshModels()}
                 disabled={modelsLoading}
-                className="text-zinc-400 hover:text-white"
-                style={{ width: 'clamp(1.25rem, 1rem + 0.5vw, 1.875rem)', height: 'clamp(1.25rem, 1rem + 0.5vw, 1.875rem)' }}
+                className="cm-shell-button cm-shell-button--ghost cm-shell-button--icon"
               >
-                <RefreshCw className={modelsLoading ? "animate-spin" : ""} style={{ width: 'clamp(0.625rem, 0.5rem + 0.25vw, 1rem)', height: 'clamp(0.625rem, 0.5rem + 0.25vw, 1rem)' }} />
+                <RefreshCw className={`h-4 w-4 ${modelsLoading ? "animate-spin" : ""}`} />
               </Button>
             </div>
 
@@ -668,20 +492,12 @@ export default function PlaygroundPage() {
                   ? "Start a session first"
                   : attachedFiles.length > 0
                     ? "Describe the uploaded file..."
-                    : `Send ${operationLabel(selectedOperation)} request...`
+                    : "Send a request..."
               }
-              emptyStateIcon={
-                operationIcon(selectedOperation) === "image" ? (
-                  <ImageIcon className="mx-auto mb-4 opacity-50 text-zinc-500" style={{ width: 'clamp(2rem, 1.5rem + 2vw, 4rem)', height: 'clamp(2rem, 1.5rem + 2vw, 4rem)' }} />
-                ) : operationIcon(selectedOperation) === "audio" ? (
-                  <Music className="mx-auto mb-4 opacity-50 text-zinc-500" style={{ width: 'clamp(2rem, 1.5rem + 2vw, 4rem)', height: 'clamp(2rem, 1.5rem + 2vw, 4rem)' }} />
-                ) : (
-                  <Bot className="mx-auto mb-4 opacity-50 text-zinc-500" style={{ width: 'clamp(2rem, 1.5rem + 2vw, 4rem)', height: 'clamp(2rem, 1.5rem + 2vw, 4rem)' }} />
-                )
-              }
+              emptyStateIcon={<Bot className="mx-auto mb-4 h-12 w-12 text-cyan-300/50" />}
               emptyStateText={
                 selectedModelInfo
-                  ? `Start ${operationLabel(selectedOperation)} with ${selectedModelInfo.name || selectedModelInfo.modelId}`
+                  ? `Start with ${selectedModelInfo.name || selectedModelInfo.modelId}`
                   : "Select a model to begin"
               }
               emptyStateSubtext={
@@ -705,19 +521,8 @@ export default function PlaygroundPage() {
               <MirrorPane
                 selectedModel={selectedModel}
                 modelInfo={selectedModelInfo || null}
-                isGoogleModel={isGoogleModel}
                 systemPrompt={systemPrompt}
                 onSystemPromptChange={setSystemPrompt}
-                googleTools={isGoogleModel ? {
-                  enableGoogleSearch,
-                  setEnableGoogleSearch,
-                  enableCodeExecution,
-                  setEnableCodeExecution,
-                  enableMapsGrounding,
-                  setEnableMapsGrounding,
-                  urlContextUrls,
-                  setUrlContextUrls,
-                } : undefined}
                 modelParams={modelParams}
                 paramValues={paramValues}
                 onParamValuesChange={setParamValues}
@@ -778,30 +583,19 @@ export default function PlaygroundPage() {
 
       {/* ── Mobile MirrorPane Sheet ───────────────────────────────── */}
       <Sheet open={mobilePaneOpen} onOpenChange={setMobilePaneOpen}>
-        <SheetContent side="right" className="p-0 overflow-y-auto" style={{ width: 'clamp(16rem, 14rem + 10vw, 28rem)' }}>
-          <SheetHeader className="border-b border-sidebar-border" style={{ padding: 'clamp(0.5rem, 0.4rem + 0.5vw, 1.25rem)' }}>
-            <SheetTitle className="font-display text-cyan-400 flex items-center" style={{ gap: 'clamp(0.375rem, 0.3rem + 0.2vw, 0.625rem)', fontSize: 'clamp(0.75rem, 0.6rem + 0.35vw, 1.125rem)' }}>
-              <Settings2 style={{ width: 'clamp(0.75rem, 0.6rem + 0.3vw, 1.25rem)', height: 'clamp(0.75rem, 0.6rem + 0.3vw, 1.25rem)' }} />
+        <SheetContent side="right" className="cm-shell-panel p-0 overflow-y-auto w-[min(28rem,calc(100vw-1rem))]">
+          <SheetHeader className="border-b border-primary/15 p-4">
+            <SheetTitle className="font-display text-cyan-300 flex items-center gap-2 text-base">
+              <Settings2 className="h-5 w-5" />
               Model Settings
             </SheetTitle>
           </SheetHeader>
-          <div style={{ padding: 'clamp(0.5rem, 0.4rem + 0.5vw, 1.25rem)' }}>
+          <div className="p-3 sm:p-4">
             <MirrorPane
               selectedModel={selectedModel}
               modelInfo={selectedModelInfo || null}
-              isGoogleModel={isGoogleModel}
               systemPrompt={systemPrompt}
               onSystemPromptChange={setSystemPrompt}
-              googleTools={isGoogleModel ? {
-                enableGoogleSearch,
-                setEnableGoogleSearch,
-                enableCodeExecution,
-                setEnableCodeExecution,
-                enableMapsGrounding,
-                setEnableMapsGrounding,
-                urlContextUrls,
-                setUrlContextUrls,
-              } : undefined}
               modelParams={modelParams}
               paramValues={paramValues}
               onParamValuesChange={setParamValues}

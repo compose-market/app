@@ -5,9 +5,11 @@
  */
 import { useState, useDeferredValue } from "react";
 import * as React from "react";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { usePostHog } from "@posthog/react";
+import type { DirectoryAgent } from "@compose-market/sdk";
 import { mpTrack } from "@/lib/mixpanel";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -21,12 +23,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useOnchainWorkflows, useOnchainAgents, useOpenRFAs, type OnchainWorkflow, type OnchainAgent, type OnchainRFA } from "@/hooks/use-onchain";
+import { useOnchainWorkflows, useOpenRFAs, type OnchainAgent, type OnchainWorkflow, type OnchainRFA } from "@/hooks/use-onchain";
 import { useTabs } from "@/hooks/use-tabs";
 import { getIpfsUrl } from "@/lib/pinata";
-import { RFA_BOUNTY_LIMITS, getContractAddress } from "@/lib/contracts";
+import { RFA_BOUNTY_LIMITS, formatUsdcPrice, getContractAddress, weiToUsdc } from "@/lib/contracts";
 import { CHAIN_CONFIG } from "@/lib/chains";
+import { sdk } from "@/lib/sdk";
 import { RFADetails } from "@/components/RFADetails";
+import { AgentCard as SharedAgentCard } from "@/components/agent-card";
 import {
   Box,
   Layers,
@@ -45,9 +49,7 @@ import {
   Target,
   ExternalLink,
   Bot,
-  ArrowRightLeft,
 } from "lucide-react";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 export default function Market() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -58,7 +60,7 @@ export default function Market() {
   const [activeTab, setActiveTab] = useTabs("market", "agents");
 
   return (
-    <div className="space-y-4 sm:space-y-6 lg:space-y-8">
+    <div className="cm-market-workspace">
       {/* Page Header */}
       <div className="cm-page-header">
         <div className="cm-page-header__title-row">
@@ -73,56 +75,47 @@ export default function Market() {
         </p>
       </div>
 
-      {/* Search Bar */}
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <Input
-          placeholder="Search workflows and bounties..."
-          value={searchQuery}
-          onChange={(e) => {
-            setSearchQuery(e.target.value);
-            if (e.target.value.trim()) {
-              mpTrack("Search", { "Search Query": e.target.value.trim() });
-            }
-          }}
-          className="pl-10 bg-background/50 border-sidebar-border font-mono text-sm"
-        />
-      </div>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="cm-market-tabs w-full">
+        <div className="cm-control-rail cm-market-control-rail">
+          <div className="cm-market-control-rail__search relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              placeholder="Search workflows, agents, and bounties..."
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                if (e.target.value.trim()) {
+                  mpTrack("Search", { "Search Query": e.target.value.trim() });
+                }
+              }}
+              className="pl-10 bg-background/50 border-primary/20 focus:border-cyan-500 font-mono text-sm"
+            />
+          </div>
+          <TabsList className="cm-shell-tab-strip cm-market-control-rail__tabs">
+            <TabsTrigger value="agents" className="cm-shell-tab min-w-0">
+              <Bot className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">AGENTS</span>
+            </TabsTrigger>
+            <TabsTrigger value="workflows" className="cm-shell-tab min-w-0">
+              <Layers className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">WORKFLOWS</span>
+            </TabsTrigger>
+            <TabsTrigger value="rfas" className="cm-shell-tab min-w-0">
+              <FileQuestion className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">RFAs</span>
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="bg-sidebar-accent border border-sidebar-border p-1 mb-4 sm:mb-6 lg:mb-8 w-full sm:w-auto">
-          <TabsTrigger
-            value="agents"
-            className="flex-1 sm:flex-none data-[state=active]:bg-cyan-500 data-[state=active]:text-black font-bold font-mono tracking-wide px-2 sm:px-6 lg:px-8 text-[10px] sm:text-sm min-w-0"
-          >
-            <Bot className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2 shrink-0" />
-            <span className="truncate">AGENTS</span>
-          </TabsTrigger>
-          <TabsTrigger
-            value="workflows"
-            className="flex-1 sm:flex-none data-[state=active]:bg-cyan-500 data-[state=active]:text-black font-bold font-mono tracking-wide px-2 sm:px-6 lg:px-8 text-[10px] sm:text-sm min-w-0"
-          >
-            <Layers className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2 shrink-0" />
-            <span className="truncate">WORKFLOWS</span>
-          </TabsTrigger>
-          <TabsTrigger
-            value="rfas"
-            className="flex-1 sm:flex-none data-[state=active]:bg-fuchsia-500 data-[state=active]:text-white font-bold font-mono tracking-wide px-2 sm:px-6 lg:px-8 text-[10px] sm:text-sm min-w-0"
-          >
-            <FileQuestion className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2 shrink-0" />
-            <span className="truncate">RFAs</span>
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="agents" className="mt-0">
+        <TabsContent value="agents" className="cm-market-tab-panel cm-market-tab-panel--agents mt-0">
           <AgentsTab searchQuery={deferredQuery} />
         </TabsContent>
 
-        <TabsContent value="workflows" className="mt-0">
+        <TabsContent value="workflows" className="cm-market-tab-panel cm-market-tab-panel--scroll mt-0">
           <WorkflowsTab searchQuery={deferredQuery} />
         </TabsContent>
 
-        <TabsContent value="rfas" className="mt-0">
+        <TabsContent value="rfas" className="cm-market-tab-panel cm-market-tab-panel--scroll mt-0">
           <RFAsTab searchQuery={deferredQuery} />
         </TabsContent>
       </Tabs>
@@ -671,54 +664,156 @@ const RFACard = React.memo(function RFACard({
 });
 
 // =============================================================================
-// Agents Tab - ERC8004 Agents from AgentFactory, Clone, and Warp contracts
+// Agents Tab - Cloudflare-backed native agents, progressively loaded
 // =============================================================================
 
+const AGENTS_LIMIT = 24;
+
+type AgentPage = {
+  agents: DirectoryAgent[];
+  total: number;
+  count?: number;
+  nextCursor?: string | null;
+  hasMore?: boolean;
+};
+
+function amount(value: string | undefined): bigint {
+  const raw = value?.trim();
+  if (!raw) return 0n;
+  if (/^\d+$/.test(raw)) return BigInt(raw);
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? BigInt(Math.round(parsed * 1_000_000)) : 0n;
+}
+
+function finite(value: unknown): number | null {
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function agent(card: DirectoryAgent): OnchainAgent {
+  const cost = amount(card.licensePrice);
+  const licenses = finite(card.licenses) ?? 0;
+  const minted = finite((card as { licensesMinted?: unknown }).licensesMinted) ?? 0;
+  const available = finite(card.licensesAvailable) ?? (licenses === 0 ? Infinity : Math.max(0, licenses - minted));
+  const creatorFee = finite(card.creatorFee) ?? 1;
+
+  return {
+    id: finite(card.agentId) ?? 0,
+    dnaHash: card.dnaHash || "",
+    walletAddress: card.walletAddress || "",
+    licenses,
+    licensesMinted: minted,
+    licensesAvailable: available,
+    licensePrice: weiToUsdc(cost),
+    licensePriceFormatted: formatUsdcPrice(cost),
+    creatorFee,
+    creator: card.creator || "",
+    cloneable: Boolean(card.cloneable),
+    isClone: Boolean(card.isClone),
+    parentAgentId: finite(card.parentAgentId) ?? 0,
+    agentCardUri: card.cid ? `ipfs://${card.cid}` : "",
+    metadata: {
+      ...card,
+      creatorFee,
+      x402: true,
+    } as OnchainAgent["metadata"],
+    isWarped: false,
+  };
+}
+
+type AgentSort = "newest" | "price-low" | "price-high";
+
+async function page(input: { cursor?: string; q?: string; sort?: AgentSort; signal?: AbortSignal }): Promise<AgentPage> {
+  const params = new URLSearchParams({ limit: String(AGENTS_LIMIT) });
+  if (input.cursor) params.set("cursor", input.cursor);
+  if (input.q) params.set("q", input.q);
+  if (!input.q && input.sort) params.set("sort", input.sort);
+  const response = await sdk.fetch(`/agents?${params.toString()}`, {
+    headers: { Accept: "application/json" },
+    signal: input.signal,
+  });
+  if (!response.ok) {
+    throw new Error(`Agent lookup failed with status ${response.status}`);
+  }
+  return await response.json() as AgentPage;
+}
+
 function AgentsTab({ searchQuery }: { searchQuery: string }) {
-  const [sort, setSort] = useState<"newest" | "price-low" | "price-high">("newest");
-  const { data: agents, isLoading, error, refetch } = useOnchainAgents();
+  const [sort, setSort] = useState<AgentSort>("newest");
+  const [shown, setShown] = useState(120);
+  const [, setLocation] = useLocation();
+  const canvasRef = React.useRef<HTMLDivElement | null>(null);
+  const moreRef = React.useRef<HTMLDivElement | null>(null);
+  const q = searchQuery.trim();
+  const {
+    data,
+    isLoading,
+    isFetchingNextPage,
+    hasNextPage,
+    error,
+    refetch,
+    fetchNextPage,
+  } = useInfiniteQuery({
+    queryKey: ["agents", "market", q, q ? "relevance" : sort],
+    queryFn: async ({ pageParam, signal }) => {
+      const cursor = typeof pageParam === "string" ? pageParam : undefined;
+      return await page({ cursor, q: q || undefined, sort: q ? undefined : sort, signal });
+    },
+    initialPageParam: null as string | null,
+    getNextPageParam: (page) => page.hasMore ? page.nextCursor ?? undefined : undefined,
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+    retry: 1,
+  });
 
-  // Filter and sort
-  const filteredAgents = React.useMemo(() => {
-    if (!agents) return [];
-
-    let filtered = agents;
-
-    // Search filter
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      filtered = filtered.filter(a =>
-        (a.metadata?.name || `Agent #${a.id}`).toLowerCase().includes(q) ||
-        (a.metadata?.description || "").toLowerCase().includes(q)
-      );
-    }
-
-    // Sort
-    filtered = [...filtered].sort((a, b) => {
-      switch (sort) {
-        case "price-low":
-          return parseFloat(a.licensePrice) - parseFloat(b.licensePrice);
-        case "price-high":
-          return parseFloat(b.licensePrice) - parseFloat(a.licensePrice);
-        case "newest":
-        default:
-          // Sort by minting date (from IPFS metadata), newest first
-          const aDate = a.metadata?.createdAt ? new Date(a.metadata.createdAt).getTime() : 0;
-          const bDate = b.metadata?.createdAt ? new Date(b.metadata.createdAt).getTime() : 0;
-          return bDate - aDate;
+  const agents = React.useMemo(() => {
+    const seen = new Set<string>();
+    const out: OnchainAgent[] = [];
+    for (const page of data?.pages || []) {
+      for (const card of page.agents || []) {
+        if (!card.walletAddress) continue;
+        const key = card.walletAddress.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(agent(card));
       }
-    });
+    }
+    return out;
+  }, [data]);
 
-    return filtered;
-  }, [agents, searchQuery, sort]);
+  const total = data?.pages[0]?.total ?? 0;
+  const visibleAgents = agents.length > 120 ? agents.slice(0, shown) : agents;
+  const canReveal = visibleAgents.length < agents.length;
+
+  React.useEffect(() => {
+    setShown(120);
+  }, [q, sort]);
+
+  React.useEffect(() => {
+    const root = canvasRef.current;
+    const node = moreRef.current;
+    if (!root || !node) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      if (canReveal) {
+        setShown((value) => Math.min(value + 48, agents.length));
+        return;
+      }
+      if (hasNextPage && !isFetchingNextPage) {
+        void fetchNextPage();
+      }
+    }, { root, rootMargin: "640px 0px" });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [agents.length, canReveal, fetchNextPage, hasNextPage, isFetchingNextPage]);
 
   return (
-    <div className="space-y-4">
+    <div className="cm-market-agents">
       {/* Filters */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <Select value={sort} onValueChange={(v) => setSort(v as typeof sort)}>
-            <SelectTrigger className="w-full sm:w-[160px] bg-background/50 border-sidebar-border h-9 text-sm">
+      <div className="cm-control-rail cm-control-rail--compact">
+        <div className="cm-control-rail__main">
+          <Select value={sort} onValueChange={(v) => setSort(v as AgentSort)} disabled={Boolean(q)}>
+            <SelectTrigger className="w-full sm:w-[170px] bg-background/50 border-primary/20 h-9 text-sm">
               <SelectValue placeholder="Sort by" />
             </SelectTrigger>
             <SelectContent>
@@ -728,28 +823,29 @@ function AgentsTab({ searchQuery }: { searchQuery: string }) {
             </SelectContent>
           </Select>
         </div>
-        <div className="flex items-center justify-between sm:justify-end gap-2">
-          {agents && (
+        <div className="cm-control-rail__actions">
+          {data && (
             <Badge variant="outline" className="font-mono text-[10px] sm:text-xs">
-              {filteredAgents.length} agents
+              {q ? `${agents.length} results` : `${agents.length}/${total} agents`}
             </Badge>
           )}
           <Button
             variant="outline"
             size="sm"
             onClick={() => refetch()}
-            className="border-sidebar-border h-9 w-9"
+            className="border-primary/20 h-9 w-9"
           >
-            <RefreshCw className="w-4 h-4" />
+            <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
           </Button>
         </div>
       </div>
 
       {/* Loading State */}
       {isLoading && (
-        <div className="cm-card-grid">
-          {[...Array(6)].map((_, i) => (
-            <Card key={i} className="glass-panel">
+        <div className="cm-market-agent-canvas cm-market-agent-canvas--loading">
+          <div className="cm-market-agent-grid">
+          {[...Array(9)].map((_, i) => (
+            <Card key={i} className="glass-panel cm-agent-card--market-full">
               <CardHeader className="pb-2">
                 <Skeleton className="h-12 w-12 rounded-full" />
                 <Skeleton className="h-4 w-3/4 mt-4" />
@@ -760,6 +856,7 @@ function AgentsTab({ searchQuery }: { searchQuery: string }) {
               </CardContent>
             </Card>
           ))}
+          </div>
         </div>
       )}
 
@@ -779,16 +876,51 @@ function AgentsTab({ searchQuery }: { searchQuery: string }) {
       )}
 
       {/* Agents Grid */}
-      {!isLoading && filteredAgents.length > 0 && (
-        <div className="cm-card-grid">
-          {filteredAgents.map((agent) => (
-            <AgentCard key={agent.id} agent={agent} />
-          ))}
+      {!isLoading && visibleAgents.length > 0 && (
+        <div className="cm-market-agent-canvas" ref={canvasRef} aria-label="Agents">
+          <div className="cm-market-agent-grid">
+          {visibleAgents.map((agent) => {
+            const agentPageUrl = agent.walletAddress
+              ? `/agent/${agent.walletAddress}`
+              : agent.id > 0 ? `/agent/${agent.id}` : "/agents";
+
+            return (
+              <div
+                key={agent.walletAddress || `agent-${agent.id}`}
+                className="cm-market-agent-slot [content-visibility:auto] [contain-intrinsic-size:360px]"
+              >
+                <SharedAgentCard
+                  agent={agent}
+                  className="cm-agent-card--market-full"
+                  onOpen={() => setLocation(agentPageUrl)}
+                />
+              </div>
+            );
+          })}
+          {(canReveal || hasNextPage) ? (
+            <div ref={moreRef} className="cm-market-agent-more">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  if (canReveal) {
+                    setShown((value) => Math.min(value + 48, agents.length));
+                  } else {
+                    void fetchNextPage();
+                  }
+                }}
+                disabled={isFetchingNextPage}
+                className="border-sidebar-border h-9 text-xs"
+              >
+                {isFetchingNextPage ? "Loading..." : "Load more"}
+              </Button>
+            </div>
+          ) : null}
+          </div>
         </div>
       )}
 
       {/* Empty State */}
-      {filteredAgents.length === 0 && !isLoading && (
+      {agents.length === 0 && !isLoading && (
         <div className="text-center py-12 sm:py-20">
           <Bot className="w-10 h-10 sm:w-12 sm:h-12 mx-auto text-muted-foreground/30 mb-4" />
           <p className="text-muted-foreground text-sm sm:text-base">
@@ -799,166 +931,3 @@ function AgentsTab({ searchQuery }: { searchQuery: string }) {
     </div>
   );
 }
-
-// Memoized agent card component
-const AgentCard = React.memo(function AgentCard({ agent }: { agent: OnchainAgent }) {
-  const posthog = usePostHog();
-  const metadata = agent.metadata;
-  const name = metadata?.name || `Agent #${agent.id}`;
-  const description = metadata?.description || "No description available";
-
-  // Handle avatar URL
-  let avatarUrl: string | null = null;
-  if (metadata?.image && metadata.image !== "none") {
-    if (metadata.image.startsWith("ipfs://")) {
-      avatarUrl = getIpfsUrl(metadata.image.replace("ipfs://", ""));
-    } else if (metadata.image.startsWith("https://")) {
-      avatarUrl = metadata.image;
-    }
-  }
-
-  const initials = name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
-  const licensesDisplay = agent.licenses === 0 ? "∞" : `${agent.licensesAvailable}/${agent.licenses}`;
-
-  // Agent page URL using wallet address (primary) or ID (fallback)
-  const agentPageUrl = agent.walletAddress
-    ? `/agent/${agent.walletAddress}`
-    : `/agent/${agent.id}`;
-
-  return (
-    <Link href={agentPageUrl} className="block">
-      <Card
-        className="glass-panel border-cyan-500/20 hover:border-cyan-500/60 transition-all duration-300 group overflow-hidden cursor-pointer"
-      >
-        {/* Header with Avatar */}
-        <CardHeader className="p-3 sm:p-4 pb-2">
-          <div className="flex items-start gap-2 sm:gap-3">
-            <Avatar className="w-10 h-10 sm:w-12 sm:h-12 border-2 border-cyan-500/30 group-hover:border-cyan-500/60 transition-colors shrink-0">
-              <AvatarImage src={avatarUrl || undefined} alt={name} />
-              <AvatarFallback className="bg-cyan-500/10 text-cyan-400 font-mono text-xs sm:text-sm">
-                {initials}
-              </AvatarFallback>
-            </Avatar>
-            <div className="min-w-0 flex-1">
-              <CardTitle className="text-sm sm:text-lg font-display font-bold text-white group-hover:text-cyan-400 transition-colors truncate">
-                {name}
-              </CardTitle>
-              <p className="text-[9px] sm:text-xs font-mono text-muted-foreground mt-0.5 truncate">
-                Agent #{agent.id} • ERC8004
-              </p>
-            </div>
-          </div>
-
-          {/* Badges */}
-          <div className="flex flex-wrap gap-1 mt-2">
-            {/* Chain badge */}
-            {agent.metadata?.chain && (() => {
-              const chainInfo = CHAIN_CONFIG[agent.metadata.chain];
-              const colorClass = chainInfo?.color === 'red'
-                ? 'border-red-500/30 text-red-400 bg-red-500/10'
-                : 'border-blue-500/30 text-blue-400 bg-blue-500/10';
-              return (
-                <Badge variant="outline" className={`text-[8px] sm:text-[10px] ${colorClass}`}>
-                  {chainInfo?.name || `Chain ${agent.metadata.chain}`}
-                </Badge>
-              );
-            })()}
-            <Badge className="bg-cyan-500/20 text-cyan-400 border-cyan-500/30 text-[8px] sm:text-[10px]">
-              <Sparkles className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
-              on-chain
-            </Badge>
-            {agent.isWarped && (
-              <Badge className="bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/30 text-[8px] sm:text-[10px]">
-                <ArrowRightLeft className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
-                warped
-              </Badge>
-            )}
-            {agent.cloneable && (
-              <Badge variant="outline" className="text-[8px] sm:text-[10px] border-purple-500/30 text-purple-400 bg-purple-500/10">
-                cloneable
-              </Badge>
-            )}
-            {agent.isClone && (
-              <Badge variant="outline" className="text-[8px] sm:text-[10px] border-orange-500/30 text-orange-400 bg-orange-500/10">
-                clone
-              </Badge>
-            )}
-          </div>
-        </CardHeader>
-
-        <CardContent className="p-3 sm:p-4 pt-0 space-y-2 sm:space-y-3">
-          {/* Description */}
-          <CardDescription className="line-clamp-2 text-[10px] sm:text-xs h-7 sm:h-8">
-            {description}
-          </CardDescription>
-
-          {/* Stats Grid */}
-          <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
-            <div className="p-1.5 sm:p-2 bg-background border border-sidebar-border/50 rounded">
-              <p className="text-[8px] sm:text-[10px] text-muted-foreground uppercase">License Price</p>
-              <div className="flex items-center gap-1">
-                <DollarSign className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-green-400" />
-                <span className="font-mono text-xs sm:text-sm text-green-400 truncate">{agent.licensePriceFormatted}</span>
-              </div>
-            </div>
-            <div className="p-1.5 sm:p-2 bg-background border border-sidebar-border/50 rounded">
-              <p className="text-[8px] sm:text-[10px] text-muted-foreground uppercase">Licenses</p>
-              <div className="flex items-center gap-1">
-                <Package className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-cyan-400" />
-                <span className="font-mono text-xs sm:text-sm text-cyan-400">{licensesDisplay}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* x402 Default Price - shows inference cost */}
-          <div className="p-1.5 sm:p-2 bg-gradient-to-r from-cyan-500/10 to-transparent border border-cyan-500/20 rounded">
-            <p className="text-[8px] sm:text-[10px] text-muted-foreground uppercase">x402 Call Price</p>
-            <div className="flex items-center gap-1">
-              <Zap className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-yellow-400" />
-              <span className="font-mono text-xs sm:text-sm text-yellow-400">$0.005 USDC</span>
-            </div>
-          </div>
-        </CardContent>
-
-        <CardFooter className="p-3 sm:p-4 pt-0 flex gap-1.5 sm:gap-2">
-          <Button
-            className="flex-1 bg-cyan-500 hover:bg-cyan-600 text-black font-bold font-mono text-[9px] sm:text-xs h-8 sm:h-9 px-2 sm:px-3 min-w-0"
-            onClick={(e) => {
-              e.stopPropagation();
-              posthog?.capture("market_agent_use_clicked", {
-                agent_id: agent.id,
-                agent_name: name,
-                agent_wallet: agent.walletAddress,
-                license_price: agent.licensePriceFormatted,
-              });
-            }}
-          >
-            <Zap className="w-3 h-3 mr-0.5 sm:mr-1 shrink-0" />
-            <span className="truncate">USE IT</span>
-          </Button>
-          <Button
-            variant="outline"
-            className="flex-1 border-fuchsia-500/30 hover:bg-fuchsia-500/10 font-bold font-mono text-[9px] sm:text-xs h-8 sm:h-9 px-2 sm:px-3 min-w-0"
-            onClick={(e) => { e.stopPropagation(); /* TODO: Nest / License */ }}
-          >
-            <Layers className="w-3 h-3 mr-0.5 sm:mr-1 shrink-0" />
-            <span className="truncate">NEST</span>
-          </Button>
-          <Button
-            variant="outline"
-            className="border-sidebar-border hover:border-cyan-500/50 h-8 sm:h-9 w-8 sm:w-9 shrink-0 p-0"
-            onClick={(e) => {
-              e.stopPropagation();
-              const metadataChainId = agent.metadata?.chain;
-              if (metadataChainId && CHAIN_CONFIG[metadataChainId]) {
-                window.open(`${CHAIN_CONFIG[metadataChainId].explorer}/token/${getContractAddress("AgentFactory", metadataChainId)}?a=${agent.id}`, "_blank");
-              }
-            }}
-          >
-            <ExternalLink className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-          </Button>
-        </CardFooter>
-      </Card>
-    </Link>
-  );
-});

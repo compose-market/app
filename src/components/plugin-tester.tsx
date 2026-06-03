@@ -557,26 +557,26 @@ export function PluginTester({
     // ==========================================================================
 
     return (
-        <div className="flex flex-col h-full">
+        <div className="cm-chat cm-plugin-tester h-full">
             {/* Header: Source and Plugin/Server selectors */}
-            <div className="shrink-0 p-3 lg:p-4 border-b border-zinc-800">
+            <div className="cm-chat__header">
                 <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 flex-wrap">
                     {/* Source selector */}
                     <Select value={pluginSource} onValueChange={(v) => handleSourceChange(v as PluginSource)}>
-                        <SelectTrigger className="w-full sm:w-28 lg:w-32 bg-zinc-900 border-zinc-700 h-9">
+                        <SelectTrigger className="cm-form-select h-9 w-full sm:w-28 lg:w-32">
                             <SelectValue />
                         </SelectTrigger>
-                        <SelectContent className="bg-zinc-900 border-zinc-700">
+                        <SelectContent className="cm-shell-panel">
                             <SelectItem value="onchain">
                                 <div className="flex items-center gap-2">
                                     <Badge className="bg-green-500/20 text-green-400 border-green-500/40 text-[10px] px-1.5">Onchain</Badge>
-                                    <span className="text-[10px] text-zinc-500">DeFi</span>
+                                    <span className="text-[10px] text-muted-foreground">DeFi</span>
                                 </div>
                             </SelectItem>
                             <SelectItem value="tools">
                                 <div className="flex items-center gap-2">
-                                    <Badge className="bg-purple-500/20 text-purple-400 border-purple-500/40 text-[10px] px-1.5">Tools</Badge>
-                                    <span className="text-[10px] text-zinc-500">Servers</span>
+                                    <Badge className="bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/40 text-[10px] px-1.5">Tools</Badge>
+                                    <span className="text-[10px] text-muted-foreground">Servers</span>
                                 </div>
                             </SelectItem>
                         </SelectContent>
@@ -586,12 +586,12 @@ export function PluginTester({
                     {pluginSource === "onchain" && (
                         <>
                             <Select value={selectedPlugin} onValueChange={handlePluginChange} disabled={!goatStatus?.plugins?.length}>
-                                <SelectTrigger className="w-full sm:w-40 lg:w-52 bg-zinc-900 border-zinc-700 h-9">
+                                <SelectTrigger className="cm-form-select h-9 w-full sm:w-40 lg:w-52">
                                     <SelectValue placeholder={pluginsLoading ? "Loading..." : "Select plugin"} />
                                 </SelectTrigger>
-                                <SelectContent className="bg-zinc-900 border-zinc-700 max-h-80">
+                                <SelectContent className="cm-shell-panel max-h-80">
                                     {!goatStatus?.plugins?.length ? (
-                                        <div className="p-2 text-zinc-500 text-sm">No plugins available</div>
+                                        <div className="p-2 text-muted-foreground text-sm">No plugins available</div>
                                     ) : (
                                         goatStatus.plugins.map((plugin) => (
                                             <SelectItem key={plugin.id} value={plugin.id}>
@@ -606,18 +606,18 @@ export function PluginTester({
                             </Select>
 
                             <Select value={selectedTool} onValueChange={handleToolSelect} disabled={pluginTools.length === 0}>
-                                <SelectTrigger className="w-full sm:flex-1 lg:w-56 xl:w-72 bg-zinc-900 border-zinc-700 h-9">
+                                <SelectTrigger className="cm-form-select h-9 w-full sm:flex-1 lg:w-56 xl:w-72">
                                     <SelectValue placeholder={pluginTools.length === 0 ? "Select plugin first" : "Select tool"} />
                                 </SelectTrigger>
-                                <SelectContent className="bg-zinc-900 border-zinc-700 max-h-96">
+                                <SelectContent className="cm-shell-panel max-h-96">
                                     {pluginTools.length === 0 ? (
-                                        <div className="p-2 text-zinc-500 text-sm">No tools available</div>
+                                        <div className="p-2 text-muted-foreground text-sm">No tools available</div>
                                     ) : (
                                         pluginTools.map((tool) => (
                                             <SelectItem key={tool.name} value={tool.name}>
                                                 <div className="flex flex-col py-0.5">
                                                     <span className="font-mono text-xs">{tool.name}</span>
-                                                    <span className="text-[10px] text-zinc-500 truncate max-w-64">{tool.description}</span>
+                                                    <span className="text-[10px] text-muted-foreground truncate max-w-64">{tool.description}</span>
                                                 </div>
                                             </SelectItem>
                                         ))
@@ -628,7 +628,7 @@ export function PluginTester({
                             {goatStatus && (
                                 <div className="flex items-center gap-2 text-xs">
                                     <div className={cn("w-2 h-2 rounded-full", goatStatus.initialized ? "bg-emerald-500" : "bg-red-500")} />
-                                    <span className="text-zinc-500">
+                                    <span className="text-muted-foreground">
                                         {goatStatus.initialized ? `${goatStatus.totalTools} tools • ${goatStatus.chain}` : "Offline"}
                                     </span>
                                 </div>
@@ -644,7 +644,7 @@ export function PluginTester({
                                     <Button
                                         variant="outline"
                                         role="combobox"
-                                        className="w-full sm:w-40 lg:w-52 bg-zinc-900 border-zinc-700 h-9 justify-between text-left font-normal"
+                                        className="cm-form-select h-9 w-full justify-between text-left font-normal sm:w-40 lg:w-52"
                                     >
                                         <span className="truncate font-mono text-xs">
                                             {mcpLoading
@@ -656,8 +656,8 @@ export function PluginTester({
                                         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                                     </Button>
                                 </PopoverTrigger>
-                                <PopoverContent className="w-[300px] p-0 bg-zinc-900 border-zinc-700" align="start">
-                                    <Command className="bg-zinc-900" shouldFilter={false}>
+                                <PopoverContent className="cm-shell-panel w-[min(300px,calc(100vw-2rem))] p-0" align="start">
+                                    <Command className="bg-transparent" shouldFilter={false}>
                                         <CommandInput
                                             placeholder="Search servers..."
                                             className="h-9"
@@ -666,11 +666,11 @@ export function PluginTester({
                                         />
                                         <CommandList className="max-h-[300px]">
                                             {trimmedMcpServerSearch && !mcpSearchReady ? (
-                                                <div className="p-4 text-center text-zinc-500 text-sm">
+                                                <div className="p-4 text-center text-muted-foreground text-sm">
                                                     Type at least 2 characters to search
                                                 </div>
                                             ) : mcpLoading || (mcpSearchReady && mcpSearchLoading && filteredMcpServers.length === 0) ? (
-                                                <div className="p-4 text-center text-zinc-500">
+                                                <div className="p-4 text-center text-muted-foreground">
                                                     <Loader2 className="h-4 w-4 animate-spin mx-auto mb-2" />
                                                     Loading servers...
                                                 </div>
@@ -698,7 +698,7 @@ export function PluginTester({
                                                                 />
                                                                 <div className="flex flex-col min-w-0 flex-1">
                                                                     <span className="font-mono text-xs truncate">{server.name || server.slug}</span>
-                                                                    <span className="text-[10px] text-zinc-500 truncate">{server.description || "No description"}</span>
+                                                                    <span className="text-[10px] text-muted-foreground truncate">{server.description || "No description"}</span>
                                                                 </div>
                                                                 {server.transport === 'http' && (
                                                                     <Badge variant="outline" className="text-[9px] px-1 py-0 border-cyan-500/50 text-cyan-400 shrink-0">remote</Badge>
@@ -714,18 +714,18 @@ export function PluginTester({
                             </Popover>
 
                             <Select value={selectedTool} onValueChange={handleMcpToolSelect} disabled={mcpTools.length === 0}>
-                                <SelectTrigger className="w-full sm:flex-1 lg:w-56 xl:w-72 bg-zinc-900 border-zinc-700 h-9">
+                                <SelectTrigger className="cm-form-select h-9 w-full sm:flex-1 lg:w-56 xl:w-72">
                                     <SelectValue placeholder={mcpTools.length === 0 ? "Select server first" : "Select tool"} />
                                 </SelectTrigger>
-                                <SelectContent className="bg-zinc-900 border-zinc-700 max-h-96">
+                                <SelectContent className="cm-shell-panel max-h-96">
                                     {mcpTools.length === 0 ? (
-                                        <div className="p-2 text-zinc-500 text-sm">No tools available</div>
+                                        <div className="p-2 text-muted-foreground text-sm">No tools available</div>
                                     ) : (
                                         mcpTools.map((tool) => (
                                             <SelectItem key={tool.name} value={tool.name}>
                                                 <div className="flex flex-col py-0.5">
                                                     <span className="font-mono text-xs">{tool.name}</span>
-                                                    <span className="text-[10px] text-zinc-500 truncate max-w-48 sm:max-w-64">{tool.description || "No description"}</span>
+                                                    <span className="text-[10px] text-muted-foreground truncate max-w-48 sm:max-w-64">{tool.description || "No description"}</span>
                                                 </div>
                                             </SelectItem>
                                         ))
@@ -734,8 +734,8 @@ export function PluginTester({
                             </Select>
 
                             <div className="flex items-center gap-2 text-[10px] sm:text-xs shrink-0">
-                                <div className={cn("w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full", mcpServers.length > 0 || selectedMcpServer ? "bg-purple-500" : "bg-zinc-500")} />
-                                <span className="text-zinc-500">
+                                <div className={cn("w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full", mcpServers.length > 0 || selectedMcpServer ? "bg-fuchsia-400" : "bg-muted-foreground")} />
+                                <span className="text-muted-foreground">
                                     {mcpCatalogTotal > 0
                                         ? `${mcpCatalogTotal.toLocaleString()} servers`
                                         : selectedMcpServer
@@ -753,7 +753,7 @@ export function PluginTester({
                         size="icon"
                         onClick={pluginSource === "onchain" ? fetchPluginStatus : () => forceRefreshMcpRegistry()}
                         disabled={pluginsLoading || mcpLoading}
-                        className="text-zinc-400 hover:text-white shrink-0 h-8 w-8 sm:h-9 sm:w-9"
+                        className="cm-chat__icon-action shrink-0 h-8 w-8 sm:h-9 sm:w-9"
                         title="Refresh"
                     >
                         <RefreshCw className={cn("h-3.5 w-3.5 sm:h-4 sm:w-4", (pluginsLoading || mcpLoading) && "animate-spin")} />
@@ -762,10 +762,10 @@ export function PluginTester({
             </div>
 
             {/* Results Area */}
-            <ScrollArea className="flex-1 p-4 min-h-0">
+            <ScrollArea className="cm-chat__body">
                 <div className="space-y-4 max-w-4xl mx-auto">
                     {pluginResults.length === 0 ? (
-                        <div className="text-center py-8 text-zinc-500">
+                        <div className="cm-chat__empty py-8">
                             <Plug className="h-12 w-12 mx-auto mb-4 opacity-50" />
                             <p className="text-lg">
                                 Test {pluginSource === "onchain" ? "Onchain" : "Tools"} Actions
@@ -778,7 +778,7 @@ export function PluginTester({
 
                             {pluginSource === "onchain" && goatStatus?.plugins && goatStatus.plugins.length > 0 && (
                                 <div className="mt-6 text-left max-w-2xl mx-auto">
-                                    <p className="text-xs text-zinc-600 uppercase tracking-wider mb-3">
+                                    <p className="text-xs text-muted-foreground uppercase tracking-wider mb-3">
                                         {goatStatus.plugins.length} Plugins • {goatStatus.totalTools} Tools
                                     </p>
                                     <div className="grid grid-cols-2 gap-2 text-xs">
@@ -787,17 +787,17 @@ export function PluginTester({
                                                 key={plugin.id}
                                                 onClick={() => handlePluginChange(plugin.id)}
                                                 className={cn(
-                                                    "bg-zinc-900 rounded-lg p-3 border text-left transition-colors",
+                                                    "cm-shell-panel p-3 text-left transition-colors",
                                                     selectedPlugin === plugin.id
                                                         ? "border-green-500/50 bg-green-950/20"
-                                                        : "border-zinc-800 hover:border-zinc-700"
+                                                        : "hover:border-cyan-500/30"
                                                 )}
                                             >
                                                 <div className="flex items-center justify-between mb-1">
                                                     <span className="text-green-400 font-mono text-xs">{plugin.name}</span>
                                                     <Badge variant="outline" className="text-[9px]">{plugin.toolCount}</Badge>
                                                 </div>
-                                                <p className="text-zinc-500 text-[10px] line-clamp-2">{plugin.description}</p>
+                                                <p className="text-muted-foreground text-[10px] line-clamp-2">{plugin.description}</p>
                                             </button>
                                         ))}
                                     </div>
@@ -806,11 +806,11 @@ export function PluginTester({
 
                             {pluginSource === "tools" && mcpCatalogTotal > 0 && (
                                 <div className="mt-6 text-left max-w-md mx-auto">
-                                    <p className="text-xs text-zinc-600 uppercase tracking-wider mb-3 text-center">
+                                    <p className="text-xs text-muted-foreground uppercase tracking-wider mb-3 text-center">
                                         {mcpCatalogTotal.toLocaleString()} Tool Servers Available
                                     </p>
-                                    <p className="text-zinc-500 text-sm text-center">
-                                        Use the <span className="text-purple-400 font-mono">Select server</span> dropdown above to search the catalog.
+                                    <p className="text-muted-foreground text-sm text-center">
+                                        Use the <span className="text-fuchsia-300 font-mono">Select server</span> dropdown above to search the catalog.
                                     </p>
                                 </div>
                             )}
@@ -829,25 +829,25 @@ export function PluginTester({
                             <div
                                 key={index}
                                 className={cn(
-                                    "rounded-lg p-4 border",
+                                    "cm-shell-panel p-4",
                                     result.success
                                         ? "bg-emerald-950/30 border-emerald-800"
                                         : "bg-red-950/30 border-red-800"
                                 )}
                             >
                                 <div className="flex items-center gap-2 mb-2 flex-wrap">
-                                    <Terminal className="h-4 w-4 text-zinc-400" />
+                                    <Terminal className="h-4 w-4 text-muted-foreground" />
                                     <Badge
                                         className={cn(
                                             "text-[10px] px-1.5",
                                             result.source === "tools"
-                                                ? "bg-purple-500/20 text-purple-400 border-purple-500/40"
+                                                ? "bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/40"
                                                 : "bg-green-500/20 text-green-400 border-green-500/40"
                                         )}
                                     >
                                         {result.source === "tools" ? "Tools" : "Onchain"}
                                     </Badge>
-                                    <span className="font-mono text-sm text-zinc-300">
+                                    <span className="font-mono text-sm text-foreground">
                                         {result.pluginId}/{result.tool}
                                     </span>
                                     <Badge variant={result.success ? "default" : "destructive"} className="text-xs">
@@ -864,12 +864,12 @@ export function PluginTester({
                                         </a>
                                     )}
                                     {result.executedBy && (
-                                        <span className="text-[10px] text-zinc-600">
+                                        <span className="text-[10px] text-muted-foreground">
                                             by {result.executedBy.slice(0, 6)}...{result.executedBy.slice(-4)}
                                         </span>
                                     )}
                                 </div>
-                                <pre className="text-xs text-zinc-400 overflow-auto max-h-48 font-mono bg-zinc-900/50 rounded p-2">
+                                <pre className="text-xs text-muted-foreground overflow-auto max-h-48 font-mono rounded-lg border border-primary/10 bg-background/40 p-2">
                                     {result.error || JSON.stringify(result.result, null, 2)}
                                 </pre>
                             </div>
@@ -880,7 +880,7 @@ export function PluginTester({
             </ScrollArea>
 
             {/* Input with schema hints */}
-            <div className="shrink-0 border-t border-zinc-800 p-4">
+            <div className="cm-chat__composer">
                 <div className="max-w-4xl mx-auto space-y-3">
                     {mcpCredentialsRequired && (
                         <div className="rounded-lg border border-amber-700/60 bg-amber-950/20 p-3">
@@ -888,7 +888,7 @@ export function PluginTester({
                                 <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
                                 Credentials needed
                             </p>
-                            <p className="mt-1 text-xs text-zinc-400">
+                            <p className="mt-1 text-xs text-muted-foreground">
                                 This server requires credentials before its tools can run.
                             </p>
                             <div className="mt-2 flex flex-wrap gap-2">
@@ -899,45 +899,45 @@ export function PluginTester({
                                         </Badge>
                                     ))
                                 ) : (
-                                    <span className="text-xs text-zinc-500">No specific env vars are recorded in the catalog.</span>
+                                    <span className="text-xs text-muted-foreground">No specific env vars are recorded in the catalog.</span>
                                 )}
                             </div>
                         </div>
                     )}
 
                     {(pluginSource === "onchain" ? currentTool : currentMcpTool) && (
-                        <div className="bg-zinc-900/50 rounded-lg p-3 border border-zinc-800">
+                        <div className="cm-shell-panel p-3">
                             <div className="flex items-center gap-2 mb-2">
                                 <Terminal className={cn(
                                     "h-4 w-4",
-                                    pluginSource === "onchain" ? "text-green-400" : "text-purple-400"
+                                    pluginSource === "onchain" ? "text-green-400" : "text-fuchsia-300"
                                 )} />
                                 <Badge
                                     className={cn(
-                                        "text-[10px] px-1.5",
-                                        pluginSource === "onchain"
-                                            ? "bg-green-500/20 text-green-400 border-green-500/40"
-                                            : "bg-purple-500/20 text-purple-400 border-purple-500/40"
+                                    "text-[10px] px-1.5",
+                                    pluginSource === "onchain"
+                                        ? "bg-green-500/20 text-green-400 border-green-500/40"
+                                            : "bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/40"
                                     )}
                                 >
                                     {pluginSource === "onchain" ? "Onchain" : "Tools"}
                                 </Badge>
                                 <span className={cn(
                                     "font-mono text-sm",
-                                    pluginSource === "onchain" ? "text-green-400" : "text-purple-400"
+                                    pluginSource === "onchain" ? "text-green-400" : "text-fuchsia-300"
                                 )}>
                                     {pluginSource === "onchain" ? currentTool?.name : currentMcpTool?.name}
                                 </span>
                             </div>
-                            <p className="text-xs text-zinc-400 mb-2">
+                            <p className="text-xs text-muted-foreground mb-2">
                                 {pluginSource === "onchain"
                                     ? currentTool?.description
                                     : (currentMcpTool?.description || "No description available")}
                             </p>
                             {toolSchema && (
-                                <div className="mt-2 pt-2 border-t border-zinc-800">
-                                    <p className="text-[10px] text-zinc-500 uppercase mb-1">Parameters (* = required)</p>
-                                    <pre className="text-[10px] text-zinc-500 font-mono whitespace-pre-wrap">
+                                <div className="mt-2 pt-2 border-t border-primary/10">
+                                    <p className="text-[10px] text-muted-foreground uppercase mb-1">Parameters (* = required)</p>
+                                    <pre className="text-[10px] text-muted-foreground font-mono whitespace-pre-wrap">
                                         {formatSchemaHint(toolSchema)}
                                     </pre>
                                 </div>
@@ -950,7 +950,7 @@ export function PluginTester({
                             variant="ghost"
                             size="icon"
                             onClick={handleClearResults}
-                            className="text-zinc-400 hover:text-white shrink-0"
+                            className="cm-chat__icon-action shrink-0"
                             title="Clear results"
                         >
                             <Trash2 className="h-4 w-4" />
@@ -960,7 +960,7 @@ export function PluginTester({
                                 value={toolArgs}
                                 onChange={(e) => setToolArgs(e.target.value)}
                                 placeholder='{"key": "value"}'
-                                className="bg-zinc-900 border-zinc-700 font-mono text-sm min-h-20 pr-20"
+                                className="cm-form-textarea min-h-20 pr-20 font-mono text-sm"
                             />
                             <div className="absolute right-2 top-2 flex gap-1">
                                 <Button
@@ -975,7 +975,7 @@ export function PluginTester({
                                             setToolArgs(JSON.stringify(defaultArgs, null, 2));
                                         }
                                     }}
-                                    className="h-6 px-2 text-[10px] text-zinc-500 hover:text-white"
+                                    className="h-6 px-2 text-[10px] text-muted-foreground hover:text-foreground"
                                     title="Reset to defaults"
                                 >
                                     Reset
@@ -994,7 +994,7 @@ export function PluginTester({
                                 "h-auto px-6",
                                 pluginSource === "onchain"
                                     ? "bg-green-600 hover:bg-green-700"
-                                    : "bg-purple-600 hover:bg-purple-700"
+                                    : "bg-fuchsia-600 hover:bg-fuchsia-700"
                             )}
                         >
                             {executingPlugin ? (

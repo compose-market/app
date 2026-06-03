@@ -5,9 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import {
@@ -16,28 +14,18 @@ import {
   Bot,
   Layers,
   Sparkles,
-  Check,
-  CheckCircle2,
-  ExternalLink,
-  Zap,
   Filter,
-  Star,
-  Shield,
   Globe,
-  ArrowRightLeft,
-  Eye,
 } from "lucide-react";
 import { useAgents } from "@/hooks/use-agents";
 import { useOnchainAgents } from "@/hooks/use-onchain";
-import { useIsExternalWarped } from "@/hooks/use-warp";
 import { getIpfsUrl } from "@/lib/pinata";
+import { DiscoveryAgentCard, type DiscoveryAgent } from "@/components/agent-card";
 import {
   type Agent,
   type AgentRegistryId,
   AGENT_REGISTRIES,
   getEnabledRegistries,
-  formatInteractions,
-  getReadmeExcerpt,
   COMMON_TAGS
 } from "@/lib/agents";
 
@@ -70,7 +58,7 @@ export default function AgentsPage() {
   const { data: onchainAgents, isLoading: isLoadingOnchain } = useOnchainAgents();
 
   // Convert on-chain agents to unified Agent format
-  const manowarAgents = useMemo((): ExtendedAgent[] => {
+  const manowarAgents = useMemo((): DiscoveryAgent[] => {
     if (!onchainAgents || !selectedRegistries.includes("manowar")) return [];
 
     return onchainAgents
@@ -87,17 +75,17 @@ export default function AgentsPage() {
         }
         return true;
       })
-      .map((a): ExtendedAgent => {
+      .map((a): DiscoveryAgent => {
         const avatarUri = a.metadata?.image;
         let avatarUrl: string | null = null;
         if (avatarUri && avatarUri !== "none" && avatarUri.startsWith("ipfs://")) {
           avatarUrl = getIpfsUrl(avatarUri.replace("ipfs://", ""));
-        }
+          }
 
         return {
-          id: `manowar-${a.id}`,
-          address: a.creator,
-          name: a.metadata?.name || `Agent #${a.id}`,
+          id: `manowar-${a.walletAddress || a.id}`,
+          address: a.walletAddress || a.creator,
+          name: a.metadata?.name || (a.walletAddress ? `${a.walletAddress.slice(0, 6)}...${a.walletAddress.slice(-4)}` : `Agent #${a.id}`),
           description: a.metadata?.description || "",
           registry: "manowar" as AgentRegistryId,
           protocols: a.metadata?.protocols || [{ name: "Manowar", version: "1.0" }],
@@ -173,9 +161,11 @@ export default function AgentsPage() {
   }, [data?.tags]);
 
   return (
-    <div className="max-w-6xl mx-auto pb-20 px-1">
+    <div className="cm-web-page">
+      <div className="cm-web-page__canvas cm-workspace-canvas--fade">
+        <div className="cm-web-page__body cm-web-page__body--wide cm-page-stack">
       {/* Header */}
-      <div className="mb-6 sm:mb-8 space-y-3 sm:space-y-4 border-b border-sidebar-border pb-4 sm:pb-6">
+      <div className="cm-page-stack__header space-y-3 sm:space-y-4 border-b border-sidebar-border pb-3 sm:pb-4">
         <Link href="/compose">
           <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-fuchsia-400 -ml-2 mb-2 text-xs sm:text-sm">
             <ArrowLeft className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
@@ -196,7 +186,8 @@ export default function AgentsPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-col gap-3 sm:gap-4 mb-6 sm:mb-8">
+      <div className="cm-page-stack__controls">
+      <div className="cm-control-rail cm-control-rail--compact flex flex-col gap-3 sm:gap-4">
         {/* Registry Filters */}
         <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 sm:gap-4">
           <Label className="text-[10px] sm:text-xs font-mono text-muted-foreground uppercase shrink-0">Registries:</Label>
@@ -266,7 +257,7 @@ export default function AgentsPage() {
 
       {/* Stats Bar */}
       {!isLoading && (
-        <div className="flex flex-wrap items-center gap-3 sm:gap-6 mb-4 sm:mb-6 text-xs sm:text-sm font-mono text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-3 sm:gap-6 text-xs sm:text-sm font-mono text-muted-foreground">
           <div className="flex items-center gap-1.5 sm:gap-2">
             <Layers className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-fuchsia-400" />
             <span>{allAgents.length} agents</span>
@@ -291,6 +282,9 @@ export default function AgentsPage() {
           <p className="font-mono text-[10px] sm:text-xs mt-2 opacity-70">{error instanceof Error ? error.message : "Unknown error"}</p>
         </div>
       )}
+      </div>
+
+      <div className="cm-page-list cm-workspace-canvas--fade">
 
       {/* Loading State */}
       {isLoading && (
@@ -321,7 +315,7 @@ export default function AgentsPage() {
       {!isLoading && allAgents.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
           {allAgents.map((agent) => (
-            <AgentCard key={agent.id} agent={agent} onSelect={handleSelectAgent} />
+            <DiscoveryAgentCard key={agent.id} agent={agent} onSelect={handleSelectAgent} />
           ))}
         </div>
       )}
@@ -344,227 +338,9 @@ export default function AgentsPage() {
           </Button>
         </div>
       )}
+      </div>
+        </div>
+      </div>
     </div>
-  );
-}
-
-// Extended Agent type with Manowar fields
-interface ExtendedAgent extends Agent {
-  price?: string;
-  units?: string;
-  cloneable?: boolean;
-  isClone?: boolean;
-  isWarped?: boolean; // True if this manowar agent was created via warp
-  walletAddress?: string; // Derived wallet address for manowar agents
-}
-
-function AgentCard({ agent, onSelect }: { agent: ExtendedAgent; onSelect: (a: Agent) => void }) {
-  const [, setLocation] = useLocation();
-  const posthog = usePostHog();
-  const excerpt = agent.description || (agent.readme ? getReadmeExcerpt(agent.readme, 100) : "");
-  const initials = agent.name
-    .split(" ")
-    .map(w => w[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-
-  const registryInfo = AGENT_REGISTRIES[agent.registry];
-  const isManowar = agent.registry === "manowar";
-
-  // Extract numeric ID for manowar agents (e.g., "manowar-5" -> 5)
-  const manowarId = isManowar ? parseInt(agent.id.replace("manowar-", "")) : null;
-
-  // Check if external agent has been warped
-  const externalRegistry = !isManowar ? agent.registry : null;
-  const externalAddress = !isManowar ? agent.address : null;
-  const { data: externalWarpData } = useIsExternalWarped(externalRegistry, externalAddress);
-
-  // Determine if agent is warped (either manowar isWarped or external has been warped)
-  const isAgentWarped = isManowar ? agent.isWarped : externalWarpData?.isWarped;
-
-  const handleWarp = () => {
-    posthog?.capture("agent_warp_initiated", {
-      agent_id: agent.id,
-      agent_name: agent.name,
-      agent_registry: agent.registry,
-    });
-    // Store agent for warp flow
-    sessionStorage.setItem("warpAgent", JSON.stringify(agent));
-    setLocation("/create-agent?warp=true");
-  };
-
-  const handleViewEndpoint = () => {
-    // Use wallet address for navigation (consistent with backend)
-    if (agent.walletAddress) {
-      setLocation(`/agent/${agent.walletAddress}`);
-    } else if (manowarId) {
-      // Fallback for legacy agents without walletAddress
-      setLocation(`/agent/${manowarId}`);
-    }
-  };
-
-  return (
-    <Card className={`group bg-background border-sidebar-border hover:border-fuchsia-500/50 transition-all duration-300 corner-decoration overflow-hidden ${isManowar ? "ring-1 ring-cyan-500/20" : ""}`}>
-      <CardContent className="p-4 sm:p-5 space-y-3 sm:space-y-4">
-        {/* Header with Avatar */}
-        <div className="flex items-start gap-2.5 sm:gap-3">
-          <Avatar className={`w-10 h-10 sm:w-12 sm:h-12 border-2 ${isManowar ? "border-cyan-500/50" : "border-sidebar-border"} group-hover:border-fuchsia-500/50 transition-colors shrink-0`}>
-            <AvatarImage src={agent.avatarUrl || undefined} alt={agent.name} />
-            <AvatarFallback className={`${isManowar ? "bg-cyan-500/10 text-cyan-400" : "bg-fuchsia-500/10 text-fuchsia-400"} font-mono text-xs sm:text-sm`}>
-              {initials}
-            </AvatarFallback>
-          </Avatar>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-start justify-between gap-2">
-              <h3 className="font-display font-bold text-foreground truncate group-hover:text-fuchsia-400 transition-colors text-sm sm:text-base">
-                {agent.name}
-              </h3>
-              {agent.externalUrl && (
-                <a
-                  href={agent.externalUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="p-1 text-muted-foreground hover:text-fuchsia-400 transition-colors shrink-0"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <ExternalLink className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                </a>
-              )}
-            </div>
-            <p className="text-[10px] sm:text-xs font-mono text-muted-foreground truncate">
-              {registryInfo?.name || agent.registry}
-            </p>
-          </div>
-        </div>
-
-        {/* Description */}
-        {excerpt && (
-          <p className="text-[10px] sm:text-xs text-muted-foreground line-clamp-2 min-h-[2rem] sm:min-h-[2.5rem]">
-            {excerpt}
-          </p>
-        )}
-
-        {/* Badges */}
-        <div className="flex flex-wrap gap-1 sm:gap-1.5">
-          {isManowar && (
-            <Badge variant="outline" className="text-[10px] font-mono border-cyan-500/30 text-cyan-400 bg-cyan-500/10 px-1.5 py-0">
-              <Sparkles className="w-2.5 h-2.5 mr-1" />
-              on-chain
-            </Badge>
-          )}
-          {isAgentWarped && (
-            <Badge variant="outline" className="text-[10px] font-mono border-fuchsia-500/30 text-fuchsia-400 bg-fuchsia-500/10 px-1.5 py-0">
-              <ArrowRightLeft className="w-2.5 h-2.5 mr-1" />
-              warped
-            </Badge>
-          )}
-          {agent.verified && (
-            <Badge variant="outline" className="text-[10px] font-mono border-green-500/30 text-green-400 bg-green-500/10 px-1.5 py-0">
-              <Shield className="w-2.5 h-2.5 mr-1" />
-              verified
-            </Badge>
-          )}
-          {agent.featured && (
-            <Badge variant="outline" className="text-[10px] font-mono border-yellow-500/30 text-yellow-400 bg-yellow-500/10 px-1.5 py-0">
-              <Star className="w-2.5 h-2.5 mr-1" />
-              featured
-            </Badge>
-          )}
-          {agent.cloneable && (
-            <Badge variant="outline" className="text-[10px] font-mono border-purple-500/30 text-purple-400 bg-purple-500/10 px-1.5 py-0">
-              cloneable
-            </Badge>
-          )}
-          {agent.isClone && (
-            <Badge variant="outline" className="text-[10px] font-mono border-orange-500/30 text-orange-400 bg-orange-500/10 px-1.5 py-0">
-              clone
-            </Badge>
-          )}
-          <Badge variant="outline" className="text-[10px] font-mono border-fuchsia-500/30 text-fuchsia-400 bg-fuchsia-500/10 px-1.5 py-0">
-            {agent.category}
-          </Badge>
-          {agent.type === "hosted" && (
-            <Badge variant="outline" className="text-[10px] font-mono border-cyan-500/30 text-cyan-400 bg-cyan-500/10 px-1.5 py-0">
-              hosted
-            </Badge>
-          )}
-        </div>
-
-        {/* Stats */}
-        <div className="grid grid-cols-2 gap-2 sm:gap-3 text-[10px] sm:text-xs font-mono">
-          {isManowar && agent.price ? (
-            <>
-              <div className="flex items-center gap-1.5 sm:gap-2 text-muted-foreground">
-                <Zap className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-green-400 shrink-0" />
-                <span className="truncate">{agent.price}</span>
-              </div>
-              <div className="flex items-center gap-1.5 sm:gap-2 text-muted-foreground">
-                <Layers className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-cyan-400 shrink-0" />
-                <span className="truncate">{agent.units} units</span>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="flex items-center gap-1.5 sm:gap-2 text-muted-foreground">
-                <Zap className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-green-400 shrink-0" />
-                <span>{formatInteractions(agent.totalInteractions)} uses</span>
-              </div>
-              <div className="flex items-center gap-1.5 sm:gap-2 text-muted-foreground">
-                <Star className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-yellow-400 shrink-0" />
-                <span>{agent.rating.toFixed(1)} rating</span>
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* Action Buttons */}
-        <div className="flex flex-col sm:flex-row gap-1.5 sm:gap-2">
-          <Button
-            onClick={() => onSelect(agent)}
-            className={`flex-1 bg-sidebar-accent border border-sidebar-border text-foreground hover:border-fuchsia-500 hover:text-fuchsia-400 font-mono text-[10px] sm:text-xs transition-colors group-hover:bg-fuchsia-500/10 h-8 sm:h-9 ${isManowar ? "hover:border-cyan-500 hover:text-cyan-400 group-hover:bg-cyan-500/10" : ""}`}
-          >
-            <Check className="w-3 h-3 sm:w-3.5 sm:h-3.5 mr-1 sm:mr-1.5" />
-            SELECT
-          </Button>
-
-          {/* WARP button for non-manowar agents that haven't been warped yet */}
-          {!isManowar && !externalWarpData?.isWarped && (
-            <Button
-              onClick={handleWarp}
-              variant="outline"
-              className="border-fuchsia-500/50 text-fuchsia-400 hover:bg-fuchsia-500/20 font-mono text-[10px] sm:text-xs h-8 sm:h-9"
-            >
-              <ArrowRightLeft className="w-3 h-3 sm:w-3.5 sm:h-3.5 mr-1" />
-              WARP
-            </Button>
-          )}
-
-          {/* Show WARPED indicator for already warped external agents */}
-          {!isManowar && externalWarpData?.isWarped && (
-            <Button
-              variant="outline"
-              disabled
-              className="border-green-500/50 text-green-400 font-mono text-[10px] sm:text-xs cursor-default h-8 sm:h-9"
-            >
-              <CheckCircle2 className="w-3 h-3 sm:w-3.5 sm:h-3.5 mr-1" />
-              WARPED
-            </Button>
-          )}
-
-          {/* VIEW ENDPOINT button for manowar agents */}
-          {isManowar && (
-            <Button
-              onClick={handleViewEndpoint}
-              variant="outline"
-              className="border-cyan-500/50 text-cyan-400 hover:bg-cyan-500/20 font-mono text-[10px] sm:text-xs h-8 sm:h-9"
-            >
-              <Eye className="w-3 h-3 sm:w-3.5 sm:h-3.5 mr-1" />
-              VIEW
-            </Button>
-          )}
-        </div>
-      </CardContent>
-    </Card>
   );
 }

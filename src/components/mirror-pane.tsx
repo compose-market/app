@@ -6,7 +6,12 @@
  * Styling: uses @compose-market/theme BEM classes (cm-mirror-pane*).
  */
 import { useState } from "react";
-import { Badge } from "@/components/ui/badge";
+import {
+    ComposeMirrorPane,
+    ComposeMirrorPricing,
+    ComposeMirrorRow,
+    ComposeMirrorSection,
+} from "@compose-market/theme/mirror";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -26,13 +31,10 @@ import {
 } from "@/components/ui/tooltip";
 import {
     Cpu,
-    Search,
-    Code2,
-    MapPin,
-    Link,
     LayoutGrid,
     Settings,
 } from "lucide-react";
+import type { CanonicalModality } from "@compose-market/sdk";
 import {
     formatModelTypeLabel,
     getDefaultModelPricingSections,
@@ -43,19 +45,8 @@ import {
     type CatalogModel,
 } from "@/lib/models";
 
-export interface GoogleToolsState {
-    enableGoogleSearch: boolean;
-    setEnableGoogleSearch: (value: boolean) => void;
-    enableCodeExecution: boolean;
-    setEnableCodeExecution: (value: boolean) => void;
-    enableMapsGrounding: boolean;
-    setEnableMapsGrounding: (value: boolean) => void;
-    urlContextUrls: string;
-    setUrlContextUrls: (value: string) => void;
-}
-
 export interface ParamDefinition {
-    type: "string" | "integer" | "number" | "boolean" | "array";
+    type: "string" | "integer" | "number" | "boolean" | "array" | "object";
     required: boolean;
     default?: string | number | boolean;
     options?: Array<string | number>;
@@ -64,7 +55,7 @@ export interface ParamDefinition {
 
 export interface ModelParamsSchema {
     modelId: string;
-    type: "video" | "image" | null;
+    type: CanonicalModality | null;
     params: Record<string, ParamDefinition>;
     defaults: Record<string, unknown>;
     provider: string | null;
@@ -73,10 +64,8 @@ export interface ModelParamsSchema {
 export interface MirrorPaneProps {
     selectedModel: string;
     modelInfo: CatalogModel | null;
-    isGoogleModel: boolean;
     systemPrompt: string;
     onSystemPromptChange: (value: string) => void;
-    googleTools?: GoogleToolsState;
     modelParams?: ModelParamsSchema | null;
     paramValues?: Record<string, unknown>;
     onParamValuesChange?: (values: Record<string, unknown>) => void;
@@ -92,7 +81,7 @@ function renderParamInput(
         const stringValue = value === undefined ? "" : String(value);
         return (
             <Select value={stringValue} onValueChange={onChange as (value: string) => void}>
-                <SelectTrigger className="bg-background/50 border-sidebar-border">
+                <SelectTrigger className="cm-mirror-pane__field">
                     <SelectValue placeholder={`Select ${key}`} />
                 </SelectTrigger>
                 <SelectContent>
@@ -109,7 +98,7 @@ function renderParamInput(
     if (definition.type === "boolean") {
         return (
             <div className="cm-mirror-pane__tool-toggle">
-                <span className="text-xs text-muted-foreground">{definition.description || key}</span>
+                <span className="cm-mirror-pane__param-description">{definition.description || key}</span>
                 <Switch checked={Boolean(value)} onCheckedChange={onChange as (checked: boolean) => void} />
             </div>
         );
@@ -131,7 +120,7 @@ function renderParamInput(
                 }
                 onChange(rawValue);
             }}
-            className="bg-background/50 border-sidebar-border"
+            className="cm-mirror-pane__field"
         />
     );
 }
@@ -139,10 +128,8 @@ function renderParamInput(
 export function MirrorPane({
     selectedModel,
     modelInfo,
-    isGoogleModel,
     systemPrompt,
     onSystemPromptChange,
-    googleTools,
     modelParams,
     paramValues = {},
     onParamValuesChange,
@@ -158,80 +145,40 @@ export function MirrorPane({
 
     if (!selectedModel) {
         return (
-            <div className="cm-mirror-pane">
-                <div className="cm-mirror-pane__empty">
-                    <Cpu className="cm-mirror-pane__empty-icon" />
-                    <p className="cm-mirror-pane__empty-text">Select a model to inspect pricing, limits, and settings</p>
-                </div>
-            </div>
+            <ComposeMirrorPane
+                empty
+                emptyIcon={<Cpu />}
+                emptyText="Select a model to inspect pricing, limits, and settings"
+            />
         );
     }
 
     return (
         <TooltipProvider>
-            <div className="cm-mirror-pane">
-                {/* Toolbar */}
-                <div className="cm-mirror-pane__toolbar">
-                    <Tooltip>
-                        <TooltipTrigger asChild>
-                            <button
-                                onClick={() => setActiveTab("details")}
-                                className={`cm-mirror-pane__toolbar-btn ${activeTab === "details" ? "cm-mirror-pane__toolbar-btn--active-cyan" : ""}`}
-                                aria-label="Details"
-                            >
-                                <LayoutGrid />
-                            </button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom">Details</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                        <TooltipTrigger asChild>
-                            <button
-                                onClick={() => setActiveTab("custom")}
-                                className={`cm-mirror-pane__toolbar-btn ${activeTab === "custom" ? "cm-mirror-pane__toolbar-btn--active-fuchsia" : ""}`}
-                                aria-label="Custom"
-                            >
-                                <Settings />
-                            </button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom">Custom</TooltipContent>
-                    </Tooltip>
-                </div>
-
-                {/* Body */}
-                <div className="cm-mirror-pane__body">
-                    {activeTab === "details" && (
-                        <>
-                            {/* ── Model Identity: icon + name + types + id ── */}
-                            <div className="cm-mirror-pane__model-header">
-                                <div className="cm-mirror-pane__model-icon-box">
-                                    <Cpu className="text-cyan-400" />
-                                </div>
-                                <div className="cm-mirror-pane__model-copy">
-                                    <div className="cm-mirror-pane__model-name-row">
-                                        <h3 className="cm-mirror-pane__model-name">
-                                            {modelInfo?.name || selectedModel}
-                                        </h3>
-                                        {typeValues.length > 0 && (
-                                            <span className="cm-mirror-pane__model-types">
-                                                {typeValues.map((v) => (
-                                                    <Badge key={v} className="bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/30 text-[10px] px-1.5 py-0">
-                                                        {formatModelTypeLabel(v)}
-                                                    </Badge>
-                                                ))}
-                                            </span>
-                                        )}
-                                    </div>
-                                    <p className="cm-mirror-pane__model-provider">
-                                        {modelInfo?.provider || "unknown"}
-                                        {modelInfo?.modelId && (
-                                            <span className="cm-mirror-pane__model-id"> ({modelInfo.modelId})</span>
-                                        )}
-                                    </p>
-                                </div>
-                            </div>
-
-                            {/* ── Description: 2-line clamp, full text on hover ── */}
+            <ComposeMirrorPane
+                title={modelInfo?.name || selectedModel}
+                subtitle={(
+                    <>
+                        {modelInfo?.provider || "unknown"}
+                        {modelInfo?.modelId ? (
+                            <span className="cm-mirror-pane__model-id"> ({modelInfo.modelId})</span>
+                        ) : null}
+                    </>
+                )}
+                icon={<Cpu />}
+                badges={typeValues.map((value) => ({
+                    label: formatModelTypeLabel(value),
+                    tone: "fuchsia" as const,
+                }))}
+                tabs={[
+                    { id: "details", label: "Details", icon: <LayoutGrid />, tone: "cyan" },
+                    { id: "custom", label: "Custom", icon: <Settings />, tone: "fuchsia" },
+                ]}
+                activeTab={activeTab}
+                onTabChange={(tab) => setActiveTab(tab === "custom" ? "custom" : "details")}
+            >
+                {activeTab === "details" && (
+                    <>
                             {modelInfo?.description && (
                                 <Tooltip>
                                     <TooltipTrigger asChild>
@@ -247,17 +194,16 @@ export function MirrorPane({
 
                             {modelInfo && (
                                 <>
-                                    {/* ── I/O Modalities: compact inline ── */}
                                     {(inputValues.length > 0 || outputValues.length > 0) && (
-                                        <div className="cm-mirror-pane__section cm-mirror-pane__section--compact">
+                                        <ComposeMirrorSection>
                                             {inputValues.length > 0 && (
                                                 <div className="cm-mirror-pane__io-row">
                                                     <span className="cm-mirror-pane__io-label">IN</span>
                                                     <div className="cm-mirror-pane__io-badges">
                                                         {inputValues.map((value) => (
-                                                            <Badge key={`in-${value}`} variant="outline" className="text-[10px] border-sidebar-border py-0 px-1.5">
+                                                            <span key={`in-${value}`} className="cm-mirror-pane__badge" data-tone="cyan">
                                                                 {value}
-                                                            </Badge>
+                                                            </span>
                                                         ))}
                                                     </div>
                                                 </div>
@@ -267,60 +213,52 @@ export function MirrorPane({
                                                     <span className="cm-mirror-pane__io-label">OUT</span>
                                                     <div className="cm-mirror-pane__io-badges">
                                                         {outputValues.map((value) => (
-                                                            <Badge key={`out-${value}`} variant="outline" className="text-[10px] border-sidebar-border py-0 px-1.5">
+                                                            <span key={`out-${value}`} className="cm-mirror-pane__badge" data-tone="fuchsia">
                                                                 {value}
-                                                            </Badge>
+                                                            </span>
                                                         ))}
                                                     </div>
                                                 </div>
                                             )}
-                                        </div>
+                                        </ComposeMirrorSection>
                                     )}
 
-                                    {/* ── Context Window: entries on same row ── */}
                                     {contextEntries.length > 0 && (
-                                        <div className="cm-mirror-pane__section cm-mirror-pane__section--compact">
-                                            <span className="cm-mirror-pane__section-label">Context Window</span>
+                                        <ComposeMirrorSection label="Context Window">
                                             <div className="cm-mirror-pane__kv-grid">
                                                 {contextEntries.map((entry) => (
-                                                    <div key={`ctx-${entry.label}`} className="cm-mirror-pane__kv-row">
-                                                        <span className="cm-mirror-pane__kv-label">{entry.label}</span>
-                                                        <span className="cm-mirror-pane__kv-value">{entry.value}</span>
-                                                    </div>
+                                                    <ComposeMirrorRow
+                                                        key={`ctx-${entry.label}`}
+                                                        label={entry.label}
+                                                        value={entry.value}
+                                                    />
                                                 ))}
                                             </div>
-                                        </div>
+                                        </ComposeMirrorSection>
                                     )}
 
-                                    {/* ── Pricing: consolidated rows, unit below ── */}
                                     {pricingSections.length > 0 && (
-                                        <div className="cm-mirror-pane__section cm-mirror-pane__section--compact">
-                                            <span className="cm-mirror-pane__section-label">Pricing</span>
+                                        <ComposeMirrorSection label="Pricing">
                                             {pricingSections.map((section, index) => (
-                                                <div key={`price-${section.header}-${index}`} className="cm-mirror-pane__pricing-compact">
-                                                    <div className="cm-mirror-pane__pricing-entries">
-                                                        {section.entries.map((entry) => (
-                                                            <div key={`${section.header}-${entry.label}`} className="cm-mirror-pane__kv-row">
-                                                                <span className="cm-mirror-pane__kv-label">{entry.label}</span>
-                                                                <span className="cm-mirror-pane__kv-value">{entry.value}</span>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                    {section.unit && (
-                                                        <span className="cm-mirror-pane__pricing-unit">{section.unit}</span>
-                                                    )}
-                                                </div>
+                                                <ComposeMirrorPricing key={`price-${section.header}-${index}`} unit={section.unit}>
+                                                    {section.entries.map((entry) => (
+                                                        <ComposeMirrorRow
+                                                            key={`${section.header}-${entry.label}`}
+                                                            label={entry.label}
+                                                            value={entry.value}
+                                                        />
+                                                    ))}
+                                                </ComposeMirrorPricing>
                                             ))}
-                                        </div>
+                                        </ComposeMirrorSection>
                                     )}
                                 </>
                             )}
-                        </>
-                    )}
+                    </>
+                )}
 
-                    {activeTab === "custom" && (
+                {activeTab === "custom" && (
                         <div className="cm-mirror-pane__custom-content">
-                            {/* System Prompt */}
                             <div className="cm-mirror-pane__custom-section">
                                 <Label className="cm-mirror-pane__section-label">SYSTEM PROMPT</Label>
                                 <Textarea
@@ -331,75 +269,27 @@ export function MirrorPane({
                                 />
                             </div>
 
-                            {/* Google Tools */}
-                            {isGoogleModel && googleTools && (
-                                <div className="cm-mirror-pane__tool-group">
-                                    <div className="cm-mirror-pane__tool-group-label text-cyan-400">GEMINI TOOLS</div>
-                                    <div className="cm-mirror-pane__tool-toggle">
-                                        <div className="cm-mirror-pane__tool-toggle-label">
-                                            <Search className="text-cyan-400" />
-                                            <span>Google Search</span>
-                                        </div>
-                                        <Switch
-                                            checked={googleTools.enableGoogleSearch}
-                                            onCheckedChange={googleTools.setEnableGoogleSearch}
-                                        />
-                                    </div>
-                                    <div className="cm-mirror-pane__tool-toggle">
-                                        <div className="cm-mirror-pane__tool-toggle-label">
-                                            <Code2 className="text-cyan-400" />
-                                            <span>Code Execution</span>
-                                        </div>
-                                        <Switch
-                                            checked={googleTools.enableCodeExecution}
-                                            onCheckedChange={googleTools.setEnableCodeExecution}
-                                        />
-                                    </div>
-                                    <div className="cm-mirror-pane__tool-toggle">
-                                        <div className="cm-mirror-pane__tool-toggle-label">
-                                            <MapPin className="text-cyan-400" />
-                                            <span>Maps Grounding</span>
-                                        </div>
-                                        <Switch
-                                            checked={googleTools.enableMapsGrounding}
-                                            onCheckedChange={googleTools.setEnableMapsGrounding}
-                                        />
-                                    </div>
-                                    <div className="cm-mirror-pane__custom-section">
-                                        <Label className="cm-mirror-pane__section-label flex items-center gap-2">
-                                            <Link className="cm-mirror-pane__tool-toggle-label-icon" />
-                                            URL CONTEXT
-                                        </Label>
-                                        <Textarea
-                                            value={googleTools.urlContextUrls}
-                                            onChange={(event) => googleTools.setUrlContextUrls(event.target.value)}
-                                            placeholder="One URL per line"
-                                            className="cm-mirror-pane__text-area"
-                                        />
-                                    </div>
-                                </div>
-                            )}
-
                             {/* Optional Pricing */}
                             {optionalPricingSections.length > 0 && (
                                 <div className="cm-mirror-pane__tool-group cm-mirror-pane__tool-group--fuchsia">
-                                    <Label className="cm-mirror-pane__tool-group-label text-fuchsia-400">OPTIONAL PRICING</Label>
+                                    <Label className="cm-mirror-pane__tool-group-label">OPTIONAL PRICING</Label>
                                     <div className="cm-mirror-pane__custom-content">
                                         {optionalPricingSections.map((section, index) => (
                                             <div key={`${section.header}-${section.unit}-${index}`} className="cm-mirror-pane__pricing-block">
                                                 <div className="cm-mirror-pane__pricing-header">
-                                                    <span className="font-mono text-fuchsia-300">{section.header}</span>
+                                                    <span className="cm-mirror-pane__pricing-name">{section.header}</span>
                                                     {section.unit && (
-                                                        <Badge variant="outline" className="text-[10px] border-sidebar-border">
+                                                        <span className="cm-mirror-pane__badge" data-tone="fuchsia">
                                                             {section.unit}
-                                                        </Badge>
+                                                        </span>
                                                     )}
                                                 </div>
                                                 {section.entries.map((entry) => (
-                                                    <div key={`${section.header}-${entry.label}`} className="cm-mirror-pane__kv-row text-xs">
-                                                        <span className="cm-mirror-pane__kv-label">{entry.label}</span>
-                                                        <span className="cm-mirror-pane__kv-value">{entry.value}</span>
-                                                    </div>
+                                                    <ComposeMirrorRow
+                                                        key={`${section.header}-${entry.label}`}
+                                                        label={entry.label}
+                                                        value={entry.value}
+                                                    />
                                                 ))}
                                             </div>
                                         ))}
@@ -436,19 +326,16 @@ export function MirrorPane({
                                 </>
                             )}
                         </div>
-                    )}
-                </div>
-            </div>
+                )}
+            </ComposeMirrorPane>
         </TooltipProvider>
     );
 }
 
 export function MirrorPaneSkeleton() {
     return (
-        <div className="cm-mirror-pane">
-            <div className="cm-mirror-pane__body">
-                <p className="text-sm text-muted-foreground">Loading model details...</p>
-            </div>
-        </div>
+        <ComposeMirrorPane>
+            <p className="cm-mirror-pane__param-description">Loading model details...</p>
+        </ComposeMirrorPane>
     );
 }
