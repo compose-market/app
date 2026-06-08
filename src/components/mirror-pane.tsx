@@ -7,31 +7,21 @@
  */
 import { useState } from "react";
 import {
-    ComposeMirrorPane,
-    ComposeMirrorPricing,
-    ComposeMirrorRow,
-    ComposeMirrorSection,
+    MirrorPane as MirrorPaneShell,
+    MirrorPricing,
+    MirrorRow,
+    MirrorSection,
 } from "@compose-market/theme/mirror";
-import { Label } from "@/components/ui/label";
+import { Excerpt, Hint } from "@compose-market/theme/shell";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
-import {
-    Tooltip,
-    TooltipContent,
-    TooltipProvider,
-    TooltipTrigger,
-} from "@/components/ui/tooltip";
-import {
     Cpu,
+    DollarSign,
     LayoutGrid,
+    LogIn,
+    LogOut,
     Settings,
 } from "lucide-react";
 import type { CanonicalModality } from "@compose-market/sdk";
@@ -44,6 +34,7 @@ import {
     getModelValueList,
     type CatalogModel,
 } from "@/lib/models";
+import { typeIcon, typeLabel } from "@compose-market/theme/icons/react";
 
 export interface ParamDefinition {
     type: "string" | "integer" | "number" | "boolean" | "array" | "object";
@@ -78,28 +69,41 @@ function renderParamInput(
     onChange: (nextValue: unknown) => void,
 ) {
     if (definition.options && definition.options.length > 0) {
-        const stringValue = value === undefined ? "" : String(value);
+        const selected = value === undefined
+            ? definition.default ?? definition.options[0]
+            : value;
         return (
-            <Select value={stringValue} onValueChange={onChange as (value: string) => void}>
-                <SelectTrigger className="cm-mirror-pane__field">
-                    <SelectValue placeholder={`Select ${key}`} />
-                </SelectTrigger>
-                <SelectContent>
-                    {definition.options.map((option) => (
-                        <SelectItem key={`${key}-${option}`} value={String(option)}>
-                            {String(option)}
-                        </SelectItem>
-                    ))}
-                </SelectContent>
-            </Select>
+            <div className="cm-mirror-pane__option-grid" role="radiogroup" aria-label={key}>
+                {definition.options.map((option) => {
+                    const active = String(selected) === String(option);
+                    return (
+                        <button
+                            key={`${key}-${option}`}
+                            type="button"
+                            role="radio"
+                            aria-checked={active}
+                            className="cm-mirror-pane__option"
+                            data-active={active ? "true" : "false"}
+                            onClick={() => onChange(option)}
+                        >
+                            <Hint label={String(option)}>
+                                <span>{String(option)}</span>
+                            </Hint>
+                        </button>
+                    );
+                })}
+            </div>
         );
     }
 
     if (definition.type === "boolean") {
+        const checked = value === undefined ? Boolean(definition.default) : Boolean(value);
         return (
             <div className="cm-mirror-pane__tool-toggle">
-                <span className="cm-mirror-pane__param-description">{definition.description || key}</span>
-                <Switch checked={Boolean(value)} onCheckedChange={onChange as (checked: boolean) => void} />
+                <span className="cm-mirror-pane__field-value">
+                    <span className="cm-mirror-pane__field-main">{checked ? "Enabled" : "Disabled"}</span>
+                </span>
+                <Switch checked={checked} onCheckedChange={onChange as (checked: boolean) => void} />
             </div>
         );
     }
@@ -125,6 +129,83 @@ function renderParamInput(
     );
 }
 
+function flow(value: string): "input" | "output" | null {
+    const id = value.toLowerCase();
+    if (id.includes("input") || id.includes("prompt")) return "input";
+    if (id.includes("output") || id.includes("completion") || id.includes("response")) return "output";
+    return null;
+}
+
+function iconLabel(label: string, kind: "input" | "output" | "price", variant: "section" | "metric" = "metric") {
+    const iconClass = "cm-mirror-pane__icon-svg";
+    const icon = kind === "input"
+        ? <LogIn className={iconClass} />
+        : kind === "output"
+            ? <LogOut className={iconClass} />
+            : <DollarSign className={iconClass} />;
+
+    return (
+        <Hint label={label}>
+            <span
+                className={`cm-mirror-pane__icon-label ${variant === "section" ? "cm-mirror-pane__icon-label--section" : ""}`}
+                aria-label={label}
+            >
+                {icon}
+            </span>
+        </Hint>
+    );
+}
+
+function formatId(value: string): string {
+    const id = value.toLowerCase().split(":")[0].trim().replace(/^output[_-]/, "").replace(/^input[_-]/, "");
+    if (id.includes("speech")) return "audio";
+    return id;
+}
+
+function formatLabel(value: string): string {
+    const id = formatId(value).replace(/[_-]+/g, " ");
+    if (id === "audio") return "Audio";
+    if (id === "text") return "Text";
+    if (id === "image") return "Image";
+    if (id === "video") return "Video";
+    return typeLabel(id.split(" ").map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" "));
+}
+
+function tone(value: string): "cyan" | "fuchsia" | "green" {
+    const id = formatId(value);
+    if (id.includes("image") || id.includes("video")) return "fuchsia";
+    if (id.includes("audio")) return "green";
+    return "cyan";
+}
+
+function FormatBadge({ value }: { value: string }) {
+    const id = formatId(value);
+    const label = formatLabel(value);
+
+    return (
+        <Hint label={label}>
+            <span className="cm-mirror-pane__format-badge" data-tone={tone(value)} aria-label={label}>
+                {typeIcon(id, "cm-mirror-pane__format-icon")}
+            </span>
+        </Hint>
+    );
+}
+
+function FieldValue({ value }: { value: string }) {
+    return (
+        <Hint label={value}>
+            <span className="cm-mirror-pane__field-value">
+                <span className="cm-mirror-pane__field-main">{value}</span>
+            </span>
+        </Hint>
+    );
+}
+
+function labelIcon(label: string, fallback: "price" | "input" = "input") {
+    const kind = flow(label) || fallback;
+    return iconLabel(label, kind);
+}
+
 export function MirrorPane({
     selectedModel,
     modelInfo,
@@ -145,7 +226,7 @@ export function MirrorPane({
 
     if (!selectedModel) {
         return (
-            <ComposeMirrorPane
+            <MirrorPaneShell
                 empty
                 emptyIcon={<Cpu />}
                 emptyText="Select a model to inspect pricing, limits, and settings"
@@ -154,188 +235,185 @@ export function MirrorPane({
     }
 
     return (
-        <TooltipProvider>
-            <ComposeMirrorPane
-                title={modelInfo?.name || selectedModel}
-                subtitle={(
-                    <>
-                        {modelInfo?.provider || "unknown"}
-                        {modelInfo?.modelId ? (
-                            <span className="cm-mirror-pane__model-id"> ({modelInfo.modelId})</span>
-                        ) : null}
-                    </>
-                )}
-                icon={<Cpu />}
-                badges={typeValues.map((value) => ({
-                    label: formatModelTypeLabel(value),
-                    tone: "fuchsia" as const,
-                }))}
-                tabs={[
-                    { id: "details", label: "Details", icon: <LayoutGrid />, tone: "cyan" },
-                    { id: "custom", label: "Custom", icon: <Settings />, tone: "fuchsia" },
-                ]}
-                activeTab={activeTab}
-                onTabChange={(tab) => setActiveTab(tab === "custom" ? "custom" : "details")}
-            >
-                {activeTab === "details" && (
-                    <>
-                            {modelInfo?.description && (
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <p className="cm-mirror-pane__description cm-mirror-pane__description--clamped">
-                                            {modelInfo.description}
-                                        </p>
-                                    </TooltipTrigger>
-                                    <TooltipContent side="bottom" className="max-w-xs text-xs">
+        <MirrorPaneShell
+            title={activeTab === "details" ? (
+                <Hint label={modelInfo?.name || selectedModel}>
+                    <span className="cm-mirror-pane__title-text">{modelInfo?.name || selectedModel}</span>
+                </Hint>
+            ) : undefined}
+            subtitle={activeTab === "details" ? (
+                <span className="cm-mirror-pane__model-meta-row">
+                    <Hint label={modelInfo?.provider || "unknown"}>
+                        <span className="cm-mirror-pane__provider">{modelInfo?.provider || "unknown"}</span>
+                    </Hint>
+                    <span className="cm-mirror-pane__type-list">
+                        {typeValues.map((value) => (
+                            <Hint key={value} label={formatModelTypeLabel(value)}>
+                                <span className="cm-mirror-pane__type-badge" data-tone={tone(value)}>
+                                    {typeIcon(value, "cm-mirror-pane__type-icon")}
+                                    <span>{formatModelTypeLabel(value)}</span>
+                                </span>
+                            </Hint>
+                        ))}
+                    </span>
+                </span>
+            ) : undefined}
+            icon={activeTab === "details" ? <Cpu /> : undefined}
+            tabs={[
+                { id: "details", label: "Details", icon: <LayoutGrid />, tone: "cyan" },
+                { id: "custom", label: "Custom", icon: <Settings />, tone: "fuchsia" },
+            ]}
+            activeTab={activeTab}
+            onTabChange={(tab: string) => setActiveTab(tab === "custom" ? "custom" : "details")}
+        >
+            {activeTab === "details" && (
+                <div className="cm-mirror-pane__details">
+                    {modelInfo?.description && (
+                        <div className="cm-mirror-pane__description">
+                            <Hint label={modelInfo.description}>
+                                <span className="cm-mirror-pane__description-hint">
+                                    <Excerpt title={modelInfo.name || selectedModel} text={modelInfo.description} lines={2}>
                                         {modelInfo.description}
-                                    </TooltipContent>
-                                </Tooltip>
-                            )}
+                                    </Excerpt>
+                                </span>
+                            </Hint>
+                        </div>
+                    )}
 
-                            {modelInfo && (
-                                <>
-                                    {(inputValues.length > 0 || outputValues.length > 0) && (
-                                        <ComposeMirrorSection>
-                                            {inputValues.length > 0 && (
-                                                <div className="cm-mirror-pane__io-row">
-                                                    <span className="cm-mirror-pane__io-label">IN</span>
-                                                    <div className="cm-mirror-pane__io-badges">
-                                                        {inputValues.map((value) => (
-                                                            <span key={`in-${value}`} className="cm-mirror-pane__badge" data-tone="cyan">
-                                                                {value}
-                                                            </span>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            )}
-                                            {outputValues.length > 0 && (
-                                                <div className="cm-mirror-pane__io-row">
-                                                    <span className="cm-mirror-pane__io-label">OUT</span>
-                                                    <div className="cm-mirror-pane__io-badges">
-                                                        {outputValues.map((value) => (
-                                                            <span key={`out-${value}`} className="cm-mirror-pane__badge" data-tone="fuchsia">
-                                                                {value}
-                                                            </span>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </ComposeMirrorSection>
-                                    )}
-
-                                    {contextEntries.length > 0 && (
-                                        <ComposeMirrorSection label="Context Window">
-                                            <div className="cm-mirror-pane__kv-grid">
-                                                {contextEntries.map((entry) => (
-                                                    <ComposeMirrorRow
-                                                        key={`ctx-${entry.label}`}
-                                                        label={entry.label}
-                                                        value={entry.value}
-                                                    />
-                                                ))}
-                                            </div>
-                                        </ComposeMirrorSection>
-                                    )}
-
-                                    {pricingSections.length > 0 && (
-                                        <ComposeMirrorSection label="Pricing">
-                                            {pricingSections.map((section, index) => (
-                                                <ComposeMirrorPricing key={`price-${section.header}-${index}`} unit={section.unit}>
-                                                    {section.entries.map((entry) => (
-                                                        <ComposeMirrorRow
-                                                            key={`${section.header}-${entry.label}`}
-                                                            label={entry.label}
-                                                            value={entry.value}
-                                                        />
+                    {modelInfo && (
+                        <>
+                            {(inputValues.length > 0 || outputValues.length > 0) && (
+                                <MirrorSection label={<span className="cm-mirror-pane__section-text">Capability</span>} className="cm-mirror-pane__section--capability">
+                                    <div className="cm-mirror-pane__lane-grid">
+                                        {inputValues.length > 0 && (
+                                            <div className="cm-mirror-pane__io-row cm-mirror-pane__metric-cell">
+                                                <span className="cm-mirror-pane__io-label">{iconLabel("Input", "input")}</span>
+                                                <div className="cm-mirror-pane__io-badges">
+                                                    {inputValues.map((value) => (
+                                                        <FormatBadge key={`in-${value}`} value={value} />
                                                     ))}
-                                                </ComposeMirrorPricing>
-                                            ))}
-                                        </ComposeMirrorSection>
-                                    )}
-                                </>
-                            )}
-                    </>
-                )}
-
-                {activeTab === "custom" && (
-                        <div className="cm-mirror-pane__custom-content">
-                            <div className="cm-mirror-pane__custom-section">
-                                <Label className="cm-mirror-pane__section-label">SYSTEM PROMPT</Label>
-                                <Textarea
-                                    value={systemPrompt}
-                                    onChange={(event) => onSystemPromptChange(event.target.value)}
-                                    placeholder="Optional system prompt..."
-                                    className="cm-mirror-pane__text-area"
-                                />
-                            </div>
-
-                            {/* Optional Pricing */}
-                            {optionalPricingSections.length > 0 && (
-                                <div className="cm-mirror-pane__tool-group cm-mirror-pane__tool-group--fuchsia">
-                                    <Label className="cm-mirror-pane__tool-group-label">OPTIONAL PRICING</Label>
-                                    <div className="cm-mirror-pane__custom-content">
-                                        {optionalPricingSections.map((section, index) => (
-                                            <div key={`${section.header}-${section.unit}-${index}`} className="cm-mirror-pane__pricing-block">
-                                                <div className="cm-mirror-pane__pricing-header">
-                                                    <span className="cm-mirror-pane__pricing-name">{section.header}</span>
-                                                    {section.unit && (
-                                                        <span className="cm-mirror-pane__badge" data-tone="fuchsia">
-                                                            {section.unit}
-                                                        </span>
-                                                    )}
                                                 </div>
-                                                {section.entries.map((entry) => (
-                                                    <ComposeMirrorRow
-                                                        key={`${section.header}-${entry.label}`}
-                                                        label={entry.label}
-                                                        value={entry.value}
-                                                    />
-                                                ))}
                                             </div>
+                                        )}
+                                        {outputValues.length > 0 && (
+                                            <div className="cm-mirror-pane__io-row cm-mirror-pane__metric-cell">
+                                                <span className="cm-mirror-pane__io-label">{iconLabel("Output", "output")}</span>
+                                                <div className="cm-mirror-pane__io-badges">
+                                                    {outputValues.map((value) => (
+                                                        <FormatBadge key={`out-${value}`} value={value} />
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </MirrorSection>
+                            )}
+
+                            {contextEntries.length > 0 && (
+                                <MirrorSection label={<span className="cm-mirror-pane__section-text">Context</span>} className="cm-mirror-pane__section--context">
+                                    <div className="cm-mirror-pane__kv-grid">
+                                        {contextEntries.map((entry) => (
+                                            <MirrorRow
+                                                key={`ctx-${entry.label}`}
+                                                label={labelIcon(entry.label, "input")}
+                                                value={<FieldValue value={entry.value} />}
+                                            />
                                         ))}
                                     </div>
-                                </div>
+                                </MirrorSection>
                             )}
 
-                            {/* No params state */}
-                            {!hasOptionalParams && optionalPricingSections.length === 0 && (
-                                <div className="cm-mirror-pane__no-params">
-                                    No optional parameters exposed for this model.
-                                </div>
-                            )}
-
-                            {/* Dynamic model params */}
-                            {hasOptionalParams && modelParams && (
-                                <>
-                                    {Object.entries(modelParams.params).filter(([, definition]) => definition.required !== true).map(([key, definition]) => (
-                                        <div key={key} className="cm-mirror-pane__custom-section">
-                                            <Label className="cm-mirror-pane__section-label">
-                                                {key}
-                                            </Label>
-                                            {renderParamInput(
-                                                key,
-                                                definition,
-                                                paramValues[key],
-                                                (nextValue) => onParamValuesChange?.({ ...paramValues, [key]: nextValue }),
-                                            )}
-                                            {definition.description && (
-                                                <p className="cm-mirror-pane__param-description">{definition.description}</p>
-                                            )}
-                                        </div>
+                            {pricingSections.length > 0 && (
+                                <MirrorSection label={iconLabel("Price", "price", "section")} className="cm-mirror-pane__section--pricing">
+                                    {pricingSections.map((section, index) => (
+                                        <MirrorPricing key={`price-${section.header}-${index}`} unit={section.unit}>
+                                            {section.entries.map((entry) => (
+                                                <MirrorRow
+                                                    key={`${section.header}-${entry.label}`}
+                                                    label={labelIcon(entry.label, "price")}
+                                                    value={<FieldValue value={entry.value} />}
+                                                />
+                                            ))}
+                                        </MirrorPricing>
                                     ))}
-                                </>
+                                </MirrorSection>
                             )}
+                        </>
+                    )}
+                </div>
+            )}
+
+            {activeTab === "custom" && (
+                <div className="cm-mirror-pane__custom-content">
+                    <MirrorSection label={<span className="cm-mirror-pane__section-text">System</span>} className="cm-mirror-pane__section--custom">
+                        <Textarea
+                            value={systemPrompt}
+                            onChange={(event) => onSystemPromptChange(event.target.value)}
+                            placeholder="Optional system prompt..."
+                            className="cm-mirror-pane__text-area"
+                        />
+                    </MirrorSection>
+
+                    {/* Optional Pricing */}
+                    {optionalPricingSections.length > 0 && (
+                        <MirrorSection label={iconLabel("Price", "price", "section")} className="cm-mirror-pane__section--pricing">
+                            {optionalPricingSections.map((section, index) => (
+                                <MirrorPricing key={`optional-price-${section.header}-${index}`} unit={section.unit}>
+                                    {section.entries.map((entry) => (
+                                        <MirrorRow
+                                            key={`${section.header}-${entry.label}`}
+                                            label={labelIcon(entry.label, "price")}
+                                            value={<FieldValue value={entry.value} />}
+                                        />
+                                    ))}
+                                </MirrorPricing>
+                            ))}
+                        </MirrorSection>
+                    )}
+
+                    {/* Dynamic model params */}
+                    {hasOptionalParams && modelParams && (
+                        <>
+                            {Object.entries(modelParams.params).filter(([, definition]) => definition.required !== true).map(([key, definition]) => (
+                                <MirrorSection key={key} label={<span className="cm-mirror-pane__section-text">{key}</span>} className="cm-mirror-pane__section--param">
+                                    <div className="cm-mirror-pane__param-body">
+                                        {renderParamInput(
+                                            key,
+                                            definition,
+                                            paramValues[key],
+                                            (nextValue) => onParamValuesChange?.({ ...paramValues, [key]: nextValue }),
+                                        )}
+                                        {definition.description && (
+                                            <Hint label={definition.description}>
+                                                <span className="cm-mirror-pane__param-description">
+                                                    <Excerpt title={key} text={definition.description} lines={2}>
+                                                        {definition.description}
+                                                    </Excerpt>
+                                                </span>
+                                            </Hint>
+                                        )}
+                                    </div>
+                                </MirrorSection>
+                            ))}
+                        </>
+                    )}
+
+                    {/* No params state */}
+                    {!hasOptionalParams && optionalPricingSections.length === 0 && (
+                        <div className="cm-mirror-pane__no-params">
+                            No optional parameters exposed for this model.
                         </div>
-                )}
-            </ComposeMirrorPane>
-        </TooltipProvider>
+                    )}
+                </div>
+            )}
+        </MirrorPaneShell>
     );
 }
 
 export function MirrorPaneSkeleton() {
     return (
-        <ComposeMirrorPane>
+        <MirrorPaneShell>
             <p className="cm-mirror-pane__param-description">Loading model details...</p>
-        </ComposeMirrorPane>
+        </MirrorPaneShell>
     );
 }
