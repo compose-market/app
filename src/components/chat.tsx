@@ -15,7 +15,7 @@ import {
     StreamNode as SharedStreamNode,
     StreamNotice as SharedStreamNotice,
     StreamPocket as SharedStreamPocket,
-} from "@compose-market/theme/workflows";
+} from "@compose-market/theme";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -55,7 +55,8 @@ import {
     Maximize2,
     Download,
 } from "lucide-react";
-import type { Artifact, AttachedFile, ChatActivityState, Message, Plan } from "@/hooks/use-chat";
+import type { ActivityNode, ActivityState } from "@compose-market/sdk";
+import type { Artifact, AttachedFile, ChatActivityState, Message, MessageBlock, Plan } from "@/hooks/use-chat";
 
 // Re-export for convenience
 export type { Message, AttachedFile };
@@ -617,55 +618,35 @@ function artifactMediaKind(kind: Artifact["artifactType"]): "image" | "audio" | 
     return kind === "image" || kind === "audio" || kind === "video" ? kind : null;
 }
 
-function StreamTreeView({ stream }: { stream: NonNullable<Message["stream"]> }) {
-    if (streamKind(stream) === "model") {
-        return null;
-    }
-    const rows = buildStreamRows(stream);
+function ActivityView({ activity, nodeId }: { activity?: ActivityState; nodeId?: string }) {
+    const rows = activity ? buildActivityRows(activity, nodeId) : [];
     if (rows.length === 0) return null;
+    const count = rows.reduce((sum, row) => sum + row.events, 0);
     return (
         <SharedStreamPocket
-            title="Execution"
-            metadata={rows.length > 1 ? <span>{rows.length} updates</span> : undefined}
+            title="Activity"
+            metadata={count > 1 ? <span>{count} updates</span> : undefined}
             className="mb-2"
         >
-            {rows.map((row) => <StreamRowNode key={row.id} row={row} />)}
+            {rows.map((row) => <ActivityRowNode key={row.id} row={row} />)}
         </SharedStreamPocket>
     );
 }
 
-function Thinking({ stream }: { stream: NonNullable<Message["stream"]> }) {
-    if (streamKind(stream) !== "model") return null;
-    const text = thinkingText(stream);
-    if (!text) return null;
-    return (
-        <SharedStreamNode
-            title="Thinking"
-            defaultOpen={false}
-            className="cm-chat-thinking"
-        >
-            <pre className="whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
-                {text}
-            </pre>
-        </SharedStreamNode>
-    );
-}
-
-type ViewNode = NonNullable<Message["stream"]>["nodes"][string];
-
-interface StreamRow {
+interface ActivityRow {
     id: string;
     class: StreamClass;
     title: string;
     summary?: string;
     metadata?: string;
-    children: StreamRow[];
+    children: ActivityRow[];
     open?: boolean;
+    events: number;
 }
 
-type StreamClass = "agent" | "model" | "tool" | "catalog" | "payment" | "session" | "error" | "system";
+type StreamClass = "agent" | "tool" | "error" | "system";
 
-function StreamRowNode({ row }: { row: StreamRow }) {
+function ActivityRowNode({ row }: { row: ActivityRow }) {
     return (
         <SharedStreamNode
             title={row.title}
@@ -674,37 +655,29 @@ function StreamRowNode({ row }: { row: StreamRow }) {
             metadata={row.metadata ? <span>{row.metadata}</span> : undefined}
             defaultOpen={row.open ?? false}
         >
-            {row.children.map((child) => <StreamRowNode key={child.id} row={child} />)}
+            {row.children.map((child) => <ActivityRowNode key={child.id} row={child} />)}
         </SharedStreamNode>
     );
 }
 
-function buildStreamRows(stream: NonNullable<Message["stream"]>): StreamRow[] {
+function buildActivityRows(activity: ActivityState, nodeId?: string): ActivityRow[] {
     const visited = new Set<string>();
-    const roots = stream.roots
-        .map((id) => stream.nodes[id])
-        .filter((node): node is ViewNode => Boolean(node) && !isTextNode(node));
-    const traceRoots = roots.filter(isTraceNode);
-    const rows: StreamRow[] = [];
-    const trace = traceRow("stream:traces", traceRoots);
-    if (trace) {
-        traceRoots.forEach((node) => visited.add(node.id));
-        rows.push(trace);
-    }
+    const roots = nodeId
+        ? [activity.nodes[nodeId]].filter((node): node is ActivityNode => Boolean(node))
+        : activity.roots.map((id) => activity.nodes[id]).filter((node): node is ActivityNode => Boolean(node));
+    const rows: ActivityRow[] = [];
     for (const node of roots) {
-        const row = projectStreamRow(node, stream, visited);
+        const row = projectActivityRow(node, activity, visited);
         if (row) rows.push(row);
     }
-    const leftovers = Object.values(stream.nodes)
-        .filter((node) => !visited.has(node.id) && !isTextNode(node));
-    const leftoverTrace = traceRow("stream:more", leftovers.filter(isTraceNode));
-    if (leftoverTrace) {
-        leftovers.filter(isTraceNode).forEach((node) => visited.add(node.id));
-        rows.push(leftoverTrace);
-    }
-    for (const node of leftovers) {
-        const row = projectStreamRow(node, stream, visited);
-        if (row) rows.push(row);
+    if (!nodeId) {
+        for (const node of Object.values(activity.nodes)) {
+            if (visited.has(node.id) || !visibleActivityNode(node)) continue;
+            const parent = node.parentId ? activity.nodes[node.parentId] : undefined;
+            if (parent && visibleActivityNode(parent)) continue;
+            const row = projectActivityRow(node, activity, visited);
+            if (row) rows.push(row);
+        }
     }
     return rows;
 }
@@ -719,144 +692,28 @@ function StreamMeta({ values }: { values: Array<string | undefined> }) {
     );
 }
 
-function thinkingText(stream: NonNullable<Message["stream"]>): string {
-    const direct = stream.reasoning.trim();
-    if (direct) return direct;
-    return Object.values(stream.nodes)
-        .filter((node) => node.kind === "reasoning")
-        .map((node) => node.text)
-        .join("")
-        .trim();
-}
-
-function projectStreamRow(
-    node: ViewNode,
-    stream: NonNullable<Message["stream"]>,
+function projectActivityRow(
+    node: ActivityNode,
+    activity: ActivityState,
     visited: Set<string>,
-): StreamRow | null {
-    if (visited.has(node.id) || isTextNode(node) || isTraceNode(node)) return null;
+): ActivityRow | null {
+    if (visited.has(node.id) || !visibleActivityNode(node)) return null;
     visited.add(node.id);
     const children = node.children
-        .map((id) => stream.nodes[id])
-        .filter((child): child is ViewNode => Boolean(child) && !isTextNode(child));
-    const trace = traceRow(`${node.id}:trace`, children.filter(isTraceNode));
-    children.filter(isTraceNode).forEach((child) => visited.add(child.id));
-    const rows = [
-        ...(trace ? [trace] : []),
-        ...children
-            .filter((child) => !isTraceNode(child))
-            .map((child) => projectStreamRow(child, stream, visited))
-            .filter((row): row is StreamRow => Boolean(row)),
-    ];
-    const klass = streamClass(node, rows);
-    if (isWrapper(node, klass, rows)) {
-        if (rows.length === 1) return rows[0];
-        return {
-            id: node.id,
-            class: klass,
-            title: `${classTitle(klass)} stream`,
-            summary: streamSummary(node),
-            metadata: node.events > 1 ? `${node.events} updates` : undefined,
-            children: rows,
-            open: node.kind === "error",
-        };
-    }
+        .map((id) => activity.nodes[id])
+        .filter((child): child is ActivityNode => Boolean(child))
+        .map((child) => projectActivityRow(child, activity, visited))
+        .filter((row): row is ActivityRow => Boolean(row));
     return {
         id: node.id,
-        class: klass,
-        title: streamTitle(node),
-        summary: streamSummary(node),
-        metadata: node.events > 1 ? `${node.events} updates` : undefined,
-        children: rows,
-        open: node.kind === "error",
+        class: activityClass(node),
+        title: activityTitle(node),
+        summary: activitySummary(node),
+        metadata: activityMeta(node),
+        children,
+        open: node.kind === "error" || node.status === "failed",
+        events: node.events + children.reduce((sum, row) => sum + row.events, 0),
     };
-}
-
-function traceRow(id: string, nodes: ViewNode[]): StreamRow | null {
-    if (nodes.length === 0) return null;
-    const phases = Array.from(new Set(nodes.map(traceLabel).filter(Boolean)));
-    const count = nodes.reduce((sum, node) => sum + node.events, 0);
-    return {
-        id,
-        class: "agent",
-        title: "Agent planned work",
-        summary: phases.length > 0 ? `Conclave: ${phases.join("; ")}` : undefined,
-        metadata: count > 1 ? `${count} updates` : undefined,
-        children: [],
-    };
-}
-
-function streamTitle(node: ViewNode): string {
-    const name = cleanLabel(node.display.title || node.display.label || node.display.target);
-    const direct = isDirectModel(node);
-    const klass = streamClass(node);
-    if (node.kind === "agent" || node.kind === "run") {
-        if (klass === "payment") return "Payment";
-        return "Agent worked";
-    }
-    if (node.kind === "approval") return approvalTitle(node);
-    if (node.kind === "artifact") return artifactStreamTitle(node);
-    if (node.kind === "model") return name && name !== "Model"
-        ? direct ? name : `Agent used ${name}`
-        : direct ? "Model update" : "Agent used a model";
-    if (node.kind === "tool" || node.kind === "connector") return name
-        ? direct ? `Tool call: ${name}` : `Agent used ${name}`
-        : direct ? "Tool call" : "Agent used a tool";
-    if (node.kind === "catalog") return direct ? "Citation" : "Agent checked the catalog";
-    if (node.kind === "harness") return "Agent delegated work";
-    if (node.kind === "receipt" || node.kind === "payment") return "Cost settled";
-    if (node.kind === "session") return "Realtime session prepared";
-    if (node.kind === "reasoning") return "Reasoning summary";
-    if (node.kind === "error") return "Action failed";
-    return direct ? "Stream update" : "Agent update";
-}
-
-function streamSummary(node: ViewNode): string | undefined {
-    if (node.kind === "artifact") return artifactStreamSummary(node);
-    if (node.kind === "error") return cleanLabel(node.display.summary || text(node.payload?.message));
-    if (node.kind === "receipt" || node.kind === "payment") {
-        return paymentSummary(node.payload);
-    }
-    return cleanLabel(node.text || node.display.summary);
-}
-
-function approvalTitle(node: ViewNode): string {
-    const decision = text(node.payload?.decision) || text(node.payload?.state);
-    if (decision === "approved") return "Plan approved";
-    if (decision === "rejected") return "Plan rejected";
-    if (decision === "changes_requested") return "Plan changes requested";
-    return "Agent proposed a plan";
-}
-
-function artifactStreamTitle(node: ViewNode): string {
-    const kind = artifactTitle(artifactKind(node.payload?.artifactType ?? node.payload?.type)).toLowerCase();
-    const partial = node.status === "running" || node.payload?.partial === true;
-    if (kind === "video" && text(node.payload?.status)) return "Video status";
-    if (partial) return `Partial ${kind}`;
-    return `${titleCase(kind)} generated`;
-}
-
-function artifactStreamSummary(node: ViewNode): string | undefined {
-    const payload = node.payload || {};
-    return [
-        text(payload.status),
-        typeof payload.progress === "number" ? `${Math.round(payload.progress)}%` : undefined,
-        text(payload.mimeType) || text(payload.mime_type),
-        formatBytes(typeof payload.bytes === "number" ? payload.bytes : undefined),
-        text(payload.responseId) ? `response ${shortId(text(payload.responseId))}` : undefined,
-    ]
-        .filter(Boolean)
-        .join(" · ") || undefined;
-}
-
-function traceLabel(node: ViewNode): string {
-    const payload = node.payload || {};
-    const raw = cleanLabel(text(payload.action) || text(payload.stage) || node.display.summary || node.display.title || text(payload.message));
-    if (!raw) return "";
-    const withoutConclave = raw.replace(/^conclave\s+/i, "");
-    const words = withoutConclave.split(/\s+/);
-    const deduped = words.filter((word, index) => index === 0 || word.toLowerCase() !== words[index - 1].toLowerCase());
-    return titleCase(deduped.join(" "));
 }
 
 function cleanLabel(value?: string): string | undefined {
@@ -868,128 +725,67 @@ function cleanLabel(value?: string): string | undefined {
     return cleaned || undefined;
 }
 
-function streamClass(node: ViewNode, children: StreamRow[] = []): StreamClass {
-    if (node.kind === "error") return "error";
-    if (node.kind === "receipt" || node.kind === "payment") return "payment";
-    if (node.kind === "session") return "session";
-    if (node.kind === "agent" || node.kind === "run" || node.kind === "harness" || node.kind === "approval" || node.kind === "action" || node.kind === "conclave") return "agent";
-    if (isDirectModel(node) || node.kind === "model" || node.kind === "artifact") return "model";
-    if (node.kind === "tool" || node.kind === "connector") return "tool";
-    if (node.kind === "catalog") return "catalog";
-    if (node.kind === "debug") return "agent";
+function activityClass(node: ActivityNode): StreamClass {
+    if (node.kind === "error" || node.status === "failed") return "error";
+    if (node.kind === "tool") return "tool";
+    if (node.kind === "agent" || node.kind === "run" || node.kind === "thinking" || node.kind === "conclave" || node.kind === "route" || node.kind === "message") {
+        return "agent";
+    }
     return "system";
 }
 
-function isDirectModel(node: ViewNode): boolean {
-    return node.source === "inference" || node.source === "responses" || node.source === "chat";
-}
-
-function isWrapper(node: ViewNode, klass: StreamClass, rows: StreamRow[]): boolean {
-    if (rows.length === 0) return false;
-    if (node.kind !== "run" && node.kind !== "agent") return false;
-    if (klass === "agent") return false;
-    const title = cleanLabel(node.display.title);
-    return !title || title === "Agent" || title === "Run" || title === "Model";
-}
-
-function classTitle(klass: StreamClass): string {
-    if (klass === "model") return "Model";
-    if (klass === "tool") return "Tool";
-    if (klass === "catalog") return "Catalog";
-    if (klass === "payment") return "Payment";
-    if (klass === "session") return "Session";
-    if (klass === "error") return "Error";
-    if (klass === "agent") return "Agent";
-    return "System";
-}
-
-function streamKind(stream: NonNullable<Message["stream"]>): "model" | "execution" {
-    const nodes = Object.values(stream.nodes).filter((node) => !isTextNode(node) && node.kind !== "receipt" && node.kind !== "payment");
-    if (nodes.length === 0) return "execution";
-    const hasExecution = nodes.some((node) =>
-        node.source === "agent" ||
-        node.source === "harness" ||
-        node.source === "workflow" ||
-        node.kind === "agent" ||
-        node.kind === "harness" ||
-        node.kind === "approval" ||
-        node.kind === "conclave" ||
-        node.kind === "action" ||
-        (node.kind === "run" && !isDirectModel(node))
-    );
-    return hasExecution ? "execution" : "model";
-}
-
-function paymentSummary(payload?: Record<string, unknown>): string | undefined {
-    if (!payload) return undefined;
-    const total = billTotal(payload.bills) ?? dollars(payload.total) ?? dollars(payload.finalAmountWei ?? payload.final_amount_wei ?? payload.amountWei ?? payload.amount_wei);
-    const status = cleanLabel(text(payload.settlementStatus) || text(payload.status));
-    return [total, status].filter(Boolean).join(" · ") || undefined;
-}
-
-function billTotal(value: unknown): string | undefined {
-    if (!Array.isArray(value)) return undefined;
-    let sum = 0;
-    let found = false;
-    for (const bill of value) {
-        if (!bill || typeof bill !== "object") continue;
-        const raw = (bill as Record<string, unknown>).total;
-        if (typeof raw !== "string") continue;
-        const match = raw.match(/([0-9]+(?:\.[0-9]+)?)/);
-        if (!match) continue;
-        const amount = Number(match[1]);
-        if (!Number.isFinite(amount)) continue;
-        sum += amount;
-        found = true;
+function activityTitle(node: ActivityNode): string {
+    const name = cleanLabel(node.target?.name || node.name || node.target?.target);
+    if (node.kind === "tool") {
+        if (node.target?.kind === "model") return name ? `Model call: ${name}` : "Model call";
+        return name ? `Tool call: ${name}` : "Tool call";
     }
-    return found ? formatDollars(sum) : undefined;
+    if (node.kind === "agent") return name ? `Agent: ${name}` : "Agent";
+    if (node.kind === "thinking") return "Thinking";
+    if (node.kind === "conclave") return "Conclave";
+    if (node.kind === "route") return "Route";
+    if (node.kind === "message") return "Message";
+    if (node.kind === "error") return "Action failed";
+    if (node.kind === "run") return node.status === "completed" ? "Run completed" : node.status === "cancelled" ? "Run stopped" : "Run";
+    return "Activity";
 }
 
-function dollars(value: unknown): string | undefined {
-    const raw = typeof value === "string" || typeof value === "number" ? String(value) : undefined;
-    if (!raw) return undefined;
-    if (raw.includes("$")) return raw;
-    const usdc = raw.match(/([0-9]+(?:\.[0-9]+)?)\s*USDC/i);
-    if (usdc) return formatDollars(Number(usdc[1]));
-    const atomic = Number(raw);
-    if (!Number.isFinite(atomic) || atomic < 0) return undefined;
-    return formatDollars(atomic / 1_000_000);
+function activitySummary(node: ActivityNode): string | undefined {
+    const payload = node.payload ?? {};
+    const summary = node.text
+        || node.target?.summary
+        || text(payload.message)
+        || text(payload.summary)
+        || text(payload.error)
+        || text(payload.reason);
+    return cleanLabel(summary);
 }
 
-function formatDollars(value: number): string {
-    if (!Number.isFinite(value)) return "$0.000000";
-    if (value >= 1) return `$${value.toFixed(2)}`;
-    if (value >= 0.01) return `$${value.toFixed(4)}`;
-    return `$${value.toFixed(6)}`;
+function activityMeta(node: ActivityNode): string | undefined {
+    const status = statusLabel(node.status);
+    const updates = node.events > 1 ? `${node.events} updates` : undefined;
+    return [status, updates].filter(Boolean).join(" · ") || undefined;
 }
 
-function titleCase(value: string): string {
-    return value.replace(/\b\w/g, (char) => char.toUpperCase());
+function statusLabel(status: ActivityNode["status"]): string | undefined {
+    if (status === "pending") return "Pending";
+    if (status === "running") return "Running";
+    if (status === "completed") return "Completed";
+    if (status === "failed") return "Failed";
+    if (status === "cancelled") return "Stopped";
+    return undefined;
 }
 
-function isTextNode(node: ViewNode): boolean {
-    return node.kind === "text";
-}
-
-function isTraceNode(node: ViewNode): boolean {
-    return node.kind === "debug" || node.kind === "conclave";
+function visibleActivityNode(node: ActivityNode): boolean {
+    if (node.kind === "trace" || node.kind === "plan") return false;
+    if (node.kind === "message" && !node.parentId) return false;
+    return true;
 }
 
 function text(value: unknown): string | undefined {
     if (typeof value === "string" && value.length > 0) return value;
     if (typeof value === "number" && Number.isFinite(value)) return String(value);
     return undefined;
-}
-
-function artifactKind(value: unknown): Artifact["artifactType"] {
-    const raw = typeof value === "string" ? value.toLowerCase() : "";
-    if (raw === "image" || raw === "output_image") return "image";
-    if (raw === "audio" || raw === "output_audio") return "audio";
-    if (raw === "video" || raw === "output_video") return "video";
-    if (raw === "embedding" || raw === "output_embedding") return "embedding";
-    if (raw === "realtime" || raw === "output_realtime" || raw === "realtime_session") return "realtime";
-    if (raw === "file") return "file";
-    return "artifact";
 }
 
 function DirectMedia({ message }: { message: Message }) {
@@ -1116,19 +912,20 @@ function MessageItemInner({
     const isUser = message.role === "user";
     const hasDirectMedia = Boolean(message.imageUrl || message.audioUrl || message.videoUrl);
     const hasStreamMedia = Boolean(message.artifacts?.some((item) => artifactMediaKind(item.artifactType)));
+    const hasBlocks = !isUser && Boolean(message.blocks?.length);
     // Only treat assistant message as "loading" when generating non-text media.
     // Text "thinking" status is owned exclusively by the activityState bar (see line ~608),
     // so we don't render a second per-bubble spinner for plain text turns.
-    const isLoadingMedia = !message.content
+    const isLoadingMedia = !hasBlocks
+        && !message.content
         && message.role === "assistant"
         && !hasDirectMedia
         && !hasStreamMedia
         && (message.type === "image" || message.type === "audio" || message.type === "video");
-    const foldedFailure = !message.content && Boolean(message.stream?.errors.length);
     const hasText = message.content.trim().length > 0;
     const shouldRenderText = message.type === "embedding"
         || isLoadingMedia
-        || (isUser ? hasText || !hasDirectMedia : hasText && !foldedFailure);
+        || (isUser ? hasText || !hasDirectMedia : hasText && !hasBlocks);
 
     const getAssistantIcon = () => {
         if (assistantAvatar) return assistantAvatar;
@@ -1138,6 +935,61 @@ function MessageItemInner({
             case "video": return <Video className="h-4 w-4" />;
             default: return <Bot className="h-4 w-4" />;
         }
+    };
+
+    const renderBlock = (block: MessageBlock) => {
+        if (block.type === "text") {
+            if (!block.text) return null;
+            return (
+                <div key={block.id}>
+                    <Suspense fallback={<p className="whitespace-pre-wrap text-sm">{block.text}</p>}>
+                        <LazyMarkdownRenderer content={block.text} />
+                    </Suspense>
+                </div>
+            );
+        }
+        if (block.type === "reasoning") {
+            if (!block.text) return null;
+            return (
+                <SharedStreamNode
+                    key={block.id}
+                    title="Thinking"
+                    defaultOpen={false}
+                    className="cm-chat-thinking"
+                >
+                    <pre className="whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
+                        {block.text}
+                    </pre>
+                </SharedStreamNode>
+            );
+        }
+        if (block.type === "plan") {
+            if (!message.proposal || message.proposal.proposalId !== block.planId) return null;
+            return (
+                <PlanReview
+                    key={block.id}
+                    messageId={message.id}
+                    plan={message.proposal}
+                    onPlanDecision={onPlanDecision}
+                />
+            );
+        }
+        if (block.type === "activity") {
+            return <ActivityView key={block.id} activity={message.activity} nodeId={block.nodeId} />;
+        }
+        if (block.type === "asset") {
+            const artifact = message.artifacts?.find((item) => item.id === block.artifactId);
+            return artifact ? <ArtifactBlock key={block.id} artifacts={[artifact]} /> : null;
+        }
+        return (
+            <SharedStreamNotice
+                key={block.id}
+                tone={block.tone === "error" ? "error" : undefined}
+                title={block.tone === "error" ? "Error" : "Notice"}
+            >
+                {block.text}
+            </SharedStreamNotice>
+        );
     };
 
     return (
@@ -1181,7 +1033,7 @@ function MessageItemInner({
                     </div>
                 )}
 
-                {message.proposal && (
+                {!hasBlocks && message.proposal && (
                     <PlanReview
                         messageId={message.id}
                         plan={message.proposal}
@@ -1189,10 +1041,9 @@ function MessageItemInner({
                     />
                 )}
 
-                {message.stream && <StreamTreeView stream={message.stream} />}
-                {message.stream && <Thinking stream={message.stream} />}
+                {hasBlocks && message.blocks?.map(renderBlock)}
 
-                {shouldRenderText && message.type === "embedding" ? (
+                {!hasBlocks && shouldRenderText && message.type === "embedding" ? (
                     <EmbeddingBlock content={message.content || "..."} />
                 ) : isLoadingMedia ? (
                     <PendingMedia
@@ -1209,7 +1060,7 @@ function MessageItemInner({
 
                 {hasDirectMedia && <DirectMedia message={message} />}
 
-                {!!message.artifacts?.length && <ArtifactBlock artifacts={message.artifacts} />}
+                {!hasBlocks && !!message.artifacts?.length && <ArtifactBlock artifacts={message.artifacts} />}
             </div>
 
             {isUser && (

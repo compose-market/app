@@ -13,10 +13,11 @@ import type {
     Message as ComposeMessage,
     MessageContentPart,
     AttachmentInput,
-    StreamEvent,
-    StreamTree,
+    ActivityEvent,
+    ActivityState,
+    ModelEvent,
 } from "@compose-market/sdk";
-import { createStreamTree, reduceStreamTree } from "@compose-market/sdk";
+import { createActivityState, reduceActivityState } from "@compose-market/sdk";
 import { uploadConversationFile, cleanupConversationFiles } from "@/lib/pinata";
 import {
     createObjectUrlPreview,
@@ -72,6 +73,14 @@ export interface Artifact {
     error?: string;
 }
 
+export type MessageBlock =
+    | { id: string; type: "text"; text: string }
+    | { id: string; type: "reasoning"; text: string }
+    | { id: string; type: "plan"; planId: string }
+    | { id: string; type: "activity"; nodeId?: string }
+    | { id: string; type: "asset"; artifactId: string }
+    | { id: string; type: "notice"; tone?: "error" | "info"; text: string };
+
 export interface Message {
     id: string;
     role: "user" | "assistant";
@@ -82,9 +91,10 @@ export interface Message {
     audioUrl?: string;
     videoUrl?: string;
     partialImage?: boolean;
-    stream?: StreamTree;
+    activity?: ActivityState;
     proposal?: Plan;
     artifacts?: Artifact[];
+    blocks?: MessageBlock[];
 }
 
 export interface AttachedFile {
@@ -159,6 +169,15 @@ function summarizeActivity(value: string | undefined): string | undefined {
     return normalized.length > 120 ? `${normalized.slice(0, 117)}...` : normalized;
 }
 
+export function noticeId(tone: "error" | "info", message: string): string {
+    const normalized = message.replace(/\s+/g, " ").trim().toLowerCase() || tone;
+    let hash = 5381;
+    for (let i = 0; i < normalized.length; i += 1) {
+        hash = ((hash << 5) + hash) ^ normalized.charCodeAt(i);
+    }
+    return `notice:${tone}:${hash >>> 0}`;
+}
+
 export interface UseChatReturn {
     // === Messages ===
     messages: Message[];
@@ -174,8 +193,14 @@ export interface UseChatReturn {
     createAssistantPlaceholder: (type?: Message["type"]) => string;
     /** Update assistant message by ID (O(1) for last message) */
     updateAssistantMessage: (id: string, update: Partial<Message>) => void;
-    /** Reduce a canonical stream event into an assistant message stream tree. */
-    applyAssistantStreamEvent: (id: string, event: StreamEvent) => void;
+    /** Reduce a real runtime activity event into an assistant message activity tree. */
+    applyAssistantActivityEvent: (id: string, event: ActivityEvent) => void;
+    /** Append or replace an ordered assistant message block. */
+    upsertAssistantBlock: (id: string, block: MessageBlock) => void;
+    /** Append text to an ordered assistant text/reasoning block. */
+    appendAssistantBlockText: (id: string, blockId: string, type: "text" | "reasoning", delta: string) => void;
+    /** Preserve typed model events for callers that want a central hook point. */
+    applyAssistantModelEvent: (id: string, event: ModelEvent) => void;
     /** Fold a local/transport failure into the same stream tree used by SSE errors. */
     failAssistant: (id: string, message: string) => void;
     /** Upsert a generated media/artifact reference on an assistant message. */
@@ -350,13 +375,16 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         });
     }, []);
 
-    const applyAssistantStreamEvent = useCallback((id: string, event: StreamEvent) => {
+    const upsertAssistantBlock = useCallback((id: string, block: MessageBlock) => {
         setMessages((prev) => {
             const next = [...prev];
-            const merge = (message: Message): Message => ({
-                ...message,
-                stream: reduceStreamTree(message.stream ?? createStreamTree(), event),
-            });
+            const merge = (message: Message): Message => {
+                const blocks = [...(message.blocks ?? [])];
+                const index = blocks.findIndex((item) => item.id === block.id);
+                if (index >= 0) blocks[index] = { ...blocks[index], ...block } as MessageBlock;
+                else blocks.push(block);
+                return { ...message, blocks };
+            };
             const last = next[next.length - 1];
             if (last?.id === id) {
                 next[next.length - 1] = merge(last);
@@ -368,28 +396,73 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         });
     }, []);
 
-    const failAssistant = useCallback((id: string, message: string) => {
-        const event: StreamEvent = {
-            type: "stream",
-            id: `error:${id}:${Date.now()}`,
-            kind: "error",
-            source: "web",
-            status: "failed",
-            ts: Date.now(),
-            display: {
-                title: "Error",
-                summary: message,
-            },
-            payload: {
-                error: { message },
-            },
-        };
+    const appendAssistantBlockText = useCallback((id: string, blockId: string, type: "text" | "reasoning", delta: string) => {
+        if (!delta) return;
+        setMessages((prev) => {
+            const next = [...prev];
+            const merge = (message: Message): Message => {
+                const blocks = [...(message.blocks ?? [])];
+                const index = blocks.findIndex((item) => item.id === blockId);
+                if (index >= 0) {
+                    const current = blocks[index];
+                    const text = current.type === "text" || current.type === "reasoning" ? current.text : "";
+                    blocks[index] = { id: blockId, type, text: text + delta };
+                } else {
+                    blocks.push({ id: blockId, type, text: delta });
+                }
+                return { ...message, blocks };
+            };
+            const last = next[next.length - 1];
+            if (last?.id === id) {
+                next[next.length - 1] = merge(last);
+                return next;
+            }
+            const idx = next.findIndex((m) => m.id === id);
+            if (idx >= 0) next[idx] = merge(next[idx]);
+            return next;
+        });
+    }, []);
 
+    const applyAssistantActivityEvent = useCallback((id: string, event: ActivityEvent) => {
+        setMessages((prev) => {
+            const next = [...prev];
+            const merge = (message: Message): Message => {
+                const visible = visibleActivity(event);
+                const nodeId = visible ? event.parentId ?? event.id : undefined;
+                return {
+                    ...message,
+                    activity: reduceActivityState(message.activity ?? createActivityState(), event),
+                    blocks: nodeId
+                        ? blockup(message.blocks, { id: `activity:${nodeId}`, type: "activity", nodeId })
+                        : message.blocks,
+                };
+            };
+            const last = next[next.length - 1];
+            if (last?.id === id) {
+                next[next.length - 1] = merge(last);
+                return next;
+            }
+            const idx = next.findIndex((m) => m.id === id);
+            if (idx >= 0) next[idx] = merge(next[idx]);
+            return next;
+        });
+    }, []);
+
+    const applyAssistantModelEvent = useCallback((_id: string, _event: ModelEvent) => {
+        // Model events are projected by use-stream into ordered text/reasoning/asset blocks.
+    }, []);
+
+    const failAssistant = useCallback((id: string, message: string) => {
         setMessages((prev) => {
             const next = [...prev];
             const merge = (current: Message): Message => ({
                 ...current,
-                stream: reduceStreamTree(current.stream ?? createStreamTree(), event),
+                blocks: blockup(current.blocks, {
+                    id: noticeId("error", message),
+                    type: "notice",
+                    tone: "error",
+                    text: message,
+                }),
             });
             const last = next[next.length - 1];
             if (last?.id === id) {
@@ -409,12 +482,17 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
                 const artifacts = [...(message.artifacts || [])];
                 const key = artifactKey(artifact);
                 const idx = artifacts.findIndex((item) => item.id === artifact.id || (key !== undefined && artifactKey(item) === key));
+                const blockId = idx >= 0 ? artifacts[idx].id : artifact.id;
                 if (idx >= 0) {
                     artifacts[idx] = { ...artifacts[idx], ...artifact, id: artifacts[idx].id };
                 } else {
                     artifacts.push(artifact);
                 }
-                return { ...message, artifacts };
+                return {
+                    ...message,
+                    artifacts,
+                    blocks: blockup(message.blocks, { id: `asset:${blockId}`, type: "asset", artifactId: blockId }),
+                };
             };
             const last = next[next.length - 1];
             if (last?.id === id) {
@@ -441,6 +519,20 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     function rawNumber(raw: Record<string, unknown> | undefined, key: string): number | undefined {
         const value = raw?.[key];
         return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+    }
+
+    function blockup(blocks: MessageBlock[] | undefined, block: MessageBlock): MessageBlock[] {
+        const next = [...(blocks ?? [])];
+        const index = next.findIndex((item) => item.id === block.id);
+        if (index >= 0) next[index] = { ...next[index], ...block } as MessageBlock;
+        else next.push(block);
+        return next;
+    }
+
+    function visibleActivity(event: ActivityEvent): boolean {
+        if (event.type === "activity.trace" || event.type === "activity.plan") return false;
+        if (event.type === "activity.message" && !event.parentId) return false;
+        return true;
     }
 
     const clearMessages = useCallback(() => {
@@ -807,7 +899,10 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         addUserMessage,
         createAssistantPlaceholder,
         updateAssistantMessage,
-        applyAssistantStreamEvent,
+        applyAssistantActivityEvent,
+        applyAssistantModelEvent,
+        upsertAssistantBlock,
+        appendAssistantBlockText,
         failAssistant,
         upsertAssistantArtifact,
         clearMessages,
@@ -843,7 +938,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         messages, activityState, attachedFiles, isUploading, uploadedCids,
         isRecording, recordingSupported,
         addUserMessage, createAssistantPlaceholder, updateAssistantMessage,
-        applyAssistantStreamEvent, failAssistant, upsertAssistantArtifact,
+        applyAssistantActivityEvent, applyAssistantModelEvent, upsertAssistantBlock, appendAssistantBlockText, failAssistant, upsertAssistantArtifact,
         clearMessages, scheduleStreamUpdate, flushStreamContent,
         clearActivityState, setActivityPhase, startToolActivity, finishToolActivity,
         isNearBottom, handleFileSelect, handleRemoveFile, clearFiles, cleanupFiles,

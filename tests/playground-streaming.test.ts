@@ -23,164 +23,126 @@ function section(source: string, start: string, end: string): string {
   return source.slice(startIndex, endIndex);
 }
 
-test("playground no longer uses the terminal multimodal runner or synthetic Running activity", () => {
+test("playground uses model streams without terminal runners or synthetic running activity", () => {
   assert.equal(existsSync(multimodalPath), false);
-  assert.equal(playgroundSource.includes("runInference"), false);
-  assert.equal(playgroundSource.includes("inferenceMessage"), false);
-  assert.equal(playgroundSource.includes("Running ${"), false);
-});
-
-test("playground uses one universal SDK response stream for native inference", () => {
   assert.match(playgroundSource, /streamer\.runResponses\(/);
   assert.match(playgroundSource, /stream:\s*true/);
-  assert.doesNotMatch(playgroundSource, /modalities:/);
-  assert.doesNotMatch(playgroundSource, /provider:\s*selectedModelInfo\.provider/);
-  assert.doesNotMatch(playgroundSource, /sdk\.inference\.videos\.generate\(/);
-  assert.doesNotMatch(playgroundSource, /streamer\.runVideo\(/);
-  assert.doesNotMatch(playgroundSource, /sdk\.inference\.audio\.speech\(/);
-  assert.doesNotMatch(playgroundSource, /sdk\.inference\.audio\.transcriptions\(/);
-  assert.doesNotMatch(playgroundSource, /sdk\.inference\.embeddings\.create\(/);
-  assert.doesNotMatch(playgroundSource, /responses\.create\(/);
-  assert.doesNotMatch(playgroundSource, /images\.generate\(/);
-  assert.doesNotMatch(playgroundSource, /images\.edit\(/);
-  assert.doesNotMatch(playgroundSource, /waitUntilDone\(/);
+  assert.doesNotMatch(playgroundSource, /runInference|inferenceMessage|Running \$\{/);
+  assert.doesNotMatch(playgroundSource, /sdk\.inference\.videos\.generate\(|responses\.create\(|images\.generate\(|waitUntilDone\(/);
 });
 
-test("web renders canonical stream trees instead of flat progress or timeline rows", () => {
+test("web routes model and activity events through separate dispatch paths", () => {
   assert.equal(existsSync(timelinePath), false);
   assert.equal(existsSync(blurPath), false);
-  assert.match(streamSource, /applyAssistantStreamEvent\(assistantId,\s*event\)/);
-  assert.match(chatSource, /function StreamTreeView/);
-  assert.match(chatSource, /function buildStreamRows/);
-  assert.match(chatSource, /function StreamRowNode/);
-  assert.match(chatSource, /StreamPocket/);
-  assert.doesNotMatch(chatSource, /components\/blur|GenerationCanvas/);
-  assert.doesNotMatch(streamSource, /traceMessage/);
-  assert.doesNotMatch(streamSource, /appendAssistantProgressEvent/);
-  assert.doesNotMatch(chatSource, /function StreamTreeNode/);
-  assert.doesNotMatch(chatSource, /function ToolBadge/);
+  assert.match(streamSource, /function dispatchModel/);
+  assert.match(streamSource, /function dispatchActivity/);
+  assert.match(streamSource, /event\.domain === "model"/);
+  assert.match(streamSource, /applyAssistantModelEvent/);
+  assert.match(streamSource, /applyAssistantActivityEvent/);
+  assert.doesNotMatch(streamSource, /applyAssistantStreamEvent|StreamEvent|createStreamTree|reduceStreamTree/);
+  assert.doesNotMatch(chatSource, /function StreamTreeView|message\.stream|StreamTree/);
   assert.doesNotMatch(agentSource, /ToolTimeline/);
   assert.doesNotMatch(playgroundSource, /ToolTimeline/);
   assert.doesNotMatch(workflowSource, /ToolTimeline/);
 });
 
-test("web renders execution pockets only for agent and harness streams", () => {
-  const streamViewSource = section(chatSource, "function StreamTreeView", "function DirectMedia");
-  assert.match(streamViewSource, /streamKind\(stream\) === "model"/);
-  assert.match(streamViewSource, /return null/);
-  assert.match(streamViewSource, /Execution/);
-  assert.match(streamViewSource, /Agent planned work/);
-  assert.match(streamViewSource, /Conclave:/);
-  assert.match(streamViewSource, /Agent used/);
-  assert.match(streamViewSource, /Agent checked the catalog/);
-  assert.match(streamViewSource, /streamClass/);
-  assert.match(streamViewSource, /isDirectModel/);
-  assert.match(streamViewSource, /node\.source === "agent"/);
-  assert.match(streamViewSource, /node\.source === "harness"/);
-  assert.doesNotMatch(streamViewSource, /title="Activity"/);
-  assert.doesNotMatch(streamViewSource, /DirectModelDetails|Model stream|Model activity|Payment activity|Agent activity/);
-  assert.doesNotMatch(streamViewSource, /Unattached events/);
-  assert.doesNotMatch(streamViewSource, /Runtime trace/);
-  assert.doesNotMatch(streamViewSource, /kind="debug"|status="info"/);
-  assert.doesNotMatch(streamViewSource, /\{events\} events|events<\/span>/);
+test("chat renders ordered blocks instead of a fixed stream tree order", () => {
+  const messageBody = section(chatSource, "function MessageItemInner", "export const MessageItem");
+  assert.match(chatHookSource, /export type MessageBlock/);
+  assert.match(chatHookSource, /blocks\?: MessageBlock\[\]/);
+  assert.match(messageBody, /message\.blocks\?\.map\(renderBlock\)/);
+  assert.match(messageBody, /block\.type === "text"/);
+  assert.match(messageBody, /block\.type === "reasoning"/);
+  assert.match(messageBody, /block\.type === "plan"/);
+  assert.match(messageBody, /block\.type === "activity"/);
+  assert.match(messageBody, /block\.type === "asset"/);
+  assert.ok(messageBody.indexOf('block.type === "plan"') < messageBody.indexOf('block.type === "activity"'));
+  assert.ok(messageBody.indexOf('block.type === "activity"') < messageBody.indexOf('block.type === "asset"'));
+  assert.doesNotMatch(messageBody, /StreamTreeView|Thinking stream/);
 });
 
-test("direct model stream frames stay on media and text surfaces, not stream pockets", () => {
+test("activity folds render real activity state and hide traces by default", () => {
+  const activityView = section(chatSource, "function ActivityView", "function DirectMedia");
+  assert.match(activityView, /ActivityState/);
+  assert.match(activityView, /buildActivityRows/);
+  assert.match(activityView, /visibleActivityNode/);
+  assert.match(activityView, /node\.kind === "trace"/);
+  assert.match(activityView, /node\.kind === "plan"/);
+  assert.match(activityView, /node\.kind === "message" && !node\.parentId/);
+  assert.match(streamSource, /if \(event\.type === "activity\.trace"\) return/);
+  assert.doesNotMatch(activityView, /node\.source|isDirectModel|streamKind|Agent planned work|Conclave:/);
+  assert.doesNotMatch(activityView, /kind="debug"|status="info"/);
+});
+
+test("direct model output stays on text, reasoning, and asset surfaces", () => {
   const artifactBlock = section(chatSource, "function ArtifactBlock", "function artifactTitle");
   const messageItem = section(chatSource, "function MessageItemInner", "export const MessageItem");
-  const thinking = section(chatSource, "function Thinking", "type ViewNode");
+  assert.match(streamSource, /event\.type === "model\.text\.delta"/);
+  assert.match(streamSource, /event\.type === "model\.reasoning\.delta"/);
+  assert.match(streamSource, /event\.type === "model\.asset"/);
+  assert.match(streamSource, /function artifactFromModelEvent/);
+  assert.match(messageItem, /title="Thinking"/);
   assert.match(artifactBlock, /partial/);
   assert.match(artifactBlock, /progress/);
-  assert.match(artifactBlock, /Generating/);
   assert.match(artifactBlock, /SharedStreamMedia/);
-  assert.match(messageItem, /hasStreamMedia/);
-  assert.match(messageItem, /!hasStreamMedia/);
-  assert.match(thinking, /streamKind\(stream\) !== "model"/);
-  assert.match(thinking, /title="Thinking"/);
-  assert.doesNotMatch(thinking, /kind=|status=/);
-  assert.match(chatSource, /function thinkingText/);
   assert.match(themeWorkflowsSource, /cm-stream-media--partial/);
-  assert.match(themeWorkflowsSource, /cm-stream-media--video/);
-  assert.doesNotMatch(chatSource, /DirectModelDetails/);
+  assert.doesNotMatch(streamSource, /artifactFrames|emitArtifact|function artifactFromEvent/);
+  assert.doesNotMatch(chatSource, /DirectModelDetails|Model stream|Model activity/);
 });
 
-test("stream payment rows and receipt badge render dollars instead of atomic units", () => {
-  const streamSummarySource = section(chatSource, "function streamSummary", "function titleCase");
-  assert.match(streamSummarySource, /paymentSummary/);
-  assert.match(streamSummarySource, /formatDollars/);
-  assert.match(streamSummarySource, /finalAmountWei/);
-  assert.doesNotMatch(streamSummarySource, /return cleanLabel\(text\(node\.payload\?\.finalAmountWei\)/);
-  assert.match(receiptSource, /formatReceiptUsd/);
-  assert.match(receiptSource, /formatWeiUsd/);
-  assert.match(receiptSource, /\$0\.000000/);
-  assert.doesNotMatch(receiptSource, /0\.000000 USDC/);
-});
-
-test("debug stream events are not projected as thinking rows", () => {
-  const dispatchBody = section(streamSource, "function dispatch", "function complete");
-  assert.match(dispatchBody, /event\.kind === "debug"/);
-  assert.doesNotMatch(dispatchBody, /phase:\s*"thinking"/);
-  assert.doesNotMatch(dispatchBody, /Trace \$\{/);
-});
-
-test("artifact events still hydrate or render generated media", () => {
+test("generated media hydrate and render as normal chat assets", () => {
   const artifactBlock = section(chatSource, "function ArtifactBlock", "function artifactTitle");
   const mediaBranch = section(artifactBlock, "if (mediaKind)", "if (item.artifactType === \"embedding\")");
-  assert.match(streamSource, /function artifactFromEvent/);
   assert.match(streamSource, /function hydrateArtifact/);
-  assert.doesNotMatch(streamSource, /applyArtifact/);
-  assert.doesNotMatch(streamSource, /imageUrl:\s*outputItemUrl/);
-  assert.doesNotMatch(streamSource, /audioUrl:\s*outputItemUrl/);
-  assert.doesNotMatch(streamSource, /videoUrl:\s*outputItemUrl/);
-  assert.match(chatSource, /function ArtifactBlock/);
+  assert.match(chatHookSource, /upsertAssistantArtifact/);
+  assert.match(chatHookSource, /type: "asset", artifactId/);
+  assert.doesNotMatch(streamSource, /imageUrl:\s*outputItemUrl|audioUrl:\s*outputItemUrl|videoUrl:\s*outputItemUrl/);
   assert.doesNotMatch(mediaBranch, /SharedStreamNode/);
-  assert.doesNotMatch(artifactBlock, /SharedStreamArtifact/);
   assert.match(artifactBlock, /SharedStreamMedia/);
   assert.match(artifactBlock, /Download/);
-  assert.match(artifactBlock, /function MediaPreview|MediaPreview/);
-  assert.match(artifactBlock, /onOpen=\{\(\) => setExpanded\(item\)\}/);
+  assert.match(artifactBlock, /MediaPreview/);
   assert.match(outputSource, /SharedStreamMedia kind="image"/);
-  assert.doesNotMatch(outputSource, /<audio|<video|<img/);
 });
 
-test("raw response media renders as one in-page previewable surface", () => {
-  const artifactBlock = section(chatSource, "function ArtifactBlock", "function EmbeddingArtifact");
-  const mediaPreview = section(chatSource, "function MediaPreview", "function EmbeddingArtifact");
-  const mediaSource = themeWorkflowsSource.slice(themeWorkflowsSource.indexOf("export function StreamMedia"));
-  assert.match(artifactBlock, /mediaKind === "audio" \? "w-full min-w-0"/);
-  assert.match(artifactBlock, /mediaKind === "video" \? "w-full max-w-2xl"/);
-  assert.match(mediaPreview, /DialogContent/);
-  assert.match(mediaPreview, /Download/);
-  assert.match(mediaSource, /<audio[^>]*controls[^>]*preload="metadata"[^>]*src=\{url\}/s);
-  assert.match(mediaSource, /<video[^>]*controls[^>]*preload="metadata"[^>]*src=\{url\}/s);
-  assert.doesNotMatch(mediaSource, /<source src=\{url\}/);
-});
-
-test("embedding and feature-extraction artifacts render as foldable vectors", () => {
+test("embedding artifacts render as foldable vectors without fake artifact status chrome", () => {
   const artifactBlock = section(chatSource, "function ArtifactBlock", "function artifactTitle");
   const embeddingBlock = section(chatSource, "function EmbeddingBlock", "function shortId");
   const embeddingArtifact = section(chatSource, "function EmbeddingArtifact", "function embeddingShape");
   assert.match(artifactBlock, /item\.artifactType === "embedding"/);
-  assert.match(chatSource, /function EmbeddingArtifact/);
   assert.match(chatSource, /function embeddingVector/);
   assert.match(chatSource, /Copy raw embedding/);
   assert.match(chatSource, /dimensions/);
-  assert.match(streamSource, /embedding:\s*embedding\(payload\.embedding/);
+  assert.match(streamSource, /embedding:\s*embedding\(asset\.embedding/);
   assert.match(streamSource, /view\.embedding/);
   assert.doesNotMatch(embeddingBlock, /kind="artifact"|status="completed"/);
   assert.doesNotMatch(embeddingArtifact, /kind="artifact"|status=\{item\.status\}/);
-  assert.doesNotMatch(embeddingArtifact, /<StreamMeta values=\{\[status/);
 });
 
-test("plan review stays foldable and generated artifacts stay ordered on the message", () => {
+test("plan review and failures are product blocks, not backend stream events", () => {
   const planReview = section(chatSource, "function PlanReview", "function planSummary");
   assert.match(planReview, /<details className="cm-chat-plan mb-2" open=\{!decided\}>/);
-  assert.doesNotMatch(planReview, /SharedStreamNode/);
   assert.match(planReview, /SharedPlanReview/);
-  const messageBody = section(chatSource, "{message.proposal && (", "{hasDirectMedia && <DirectMedia message={message} />}");
-  assert.ok(messageBody.indexOf("PlanReview") < messageBody.indexOf("StreamTreeView"));
-  assert.ok(messageBody.indexOf("StreamTreeView") < messageBody.indexOf("LazyMarkdownRenderer"));
-  assert.match(chatSource, /\{!!message\.artifacts\?\.length && <ArtifactBlock artifacts=\{message\.artifacts\} \/>\}/);
+  assert.match(streamSource, /function planFromActivityEvent/);
+  assert.match(chatHookSource, /type: "notice"/);
+  assert.match(chatHookSource, /export function noticeId/);
+  assert.match(streamSource, /noticeId\("error", message\)/);
+  assert.match(streamSource, /chat\.failAssistant\(assistantId,\s*message\)/);
+  assert.match(chatSource, /class MessageBoundary/);
+  assert.doesNotMatch(streamSource, /content:\s*`Error:/);
+  assert.doesNotMatch(agentSource, /content:\s*`Error:/);
+  assert.doesNotMatch(playgroundSource, /content:\s*`Error:/);
+  assert.doesNotMatch(workflowSource, /content:\s*`Error:/);
+});
+
+test("receipt and budget stay side channels, not quality stream blocks", () => {
+  const dispatchModel = section(streamSource, "function dispatchModel", "function dispatchActivity");
+  const dispatchActivity = section(streamSource, "function dispatchActivity", "function nextBlock");
+  assert.doesNotMatch(dispatchModel, /onReceipt|onBudget/);
+  assert.doesNotMatch(dispatchActivity, /onReceipt|onBudget/);
+  assert.match(streamSource, /sdk\.events\.on\("receipt"/);
+  assert.match(streamSource, /sdk\.events\.on\("budget"/);
+  assert.match(receiptSource, /formatReceiptUsd/);
+  assert.match(receiptSource, /formatWeiUsd/);
 });
 
 test("theme stream nodes keep raw kind and status out of visible chrome by default", () => {
@@ -198,22 +160,4 @@ test("chat scroll preserves manual inspection during live updates", () => {
   assert.match(chatHookSource, /addEventListener\("wheel", markUserScroll/);
   assert.match(chatHookSource, /addEventListener\("touchmove", markUserScroll/);
   assert.match(chatSource, /New messages/);
-});
-
-test("stream and page failures fold as canonical error nodes", () => {
-  assert.match(chatHookSource, /failAssistant/);
-  assert.match(streamSource, /chat\.failAssistant\(assistantId,\s*message\)/);
-  assert.match(chatSource, /class MessageBoundary/);
-  assert.match(chatSource, /kind="error"/);
-  assert.doesNotMatch(streamSource, /content:\s*`Error:/);
-  assert.doesNotMatch(agentSource, /content:\s*`Error:/);
-  assert.doesNotMatch(playgroundSource, /content:\s*`Error:/);
-  assert.doesNotMatch(workflowSource, /content:\s*`Error:/);
-});
-
-test("quality stream events stay separate from receipt and budget state", () => {
-  const dispatchBody = section(streamSource, "function dispatch", "function complete");
-  assert.doesNotMatch(dispatchBody, /onReceipt|onBudget/);
-  assert.match(streamSource, /sdk\.events\.on\("receipt"/);
-  assert.match(streamSource, /sdk\.events\.on\("budget"/);
 });

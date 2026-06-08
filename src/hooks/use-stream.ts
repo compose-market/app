@@ -5,13 +5,15 @@ import type {
     ComposeCallOptions,
     Receipt,
     ResponsesCreateParams,
+    ActivityEvent,
+    ModelEvent,
+    RunEvent,
     SessionBudgetSnapshot,
     SessionInvalidReason,
-    StreamEvent,
 } from "@compose-market/sdk";
 
 import { sdk } from "@/lib/sdk";
-import type { Artifact, Plan, UseChatReturn } from "@/hooks/use-chat";
+import { noticeId, type Artifact, type Plan, type UseChatReturn } from "@/hooks/use-chat";
 
 export interface StreamCallbacks {
     onReceipt?: (receipt: Receipt) => void;
@@ -84,6 +86,8 @@ export function useStream(
     chatRef.current = chat;
     const callbacksRef = useRef(callbacks);
     callbacksRef.current = callbacks;
+    const textBlockRef = useRef<string | null>(null);
+    const blockSeqRef = useRef(0);
 
     useEffect(() => {
         const unsubs: Array<() => void> = [
@@ -100,6 +104,7 @@ export function useStream(
         const c = chatRef.current;
         c.currentAssistantIdRef.current = args.assistantId;
         c.streamedTextRef.current = "";
+        textBlockRef.current = null;
         c.setActivityPhase("thinking", "Starting agent");
 
         const stream = sdk.agent.stream(
@@ -117,8 +122,8 @@ export function useStream(
 
         try {
             for await (const event of stream) {
-                dispatch(event, chatRef.current, callbacksRef);
-                if (event.kind === "run" && event.status === "completed") {
+                route(event, chatRef.current, callbacksRef, textBlockRef, blockSeqRef);
+                if (event.domain === "activity" && event.type === "activity.run" && event.status === "completed") {
                     complete(chatRef.current, args.assistantId, callbacksRef);
                 }
             }
@@ -133,6 +138,7 @@ export function useStream(
         const c = chatRef.current;
         c.currentAssistantIdRef.current = args.assistantId;
         c.streamedTextRef.current = "";
+        textBlockRef.current = null;
         c.setActivityPhase("thinking", "Starting workflow");
 
         const stream = sdk.workflow.stream(
@@ -151,8 +157,8 @@ export function useStream(
 
         try {
             for await (const event of stream) {
-                dispatch(event, chatRef.current, callbacksRef);
-                if (event.kind === "run" && event.status === "completed") {
+                route(event, chatRef.current, callbacksRef, textBlockRef, blockSeqRef);
+                if (event.domain === "activity" && event.type === "activity.run" && event.status === "completed") {
                     complete(chatRef.current, args.assistantId, callbacksRef);
                 }
             }
@@ -167,6 +173,7 @@ export function useStream(
         const c = chatRef.current;
         c.currentAssistantIdRef.current = args.assistantId;
         c.streamedTextRef.current = "";
+        textBlockRef.current = null;
 
         const stream = sdk.inference.chat.completions.stream(args.params, {
             signal: args.signal,
@@ -175,7 +182,7 @@ export function useStream(
 
         try {
             for await (const event of stream) {
-                dispatch(event as StreamEvent, chatRef.current, callbacksRef);
+                dispatchModel(event, chatRef.current, callbacksRef, textBlockRef, blockSeqRef);
             }
             const final = await stream.final();
             const text = final.chatCompletion.choices[0]?.message.content ?? chatRef.current.streamedTextRef.current;
@@ -189,6 +196,7 @@ export function useStream(
         const c = chatRef.current;
         c.currentAssistantIdRef.current = args.assistantId;
         c.streamedTextRef.current = "";
+        textBlockRef.current = null;
 
         const stream = sdk.inference.responses.stream(args.params, {
             signal: args.signal,
@@ -197,7 +205,7 @@ export function useStream(
 
         try {
             for await (const event of stream) {
-                dispatch(event as StreamEvent, chatRef.current, callbacksRef);
+                dispatchModel(event, chatRef.current, callbacksRef, textBlockRef, blockSeqRef);
             }
             const final = await stream.final();
             finish(chatRef.current, args.assistantId, chatRef.current.streamedTextRef.current, final.requestId, callbacksRef);
@@ -209,86 +217,151 @@ export function useStream(
     return useMemo(() => ({ runAgent, runWorkflow, runChat, runResponses }), [runAgent, runWorkflow, runChat, runResponses]);
 }
 
-function dispatch(
-    event: StreamEvent,
+function route(
+    event: RunEvent,
     chat: UseChatReturn,
     cbRef: React.MutableRefObject<StreamCallbacks>,
+    textBlockRef: React.MutableRefObject<string | null>,
+    blockSeqRef: React.MutableRefObject<number>,
+): void {
+    if (event.domain === "model") {
+        dispatchModel(event, chat, cbRef, textBlockRef, blockSeqRef);
+    } else {
+        dispatchActivity(event, chat, cbRef, textBlockRef, blockSeqRef);
+    }
+}
+
+function dispatchModel(
+    event: ModelEvent,
+    chat: UseChatReturn,
+    cbRef: React.MutableRefObject<StreamCallbacks>,
+    textBlockRef: React.MutableRefObject<string | null>,
+    blockSeqRef: React.MutableRefObject<number>,
 ): void {
     const assistantId = chat.currentAssistantIdRef.current;
     if (!assistantId) return;
 
-    chat.applyAssistantStreamEvent(assistantId, event);
-    const direct = isDirectModelEvent(event);
+    chat.applyAssistantModelEvent(assistantId, event);
 
-    if (event.kind === "text" && event.delta) {
+    if (event.type === "model.text.delta" && event.delta) {
+        const blockId = textBlockRef.current ?? nextBlock("text", blockSeqRef);
+        textBlockRef.current = blockId;
+        chat.appendAssistantBlockText(assistantId, blockId, "text", event.delta);
         chat.streamedTextRef.current += event.delta;
         chat.scheduleStreamUpdate(chat.streamedTextRef.current);
-        if (!direct) {
-            chat.setActivityPhase("streaming", "Responding");
+        chat.setActivityPhase("streaming", "Responding");
+        return;
+    }
+
+    if (event.type === "model.text.done" && event.text) {
+        const current = chat.streamedTextRef.current;
+        const append = event.text.startsWith(current) ? event.text.slice(current.length) : current.includes(event.text) ? "" : event.text;
+        if (append) {
+            const blockId = textBlockRef.current ?? nextBlock("text", blockSeqRef);
+            textBlockRef.current = blockId;
+            chat.appendAssistantBlockText(assistantId, blockId, "text", append);
+            chat.streamedTextRef.current += append;
+            chat.scheduleStreamUpdate(chat.streamedTextRef.current);
         }
         return;
     }
 
-    if (event.kind === "reasoning") {
-        if (!direct) {
-            chat.setActivityPhase("thinking", event.display?.summary || event.display?.title || "Reasoning");
-        }
+    if (event.type === "model.reasoning.delta" && event.delta) {
+        const blockId = `reasoning:${event.responseId ?? "main"}`;
+        chat.appendAssistantBlockText(assistantId, blockId, "reasoning", event.delta);
+        chat.setActivityPhase("thinking", "Reasoning");
         return;
     }
 
-    if (event.kind === "approval") {
-        const plan = planFromEvent(event);
-        chat.updateAssistantMessage(assistantId, {
-            proposal: plan,
-            content: chat.streamedTextRef.current,
-        });
-        chat.setActivityPhase("thinking", plan.decision ? `Plan ${plan.decision}` : "Awaiting plan decision");
-        return;
-    }
-
-    if (event.kind === "artifact") {
-        const item = artifactFromEvent(event);
+    if (event.type === "model.asset") {
+        textBlockRef.current = null;
+        const item = artifactFromModelEvent(event);
         chat.upsertAssistantArtifact(assistantId, item);
         if (!item.url && item.responseId && (item.inline || (item.artifactType === "embedding" && !item.embedding))) {
             chat.upsertAssistantArtifact(assistantId, { ...item, hydrating: true });
             void hydrateArtifact(chat, assistantId, item);
         }
-        const video = event.payload;
-        if (item.artifactType === "video" && typeof video?.jobId === "string" && typeof video?.status === "string") {
+        if (item.artifactType === "video" && item.jobId && item.status) {
             cbRef.current.onVideoStatus?.({
-                jobId: video.jobId,
-                status: video.status as "queued" | "processing" | "completed" | "failed",
-                progress: typeof video.progress === "number" ? video.progress : undefined,
-                url: typeof video.url === "string" ? video.url : undefined,
-                error: typeof video.error === "string" ? video.error : undefined,
+                jobId: item.jobId,
+                status: item.status as "queued" | "processing" | "completed" | "failed",
+                progress: item.progress,
+                url: item.url,
+                error: item.error,
             });
         }
-        if (!direct) {
-            chat.setActivityPhase("streaming", `Generated ${item.artifactType}`);
-        }
+        chat.setActivityPhase("streaming", `Generated ${item.artifactType}`);
         return;
     }
 
-    if (event.kind === "error") {
-        const message = event.display?.summary || "Stream error";
+    if (event.type === "model.error") {
+        textBlockRef.current = null;
+        const message = event.error?.message || "Model stream error";
+        chat.upsertAssistantBlock(assistantId, { id: noticeId("error", message), type: "notice", tone: "error", text: message });
+        chat.setActivityPhase("error", message);
+        cbRef.current.onError?.({ message });
+        return;
+    }
+}
+
+function dispatchActivity(
+    event: ActivityEvent,
+    chat: UseChatReturn,
+    cbRef: React.MutableRefObject<StreamCallbacks>,
+    textBlockRef: React.MutableRefObject<string | null>,
+    blockSeqRef: React.MutableRefObject<number>,
+): void {
+    const assistantId = chat.currentAssistantIdRef.current;
+    if (!assistantId) return;
+
+    chat.applyAssistantActivityEvent(assistantId, event);
+
+    if (event.type === "activity.message" && event.delta && !event.parentId) {
+        const blockId = textBlockRef.current ?? nextBlock("text", blockSeqRef);
+        textBlockRef.current = blockId;
+        chat.appendAssistantBlockText(assistantId, blockId, "text", event.delta);
+        chat.streamedTextRef.current += event.delta;
+        chat.scheduleStreamUpdate(chat.streamedTextRef.current);
+        return;
+    }
+
+    if (event.type !== "activity.trace") textBlockRef.current = null;
+
+    if (event.type === "activity.plan") {
+        const plan = planFromActivityEvent(event);
+        chat.updateAssistantMessage(assistantId, {
+            proposal: plan,
+            content: chat.streamedTextRef.current,
+        });
+        chat.upsertAssistantBlock(assistantId, { id: `plan:${plan.proposalId}:${plan.version}`, type: "plan", planId: plan.proposalId });
+        chat.setActivityPhase("thinking", plan.decision ? `Plan ${plan.decision}` : "Awaiting plan decision");
+        return;
+    }
+
+    if (event.type === "activity.error") {
+        const message = str(event.payload?.message) ?? "Activity stream error";
+        chat.upsertAssistantBlock(assistantId, { id: noticeId("error", message), type: "notice", tone: "error", text: message });
         chat.setActivityPhase("error", message);
         cbRef.current.onError?.({ message });
         return;
     }
 
-    if (event.kind === "receipt" || event.kind === "payment") return;
-    if (event.kind === "debug") return;
-    if (direct) return;
+    if (event.type === "activity.trace") return;
 
-    const title = event.display?.title || event.kind;
-    const summary = event.display?.summary || title;
+    const title = event.target?.name || event.name || event.kind;
+    const summary = event.target?.summary || str(event.payload?.message) || title;
     if (event.status === "failed") {
         chat.setActivityPhase("error", summary);
     } else if (event.status === "completed") {
         chat.setActivityPhase("thinking", `${title} completed`);
     } else {
-        chat.setActivityPhase(event.kind === "tool" || event.kind === "model" || event.kind === "connector" ? "tool" : "thinking", summary);
+        chat.setActivityPhase(event.kind === "tool" ? "tool" : "thinking", summary);
     }
+}
+
+function nextBlock(type: "text" | "reasoning", ref: React.MutableRefObject<number>): string {
+    ref.current += 1;
+    return `${type}:${ref.current}`;
 }
 
 function complete(
@@ -336,7 +409,7 @@ function fail(
     cbRef.current.onError?.({ message });
 }
 
-function planFromEvent(event: StreamEvent): Plan {
+function planFromActivityEvent(event: ActivityEvent): Plan {
     const payload = event.payload ?? {};
     return {
         type: event.raw && typeof event.raw === "object" && "type" in event.raw && event.raw.type === "harness_plan_decided"
@@ -362,36 +435,33 @@ function decision(value: unknown): Plan["decision"] | undefined {
     return value === "approved" || value === "rejected" || value === "changes_requested" ? value : undefined;
 }
 
-function artifactFromEvent(event: StreamEvent): Artifact {
-    const payload = event.payload ?? {};
-    const kind = artifactKind(payload.artifactType ?? payload.type);
-    const mimeType = str(payload.mimeType) ?? str(payload.mime_type);
-    const base64 = str(payload.base64) ?? str(payload.data);
-    const url = str(payload.url)
+function artifactFromModelEvent(event: ModelEvent): Artifact {
+    const asset = event.asset ?? { kind: "artifact" as const };
+    const raw = asset.raw ?? {};
+    const kind = artifactKind(asset.kind ?? raw.artifactType ?? raw.type);
+    const mimeType = asset.mimeType ?? str(raw.mimeType) ?? str(raw.mime_type);
+    const base64 = asset.base64 ?? str(raw.base64) ?? str(raw.data);
+    const url = asset.url ?? str(raw.url)
         ?? (base64 ? `data:${mimeType || defaultMime(kind)};base64,${base64}` : undefined);
     return {
         id: event.id,
         artifactType: kind,
         url,
-        inline: payload.inline === true,
-        partial: payload.partial === true,
-        embedding: embedding(payload.embedding ?? payload.embeddings),
+        inline: asset.inline === true,
+        partial: asset.partial === true,
+        embedding: embedding(asset.embedding ?? raw.embedding ?? raw.embeddings),
         mimeType,
-        bytes: num(payload.bytes),
-        responseId: str(payload.responseId) ?? str(payload.response_id),
-        outputIndex: num(payload.outputIndex) ?? num(payload.output_index),
-        status: event.status,
-        progress: num(payload.progress),
-        jobId: str(payload.jobId) ?? str(payload.job_id),
-        sourceTool: str(payload.sourceTool),
-        source: payload.source === "child" ? "child" : "agent",
-        runKey: str(payload.runKey),
-        raw: payload,
+        bytes: num(raw.bytes),
+        responseId: asset.responseId ?? event.responseId ?? str(raw.responseId) ?? str(raw.response_id),
+        outputIndex: asset.outputIndex ?? event.outputIndex ?? num(raw.outputIndex) ?? num(raw.output_index),
+        status: asset.status ?? event.status,
+        progress: asset.progress ?? num(raw.progress),
+        jobId: asset.jobId ?? str(raw.jobId) ?? str(raw.job_id),
+        sourceTool: event.toolCallId,
+        ...(event.runId ? { source: "agent" as const } : {}),
+        runKey: event.runId,
+        raw: { ...raw, ...asset },
     };
-}
-
-function isDirectModelEvent(event: StreamEvent): boolean {
-    return event.source === "inference" || event.source === "responses" || event.source === "chat";
 }
 
 function artifactKind(value: unknown): Artifact["artifactType"] {

@@ -12,8 +12,8 @@
     "test": "node --import tsx --test tests/**/*.test.ts"
   },
   "dependencies": {
-    "@compose-market/sdk": "^0.7.4",
-    "@compose-market/theme": "^0.1.14",
+    "@compose-market/sdk": "^0.7.6",
+    "@compose-market/theme": "^0.1.16",
     "@hookform/resolvers": "^5.4.0",
     "@posthog/react": "^1.10.0",
     "@radix-ui/react-alert-dialog": "^1.1.16",
@@ -52,7 +52,7 @@
     "mixpanel-browser": "^2.80.0",
     "pdfjs-dist": "^6.0.227",
     "postcss": "^8.5.15",
-    "posthog-js": "^1.382.0",
+    "posthog-js": "^1.383.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-hook-form": "^7.78.0",

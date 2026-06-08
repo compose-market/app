@@ -7,7 +7,7 @@
  * Uses fuchsia brand color (Manowar theme) for consistency.
  */
 import React, { memo } from "react";
-import { StreamMedia as SharedStreamMedia } from "@compose-market/theme/workflows";
+import { StreamMedia as SharedStreamMedia } from "@compose-market/theme";
 import {
     Sheet,
     SheetContent,
