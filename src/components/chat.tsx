@@ -3,17 +3,29 @@
  * 
  * Consolidates:
  * - MultimodalCanvas (chat container with input, attachments, recording)
- * - ChatMessageItem (message bubbles with actions)
+ * - MessageItem (message bubbles with actions)
  * - MarkdownRenderer (rich content with Mermaid, LaTeX, code)
  * 
  * Used by: agent.tsx, workflow.tsx, playground.tsx
  */
 import React, { Suspense, lazy, useState, memo, useCallback, useEffect, useRef } from "react";
+import {
+    PlanReview as SharedPlanReview,
+    StreamMedia as SharedStreamMedia,
+    StreamNode as SharedStreamNode,
+    StreamNotice as SharedStreamNotice,
+    StreamPocket as SharedStreamPocket,
+} from "@compose-market/theme/workflows";
 import { cn } from "@/lib/utils";
-import { GenerationCanvas } from "@/components/blur";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
 import {
     Tooltip,
     TooltipContent,
@@ -36,29 +48,22 @@ import {
     Trash2,
     BookOpen,
     Copy,
-    Check,
     RefreshCw,
     ChevronDown,
-    ChevronUp,
     FileText,
-	    Image as ImageIcon,
-	    Wrench,
-	    Cpu,
-	    Plug,
-	    Search,
-	    GitBranch,
-	    Route,
-	} from "lucide-react";
-import type { AttachedFile, ChatActivityState, ChatMessage } from "@/hooks/use-chat";
+    Image as ImageIcon,
+    Maximize2,
+    Download,
+} from "lucide-react";
+import type { Artifact, AttachedFile, ChatActivityState, Message, Plan } from "@/hooks/use-chat";
 
 // Re-export for convenience
-export type { ChatMessage, AttachedFile };
+export type { Message, AttachedFile };
 const LazyMarkdownRenderer = lazy(() =>
     import("@/lib/performance/markdown").then((module) => ({ default: module.MarkdownRenderer }))
 );
 
 function EmbeddingBlock({ content }: { content: string }) {
-    const [isOpen, setIsOpen] = useState(false);
     const [copied, setCopied] = useState(false);
 
     // Parse embedding content - try to prettify it
@@ -90,113 +95,973 @@ function EmbeddingBlock({ content }: { content: string }) {
     };
 
     return (
-        <div className="border border-emerald-500/30 rounded-lg overflow-hidden bg-emerald-500/5">
-            <div
-                onClick={() => setIsOpen(!isOpen)}
-                className="w-full flex items-center justify-between px-3 py-2 text-xs text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 transition-colors cursor-pointer"
-                title="Toggle Embedding Vector"
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
+        <SharedStreamNode
+            title={<>Embedding vector {dimensions > 0 && <span>({dimensions} dimensions)</span>}</>}
+            defaultOpen={false}
+            metadata={
+                <button
+                    onClick={handleCopy}
+                    className="cm-chat__icon-action w-fit rounded-full px-2 py-1 text-[11px] transition-colors"
+                    title="Copy raw embedding"
+                    type="button"
+                >
+                    {copied ? "Copied" : "Copy raw embedding"}
+                </button>
+            }
+        >
+            <pre className="text-xs font-mono text-emerald-300/80 overflow-auto max-h-80 whitespace-pre leading-relaxed">
+                {formattedContent}
+            </pre>
+        </SharedStreamNode>
+    );
+}
+
+function shortId(value?: string): string {
+    if (!value) return "";
+    return value.length > 14 ? `${value.slice(0, 6)}...${value.slice(-4)}` : value;
+}
+
+function formatBytes(value?: number): string | null {
+    if (!value || !Number.isFinite(value)) return null;
+    if (value < 1024) return `${value} B`;
+    if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
+    return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function PlanReview({
+    messageId,
+    plan,
+    onPlanDecision,
+}: {
+    messageId: string;
+    plan: Plan;
+    onPlanDecision?: MessageItemProps["onPlanDecision"];
+}) {
+    const [feedbackOpen, setFeedbackOpen] = useState(false);
+    const [feedback, setFeedback] = useState("");
+    const decided = plan.decision || plan.state === "approved" || plan.state === "rejected" || plan.state === "changes_requested";
+    const canAct = Boolean(onPlanDecision) && !plan.pending && !decided;
+    const title = plan.type === "harness_plan_decided" ? "Plan decision" : "Plan review";
+    const subtitle = plan.decision === "changes_requested"
+        ? "Changes were requested. The agent can revise and propose the next version."
+        : plan.decision === "rejected"
+            ? "The plan was rejected."
+            : plan.decision === "approved" || plan.state === "approved"
+                ? "The plan was approved and execution can continue."
+                : "Review the proposed work plan and choose an out-of-band decision.";
+    const metadata = (
+        <>
+            <span>v{plan.version}</span>
+            {plan.proposalId && <span>{shortId(plan.proposalId)}</span>}
+            {plan.composeRunId && <span>{shortId(plan.composeRunId)}</span>}
+        </>
+    );
+    const body = plan.markdown || "Plan proposal received.";
+    const actions = canAct ? (
+        <>
+            {feedbackOpen && (
+                <Textarea
+                    value={feedback}
+                    onChange={(event) => setFeedback(event.target.value)}
+                    placeholder="Feedback for the revised plan"
+                    className="min-h-16 w-full basis-full resize-none border-amber-500/30 bg-background/60 text-xs"
+                />
+            )}
+            <Button
+                type="button"
+                size="sm"
+                className="h-8 bg-emerald-500 text-black hover:bg-emerald-400"
+                disabled={plan.pending}
+                onClick={() => onPlanDecision?.(messageId, plan, "approved")}
             >
-                <span className="flex items-center gap-2 font-medium">
-                    <span className="text-emerald-500">📊</span>
-                    Embedding Vector {dimensions > 0 && <span className="text-emerald-600">({dimensions} dimensions)</span>}
-                </span>
-                <div className="flex items-center gap-2">
+                Approve
+            </Button>
+            <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 border-amber-500/40 text-amber-300"
+                disabled={plan.pending || (feedbackOpen && feedback.trim().length === 0)}
+                onClick={() => {
+                    if (!feedbackOpen) {
+                        setFeedbackOpen(true);
+                        return;
+                    }
+                    onPlanDecision?.(messageId, plan, "changes_requested", feedback.trim());
+                }}
+            >
+                Request changes
+            </Button>
+            <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 border-red-500/40 text-red-300"
+                disabled={plan.pending}
+                onClick={() => onPlanDecision?.(messageId, plan, "rejected", feedback.trim() || undefined)}
+            >
+                Reject
+            </Button>
+        </>
+    ) : null;
+
+    return (
+        <details className="cm-chat-plan mb-2" open={!decided}>
+            <summary className="cm-stream-node__summary-row">
+                <span className="cm-stream-node__marker" />
+                <span className="cm-stream-node__title">{planSummary(plan)}</span>
+                <span className="cm-stream-node__metadata">{metadata}</span>
+            </summary>
+            <SharedPlanReview
+                title={title}
+                subtitle={plan.error ? plan.error : subtitle}
+                state={plan.decision || plan.state}
+                metadata={metadata}
+                actions={actions}
+            >
+                <Suspense fallback={<p className="whitespace-pre-wrap text-sm">{body}</p>}>
+                    <LazyMarkdownRenderer content={body} />
+                </Suspense>
+            </SharedPlanReview>
+        </details>
+    );
+}
+
+function planSummary(plan: Plan): string {
+    const state = plan.decision || plan.state;
+    if (state === "approved") return `Plan approved · v${plan.version}`;
+    if (state === "rejected") return `Plan rejected · v${plan.version}`;
+    if (state === "changes_requested") return `Plan changes requested · v${plan.version}`;
+    return `Plan proposed · v${plan.version}`;
+}
+
+function ArtifactBlock({ artifacts }: { artifacts: Artifact[] }) {
+    const [expanded, setExpanded] = useState<Artifact | null>(null);
+    const rows = artifacts;
+    if (rows.length === 0) return null;
+    const mediaTotal = mediaCounts(rows);
+    return (
+        <div className="cm-chat-artifacts mb-2 space-y-4">
+            {rows.map((item, index) => {
+                const size = formatBytes(item.bytes);
+                const status = artifactStatus(item);
+                const mediaKind = artifactMediaKind(item.artifactType);
+                const partial = item.partial === true || item.hydrating === true || item.status === "running";
+                const progress = progressLabel(item.progress);
+                const title = mediaKind
+                    ? mediaTitle(item, rows, mediaTotal)
+                    : `${artifactTitle(item.artifactType)} ${index + 1}`;
+                const actionLabel = title || artifactTitle(item.artifactType);
+
+                if (mediaKind) {
+                    return (
+                        <div key={item.id} className="cm-chat-media-asset space-y-1.5">
+                            {item.url ? (
+                                <div className={cn(
+                                    "relative max-w-full",
+                                    mediaKind === "audio" ? "w-full min-w-0" : mediaKind === "video" ? "w-full max-w-2xl" : "w-fit",
+                                )}>
+                                    {mediaKind === "image" ? (
+                                        <button
+                                            type="button"
+                                            className="block max-w-full cursor-zoom-in rounded-md text-left"
+                                            onClick={() => setExpanded(item)}
+                                            aria-label={`Open ${actionLabel}`}
+                                        >
+                                            <SharedStreamMedia
+                                                kind={mediaKind}
+                                                url={item.url}
+                                                partial={partial}
+                                            />
+                                        </button>
+                                    ) : (
+                                        <SharedStreamMedia
+                                            kind={mediaKind}
+                                            url={item.url}
+                                            partial={partial}
+                                        />
+                                    )}
+                                    {partial && (
+                                        <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-md bg-black/15 text-xs font-medium text-white shadow">
+                                            {progress || "Generating"}
+                                        </div>
+                                    )}
+                                </div>
+                            ) : (
+                                <PendingMedia
+                                    type={mediaKind}
+                                    status={progress ? `${status} ${progress}` : status}
+                                />
+                            )}
+                            <ArtifactMeta
+                                title={title}
+                                values={[
+                                    mediaStatus(status),
+                                    progress,
+                                    item.mimeType,
+                                    size || undefined,
+                                    item.responseId ? `response ${shortId(item.responseId)}` : undefined,
+                                ]}
+                                url={item.url}
+                                onOpen={() => setExpanded(item)}
+                            />
+                            {item.error && (
+                                <SharedStreamNotice tone="error" title="Artifact error">
+                                    {item.error}
+                                </SharedStreamNotice>
+                            )}
+                        </div>
+                    );
+                }
+
+                if (item.artifactType === "embedding") {
+                    const label = title ?? `${artifactTitle(item.artifactType)} ${index + 1}`;
+                    return (
+                        <EmbeddingArtifact
+                            key={item.id}
+                            item={item}
+                            title={label}
+                            values={[
+                                embeddingShape(item),
+                                item.responseId ? `response ${shortId(item.responseId)}` : undefined,
+                            ]}
+                        />
+                    );
+                }
+
+                return (
+                    <div key={item.id} className="cm-chat-artifact-meta space-y-1.5">
+                        <ArtifactMeta
+                            title={title}
+                            values={[
+                                status,
+                                progress,
+                                item.mimeType,
+                                size || undefined,
+                                item.responseId ? `response ${shortId(item.responseId)}` : undefined,
+                            ]}
+                            url={item.url}
+                        />
+                        {item.url ? (
+                            <a className="text-xs underline-offset-2 hover:underline" href={item.url} target="_blank" rel="noreferrer">
+                                Open artifact
+                            </a>
+                        ) : null}
+                        {item.error && (
+                            <SharedStreamNotice tone="error" title="Artifact error">
+                                {item.error}
+                            </SharedStreamNotice>
+                        )}
+                    </div>
+                );
+            })}
+            <MediaPreview artifact={expanded} onOpenChange={(open) => {
+                if (!open) setExpanded(null);
+            }} />
+        </div>
+    );
+}
+
+function MediaPreview({
+    artifact,
+    onOpenChange,
+}: {
+    artifact: Artifact | null;
+    onOpenChange: (open: boolean) => void;
+}) {
+    const kind = artifact ? artifactMediaKind(artifact.artifactType) : null;
+    const url = artifact?.url;
+    const title = artifact ? artifactTitle(artifact.artifactType) : "Asset";
+    return (
+        <Dialog open={Boolean(kind && url)} onOpenChange={onOpenChange}>
+            <DialogContent className="max-w-5xl border-cyan-500/30 bg-background/95 p-4">
+                <DialogHeader>
+                    <DialogTitle className="font-display text-sm text-cyan-100">{title}</DialogTitle>
+                </DialogHeader>
+                {kind && url ? (
+                    <div className={cn("flex max-h-[78vh] min-h-0 items-center justify-center", kind === "audio" && "items-stretch")}>
+                        <SharedStreamMedia
+                            kind={kind}
+                            url={url}
+                            className={cn(
+                                kind === "image" && "max-h-[72vh] w-auto",
+                                kind === "video" && "max-h-[72vh]",
+                                kind === "audio" && "w-full",
+                            )}
+                        />
+                    </div>
+                ) : null}
+                {url ? (
+                    <div className="flex justify-end text-xs text-muted-foreground">
+                        <a
+                            className="cm-chat__icon-action inline-flex h-6 w-6 items-center justify-center rounded-full transition-colors"
+                            href={url}
+                            download
+                            rel="noreferrer"
+                            aria-label="Download"
+                            title="Download"
+                        >
+                            <Download className="h-3 w-3" />
+                        </a>
+                    </div>
+                ) : null}
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+function mediaCounts(artifacts: Artifact[]): Map<Artifact["artifactType"], number> {
+    const counts = new Map<Artifact["artifactType"], number>();
+    for (const item of artifacts) {
+        if (!artifactMediaKind(item.artifactType)) continue;
+        counts.set(item.artifactType, (counts.get(item.artifactType) ?? 0) + 1);
+    }
+    return counts;
+}
+
+function mediaTitle(
+    item: Artifact,
+    artifacts: Artifact[],
+    counts: Map<Artifact["artifactType"], number>,
+): string | undefined {
+    if ((counts.get(item.artifactType) ?? 0) <= 1) return undefined;
+    const index = artifacts
+        .filter((current) => current.artifactType === item.artifactType)
+        .findIndex((current) => current.id === item.id);
+    return `${artifactTitle(item.artifactType)} ${index + 1}`;
+}
+
+function mediaStatus(status: string): string | undefined {
+    return status === "Ready" ? undefined : status;
+}
+
+function EmbeddingArtifact({
+    item,
+    title,
+    values,
+}: {
+    item: Artifact;
+    title: string;
+    values: Array<string | undefined>;
+}) {
+    const [copied, setCopied] = useState(false);
+    const vector = embeddingVector(item);
+    const raw = vector ? JSON.stringify(vector) : JSON.stringify(item.raw ?? {}, null, 2);
+    const formatted = vector ? formatEmbedding(vector) : raw;
+    const copy = async () => {
+        await navigator.clipboard.writeText(raw);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    };
+
+    return (
+        <SharedStreamNode
+            title={title}
+            defaultOpen={false}
+            metadata={
+                <>
+                    <StreamMeta values={values} />
                     <button
-                        onClick={(e) => { e.stopPropagation(); handleCopy(); }}
-                        className="p-1 rounded hover:bg-emerald-500/20 transition-colors"
+                        onClick={copy}
+                        className="cm-chat__icon-action w-fit rounded-full px-2 py-1 text-[11px] transition-colors"
                         title="Copy raw embedding"
                         type="button"
                     >
-                        {copied ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
+                        {copied ? "Copied" : "Copy raw"}
                     </button>
-                    {isOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                </div>
-            </div>
-            {isOpen && (
-                <div className="px-3 py-2 border-t border-emerald-500/20 bg-black/30 animate-in fade-in slide-in-from-top-1 duration-200">
-                    <pre className="text-xs font-mono text-emerald-300/80 overflow-auto max-h-80 whitespace-pre leading-relaxed">
-                        {formattedContent}
-                    </pre>
-                </div>
-            )}
-        </div>
-    );
-}
-
-function AudioBlock({ src, content }: { src: string; content?: string }) {
-    return (
-        <div className="mb-2 rounded-md border border-cyan-500/25 bg-black/20 p-2">
-            {content && <p className="mb-2 text-xs text-muted-foreground">{content}</p>}
-            <audio controls preload="metadata" className="w-full">
-                <source src={src} />
-            </audio>
-        </div>
-    );
-}
-
-function ToolBadge({ tool }: { tool: NonNullable<ChatMessage["toolCalls"]>[number] }) {
-    const [open, setOpen] = useState(false);
-    const label = tool.targetKind || tool.displayName || tool.name;
-    const target = tool.target || tool.displayName;
-    const title = tool.error
-        ? `${tool.displayName || tool.name}: ${tool.error}`
-        : (tool.summary || tool.arguments || target || tool.name);
-    const icon = toolIcon(tool.targetKind);
-    return (
-        <button
-            type="button"
-            onClick={() => setOpen((value) => !value)}
-            className={cn(
-                "cm-tool-chip min-h-6 max-w-full px-2 py-0.5 text-left text-[10px] normal-case",
-                tool.status === "running" && "border-cyan-500/30 bg-cyan-500/10 text-cyan-200",
-	                tool.status === "completed" && "border-emerald-500/30 bg-emerald-500/10 text-emerald-200",
-	                tool.status === "error" && "border-red-500/30 bg-red-500/10 text-red-200",
-	                toolKindClass(tool.targetKind),
-	            )}
-            title={title}
-            aria-expanded={open}
+                </>
+            }
         >
-	            {icon}
-            <span className="truncate">{label}</span>
-            <span className="shrink-0 opacity-70">{tool.status}</span>
-            {open ? <ChevronUp className="h-3 w-3 shrink-0 opacity-70" /> : <ChevronDown className="h-3 w-3 shrink-0 opacity-70" />}
-            {open && (
-                <span className="ml-1 inline-flex min-w-0 max-w-[18rem] items-center gap-1 border-l border-current/20 pl-1.5 opacity-80">
-                    {target && <span className="truncate">{target}</span>}
-                    <span className="shrink-0 opacity-60">raw:{tool.name}</span>
-                </span>
+            {vector ? (
+                <pre className="text-xs font-mono text-emerald-300/80 overflow-auto max-h-80 whitespace-pre leading-relaxed">
+                    {formatted}
+                </pre>
+            ) : (
+                <SharedStreamNotice tone="warning" title="Embedding data unavailable">
+                    {item.responseId ? `Response ${shortId(item.responseId)} finished, but the vector payload was not returned to the UI.` : "The embedding vector payload was not returned to the UI."}
+                </SharedStreamNotice>
             )}
-        </button>
+            {item.error && (
+                <SharedStreamNotice tone="error" title="Embedding error">
+                    {item.error}
+                </SharedStreamNotice>
+            )}
+        </SharedStreamNode>
     );
 }
 
-function toolIcon(kind?: string) {
-    const className = "h-2.5 w-2.5 shrink-0 opacity-75";
-    switch (kind) {
-        case "model": return <Cpu className={className} />;
-        case "connector": return <Plug className={className} />;
-        case "agent": return <Bot className={className} />;
-        case "search": return <Search className={className} />;
-        case "harness": return <GitBranch className={className} />;
-        case "conclave": return <Layers className={className} />;
-        case "route": return <Route className={className} />;
-        default: return <Wrench className={className} />;
-    }
+function embeddingShape(item: Artifact): string | undefined {
+    const vector = embeddingVector(item);
+    if (!vector) return undefined;
+    if (isVector(vector)) return `${vector.length} dimensions`;
+    const dimensions = vector[0]?.length;
+    return `${vector.length} vectors${dimensions ? ` · ${dimensions} dimensions` : ""}`;
 }
 
-function toolKindClass(kind?: string): string {
-    switch (kind) {
-        case "model": return "shadow-[inset_0_0_0_1px_rgba(56,189,248,0.12)]";
-        case "connector": return "shadow-[inset_0_0_0_1px_rgba(168,85,247,0.14)]";
-        case "agent": return "shadow-[inset_0_0_0_1px_rgba(244,114,182,0.14)]";
-        case "search": return "shadow-[inset_0_0_0_1px_rgba(34,197,94,0.12)]";
-        case "harness": return "shadow-[inset_0_0_0_1px_rgba(251,191,36,0.18)]";
-        case "conclave": return "shadow-[inset_0_0_0_1px_rgba(45,212,191,0.14)]";
-        case "route": return "shadow-[inset_0_0_0_1px_rgba(148,163,184,0.16)]";
-        default: return "";
+function embeddingVector(item: Artifact): number[] | number[][] | null {
+    const raw = item.raw ?? {};
+    const hydrated = record(raw.hydrated);
+    for (const value of [
+        item.embedding,
+        raw.embedding,
+        raw.embeddings,
+        hydrated?.embedding,
+        hydrated?.embeddings,
+    ]) {
+        const parsed = parseEmbedding(value);
+        if (parsed) return parsed;
+    }
+    return null;
+}
+
+function parseEmbedding(value: unknown): number[] | number[][] | null {
+    if (isVector(value)) return value;
+    if (Array.isArray(value) && value.every(isVector)) return value;
+    return null;
+}
+
+function isVector(value: unknown): value is number[] {
+    return Array.isArray(value) && value.every((item) => typeof item === "number" && Number.isFinite(item));
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+    return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function formatEmbedding(value: number[] | number[][]): string {
+    if (isVector(value)) {
+        return value.map((entry, index) => `[${index}]: ${entry.toFixed(8)}`).join("\n");
+    }
+    return value.map((vector, index) =>
+        `[${index}]:\n  ${vector.map((entry, dimension) => `[${dimension}]: ${entry.toFixed(8)}`).join("\n  ")}`
+    ).join("\n\n");
+}
+
+function ArtifactMeta({
+    title,
+    values,
+    url,
+    onOpen,
+}: {
+    title?: string;
+    values: Array<string | undefined>;
+    url?: string;
+    onOpen?: () => void;
+}) {
+    return (
+        <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+            {title && <span className="font-medium text-foreground">{title}</span>}
+            <StreamMeta values={values} />
+            {url && (
+                <>
+                    {onOpen ? (
+                        <button
+                            type="button"
+                            className="cm-chat__icon-action inline-flex h-6 w-6 items-center justify-center rounded-full transition-colors"
+                            onClick={onOpen}
+                            aria-label="Open"
+                            title="Open"
+                        >
+                            <Maximize2 className="h-3 w-3" />
+                        </button>
+                    ) : (
+                        <a className="underline-offset-2 hover:underline" href={url} target="_blank" rel="noreferrer">Open</a>
+                    )}
+                    {onOpen ? (
+                        <a
+                            className="cm-chat__icon-action inline-flex h-6 w-6 items-center justify-center rounded-full transition-colors"
+                            href={url}
+                            download
+                            rel="noreferrer"
+                            aria-label="Download"
+                            title="Download"
+                        >
+                            <Download className="h-3 w-3" />
+                        </a>
+                    ) : (
+                        <a className="underline-offset-2 hover:underline" href={url} download rel="noreferrer">Download</a>
+                    )}
+                </>
+            )}
+        </div>
+    );
+}
+
+function artifactStatus(item: Artifact): string {
+    if (item.error || item.status === "failed") return "Failed";
+    if (item.hydrating) return "Preparing";
+    const raw = typeof item.raw?.status === "string" ? item.raw.status : item.status;
+    if (raw === "queued") return "Queued";
+    if (raw === "processing" || raw === "running" || item.partial) return "Generating";
+    if (raw === "completed") return "Ready";
+    return item.url ? "Ready" : "Generating";
+}
+
+function progressLabel(value?: number): string | undefined {
+    if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+    const pct = value > 0 && value <= 1 ? value * 100 : value;
+    return `${Math.max(0, Math.min(100, Math.round(pct)))}%`;
+}
+
+function artifactTitle(kind: Artifact["artifactType"]): string {
+    if (kind === "image") return "Image";
+    if (kind === "audio") return "Audio";
+    if (kind === "video") return "Video";
+    if (kind === "embedding") return "Embedding";
+    if (kind === "realtime") return "Realtime";
+    if (kind === "file") return "File";
+    return "Artifact";
+}
+
+function artifactMediaKind(kind: Artifact["artifactType"]): "image" | "audio" | "video" | null {
+    return kind === "image" || kind === "audio" || kind === "video" ? kind : null;
+}
+
+function StreamTreeView({ stream }: { stream: NonNullable<Message["stream"]> }) {
+    if (streamKind(stream) === "model") {
+        return null;
+    }
+    const rows = buildStreamRows(stream);
+    if (rows.length === 0) return null;
+    return (
+        <SharedStreamPocket
+            title="Execution"
+            metadata={rows.length > 1 ? <span>{rows.length} updates</span> : undefined}
+            className="mb-2"
+        >
+            {rows.map((row) => <StreamRowNode key={row.id} row={row} />)}
+        </SharedStreamPocket>
+    );
+}
+
+function Thinking({ stream }: { stream: NonNullable<Message["stream"]> }) {
+    if (streamKind(stream) !== "model") return null;
+    const text = thinkingText(stream);
+    if (!text) return null;
+    return (
+        <SharedStreamNode
+            title="Thinking"
+            defaultOpen={false}
+            className="cm-chat-thinking"
+        >
+            <pre className="whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
+                {text}
+            </pre>
+        </SharedStreamNode>
+    );
+}
+
+type ViewNode = NonNullable<Message["stream"]>["nodes"][string];
+
+interface StreamRow {
+    id: string;
+    class: StreamClass;
+    title: string;
+    summary?: string;
+    metadata?: string;
+    children: StreamRow[];
+    open?: boolean;
+}
+
+type StreamClass = "agent" | "model" | "tool" | "catalog" | "payment" | "session" | "error" | "system";
+
+function StreamRowNode({ row }: { row: StreamRow }) {
+    return (
+        <SharedStreamNode
+            title={row.title}
+            kind={row.class}
+            summary={row.summary}
+            metadata={row.metadata ? <span>{row.metadata}</span> : undefined}
+            defaultOpen={row.open ?? false}
+        >
+            {row.children.map((child) => <StreamRowNode key={child.id} row={child} />)}
+        </SharedStreamNode>
+    );
+}
+
+function buildStreamRows(stream: NonNullable<Message["stream"]>): StreamRow[] {
+    const visited = new Set<string>();
+    const roots = stream.roots
+        .map((id) => stream.nodes[id])
+        .filter((node): node is ViewNode => Boolean(node) && !isTextNode(node));
+    const traceRoots = roots.filter(isTraceNode);
+    const rows: StreamRow[] = [];
+    const trace = traceRow("stream:traces", traceRoots);
+    if (trace) {
+        traceRoots.forEach((node) => visited.add(node.id));
+        rows.push(trace);
+    }
+    for (const node of roots) {
+        const row = projectStreamRow(node, stream, visited);
+        if (row) rows.push(row);
+    }
+    const leftovers = Object.values(stream.nodes)
+        .filter((node) => !visited.has(node.id) && !isTextNode(node));
+    const leftoverTrace = traceRow("stream:more", leftovers.filter(isTraceNode));
+    if (leftoverTrace) {
+        leftovers.filter(isTraceNode).forEach((node) => visited.add(node.id));
+        rows.push(leftoverTrace);
+    }
+    for (const node of leftovers) {
+        const row = projectStreamRow(node, stream, visited);
+        if (row) rows.push(row);
+    }
+    return rows;
+}
+
+function StreamMeta({ values }: { values: Array<string | undefined> }) {
+    const items = values.filter((value): value is string => Boolean(value));
+    if (items.length === 0) return null;
+    return (
+        <>
+            {items.map((item) => <span key={item}>{item}</span>)}
+        </>
+    );
+}
+
+function thinkingText(stream: NonNullable<Message["stream"]>): string {
+    const direct = stream.reasoning.trim();
+    if (direct) return direct;
+    return Object.values(stream.nodes)
+        .filter((node) => node.kind === "reasoning")
+        .map((node) => node.text)
+        .join("")
+        .trim();
+}
+
+function projectStreamRow(
+    node: ViewNode,
+    stream: NonNullable<Message["stream"]>,
+    visited: Set<string>,
+): StreamRow | null {
+    if (visited.has(node.id) || isTextNode(node) || isTraceNode(node)) return null;
+    visited.add(node.id);
+    const children = node.children
+        .map((id) => stream.nodes[id])
+        .filter((child): child is ViewNode => Boolean(child) && !isTextNode(child));
+    const trace = traceRow(`${node.id}:trace`, children.filter(isTraceNode));
+    children.filter(isTraceNode).forEach((child) => visited.add(child.id));
+    const rows = [
+        ...(trace ? [trace] : []),
+        ...children
+            .filter((child) => !isTraceNode(child))
+            .map((child) => projectStreamRow(child, stream, visited))
+            .filter((row): row is StreamRow => Boolean(row)),
+    ];
+    const klass = streamClass(node, rows);
+    if (isWrapper(node, klass, rows)) {
+        if (rows.length === 1) return rows[0];
+        return {
+            id: node.id,
+            class: klass,
+            title: `${classTitle(klass)} stream`,
+            summary: streamSummary(node),
+            metadata: node.events > 1 ? `${node.events} updates` : undefined,
+            children: rows,
+            open: node.kind === "error",
+        };
+    }
+    return {
+        id: node.id,
+        class: klass,
+        title: streamTitle(node),
+        summary: streamSummary(node),
+        metadata: node.events > 1 ? `${node.events} updates` : undefined,
+        children: rows,
+        open: node.kind === "error",
+    };
+}
+
+function traceRow(id: string, nodes: ViewNode[]): StreamRow | null {
+    if (nodes.length === 0) return null;
+    const phases = Array.from(new Set(nodes.map(traceLabel).filter(Boolean)));
+    const count = nodes.reduce((sum, node) => sum + node.events, 0);
+    return {
+        id,
+        class: "agent",
+        title: "Agent planned work",
+        summary: phases.length > 0 ? `Conclave: ${phases.join("; ")}` : undefined,
+        metadata: count > 1 ? `${count} updates` : undefined,
+        children: [],
+    };
+}
+
+function streamTitle(node: ViewNode): string {
+    const name = cleanLabel(node.display.title || node.display.label || node.display.target);
+    const direct = isDirectModel(node);
+    const klass = streamClass(node);
+    if (node.kind === "agent" || node.kind === "run") {
+        if (klass === "payment") return "Payment";
+        return "Agent worked";
+    }
+    if (node.kind === "approval") return approvalTitle(node);
+    if (node.kind === "artifact") return artifactStreamTitle(node);
+    if (node.kind === "model") return name && name !== "Model"
+        ? direct ? name : `Agent used ${name}`
+        : direct ? "Model update" : "Agent used a model";
+    if (node.kind === "tool" || node.kind === "connector") return name
+        ? direct ? `Tool call: ${name}` : `Agent used ${name}`
+        : direct ? "Tool call" : "Agent used a tool";
+    if (node.kind === "catalog") return direct ? "Citation" : "Agent checked the catalog";
+    if (node.kind === "harness") return "Agent delegated work";
+    if (node.kind === "receipt" || node.kind === "payment") return "Cost settled";
+    if (node.kind === "session") return "Realtime session prepared";
+    if (node.kind === "reasoning") return "Reasoning summary";
+    if (node.kind === "error") return "Action failed";
+    return direct ? "Stream update" : "Agent update";
+}
+
+function streamSummary(node: ViewNode): string | undefined {
+    if (node.kind === "artifact") return artifactStreamSummary(node);
+    if (node.kind === "error") return cleanLabel(node.display.summary || text(node.payload?.message));
+    if (node.kind === "receipt" || node.kind === "payment") {
+        return paymentSummary(node.payload);
+    }
+    return cleanLabel(node.text || node.display.summary);
+}
+
+function approvalTitle(node: ViewNode): string {
+    const decision = text(node.payload?.decision) || text(node.payload?.state);
+    if (decision === "approved") return "Plan approved";
+    if (decision === "rejected") return "Plan rejected";
+    if (decision === "changes_requested") return "Plan changes requested";
+    return "Agent proposed a plan";
+}
+
+function artifactStreamTitle(node: ViewNode): string {
+    const kind = artifactTitle(artifactKind(node.payload?.artifactType ?? node.payload?.type)).toLowerCase();
+    const partial = node.status === "running" || node.payload?.partial === true;
+    if (kind === "video" && text(node.payload?.status)) return "Video status";
+    if (partial) return `Partial ${kind}`;
+    return `${titleCase(kind)} generated`;
+}
+
+function artifactStreamSummary(node: ViewNode): string | undefined {
+    const payload = node.payload || {};
+    return [
+        text(payload.status),
+        typeof payload.progress === "number" ? `${Math.round(payload.progress)}%` : undefined,
+        text(payload.mimeType) || text(payload.mime_type),
+        formatBytes(typeof payload.bytes === "number" ? payload.bytes : undefined),
+        text(payload.responseId) ? `response ${shortId(text(payload.responseId))}` : undefined,
+    ]
+        .filter(Boolean)
+        .join(" · ") || undefined;
+}
+
+function traceLabel(node: ViewNode): string {
+    const payload = node.payload || {};
+    const raw = cleanLabel(text(payload.action) || text(payload.stage) || node.display.summary || node.display.title || text(payload.message));
+    if (!raw) return "";
+    const withoutConclave = raw.replace(/^conclave\s+/i, "");
+    const words = withoutConclave.split(/\s+/);
+    const deduped = words.filter((word, index) => index === 0 || word.toLowerCase() !== words[index - 1].toLowerCase());
+    return titleCase(deduped.join(" "));
+}
+
+function cleanLabel(value?: string): string | undefined {
+    const cleaned = value
+        ?.replace(/[_-]+/g, " ")
+        .replace(/\b(runtime|debug|info|source)\b:?/gi, "")
+        .replace(/\s+/g, " ")
+        .trim();
+    return cleaned || undefined;
+}
+
+function streamClass(node: ViewNode, children: StreamRow[] = []): StreamClass {
+    if (node.kind === "error") return "error";
+    if (node.kind === "receipt" || node.kind === "payment") return "payment";
+    if (node.kind === "session") return "session";
+    if (node.kind === "agent" || node.kind === "run" || node.kind === "harness" || node.kind === "approval" || node.kind === "action" || node.kind === "conclave") return "agent";
+    if (isDirectModel(node) || node.kind === "model" || node.kind === "artifact") return "model";
+    if (node.kind === "tool" || node.kind === "connector") return "tool";
+    if (node.kind === "catalog") return "catalog";
+    if (node.kind === "debug") return "agent";
+    return "system";
+}
+
+function isDirectModel(node: ViewNode): boolean {
+    return node.source === "inference" || node.source === "responses" || node.source === "chat";
+}
+
+function isWrapper(node: ViewNode, klass: StreamClass, rows: StreamRow[]): boolean {
+    if (rows.length === 0) return false;
+    if (node.kind !== "run" && node.kind !== "agent") return false;
+    if (klass === "agent") return false;
+    const title = cleanLabel(node.display.title);
+    return !title || title === "Agent" || title === "Run" || title === "Model";
+}
+
+function classTitle(klass: StreamClass): string {
+    if (klass === "model") return "Model";
+    if (klass === "tool") return "Tool";
+    if (klass === "catalog") return "Catalog";
+    if (klass === "payment") return "Payment";
+    if (klass === "session") return "Session";
+    if (klass === "error") return "Error";
+    if (klass === "agent") return "Agent";
+    return "System";
+}
+
+function streamKind(stream: NonNullable<Message["stream"]>): "model" | "execution" {
+    const nodes = Object.values(stream.nodes).filter((node) => !isTextNode(node) && node.kind !== "receipt" && node.kind !== "payment");
+    if (nodes.length === 0) return "execution";
+    const hasExecution = nodes.some((node) =>
+        node.source === "agent" ||
+        node.source === "harness" ||
+        node.source === "workflow" ||
+        node.kind === "agent" ||
+        node.kind === "harness" ||
+        node.kind === "approval" ||
+        node.kind === "conclave" ||
+        node.kind === "action" ||
+        (node.kind === "run" && !isDirectModel(node))
+    );
+    return hasExecution ? "execution" : "model";
+}
+
+function paymentSummary(payload?: Record<string, unknown>): string | undefined {
+    if (!payload) return undefined;
+    const total = billTotal(payload.bills) ?? dollars(payload.total) ?? dollars(payload.finalAmountWei ?? payload.final_amount_wei ?? payload.amountWei ?? payload.amount_wei);
+    const status = cleanLabel(text(payload.settlementStatus) || text(payload.status));
+    return [total, status].filter(Boolean).join(" · ") || undefined;
+}
+
+function billTotal(value: unknown): string | undefined {
+    if (!Array.isArray(value)) return undefined;
+    let sum = 0;
+    let found = false;
+    for (const bill of value) {
+        if (!bill || typeof bill !== "object") continue;
+        const raw = (bill as Record<string, unknown>).total;
+        if (typeof raw !== "string") continue;
+        const match = raw.match(/([0-9]+(?:\.[0-9]+)?)/);
+        if (!match) continue;
+        const amount = Number(match[1]);
+        if (!Number.isFinite(amount)) continue;
+        sum += amount;
+        found = true;
+    }
+    return found ? formatDollars(sum) : undefined;
+}
+
+function dollars(value: unknown): string | undefined {
+    const raw = typeof value === "string" || typeof value === "number" ? String(value) : undefined;
+    if (!raw) return undefined;
+    if (raw.includes("$")) return raw;
+    const usdc = raw.match(/([0-9]+(?:\.[0-9]+)?)\s*USDC/i);
+    if (usdc) return formatDollars(Number(usdc[1]));
+    const atomic = Number(raw);
+    if (!Number.isFinite(atomic) || atomic < 0) return undefined;
+    return formatDollars(atomic / 1_000_000);
+}
+
+function formatDollars(value: number): string {
+    if (!Number.isFinite(value)) return "$0.000000";
+    if (value >= 1) return `$${value.toFixed(2)}`;
+    if (value >= 0.01) return `$${value.toFixed(4)}`;
+    return `$${value.toFixed(6)}`;
+}
+
+function titleCase(value: string): string {
+    return value.replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function isTextNode(node: ViewNode): boolean {
+    return node.kind === "text";
+}
+
+function isTraceNode(node: ViewNode): boolean {
+    return node.kind === "debug" || node.kind === "conclave";
+}
+
+function text(value: unknown): string | undefined {
+    if (typeof value === "string" && value.length > 0) return value;
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+    return undefined;
+}
+
+function artifactKind(value: unknown): Artifact["artifactType"] {
+    const raw = typeof value === "string" ? value.toLowerCase() : "";
+    if (raw === "image" || raw === "output_image") return "image";
+    if (raw === "audio" || raw === "output_audio") return "audio";
+    if (raw === "video" || raw === "output_video") return "video";
+    if (raw === "embedding" || raw === "output_embedding") return "embedding";
+    if (raw === "realtime" || raw === "output_realtime" || raw === "realtime_session") return "realtime";
+    if (raw === "file") return "file";
+    return "artifact";
+}
+
+function DirectMedia({ message }: { message: Message }) {
+    if (!message.imageUrl && !message.audioUrl && !message.videoUrl) return null;
+    return (
+        <div className="mb-2 space-y-2">
+            {message.imageUrl && (
+                <SharedStreamMedia kind="image" url={message.imageUrl} alt="Generated" partial={message.partialImage} />
+            )}
+            {message.audioUrl && <SharedStreamMedia kind="audio" url={message.audioUrl} />}
+            {message.videoUrl && <SharedStreamMedia kind="video" url={message.videoUrl} />}
+        </div>
+    );
+}
+
+function PendingMedia({
+    type,
+    status,
+}: {
+    type: "image" | "audio" | "video";
+    status?: string;
+}) {
+    const icon = type === "image"
+        ? <ImageIcon className="w-8 h-8" />
+        : type === "audio"
+            ? <Music className="w-8 h-8" />
+            : <Video className="w-8 h-8" />;
+    const label = status || (type === "image" ? "Generating image" : type === "audio" ? "Generating audio" : "Generating video");
+    return (
+        <div className={cn(
+            "relative overflow-hidden rounded-lg bg-zinc-900/80",
+            type === "image" ? "aspect-square" : type === "video" ? "aspect-video" : "h-16",
+            type === "audio" ? "w-full" : "w-64",
+        )}>
+            <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/10 via-fuchsia-500/10 to-cyan-500/10 animate-pulse" />
+            <div className="absolute inset-0 -translate-x-full animate-[shimmer_2s_infinite] bg-gradient-to-r from-transparent via-white/5 to-transparent" />
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-zinc-400">
+                <div className="relative">
+                    {icon}
+                    <Loader2 className="w-4 h-4 absolute -bottom-1 -right-1 animate-spin text-cyan-400" />
+                </div>
+                <span className="text-xs font-medium">{label}...</span>
+            </div>
+        </div>
+    );
+}
+
+class MessageBoundary extends React.Component<
+    { children: React.ReactNode },
+    { error: string | null }
+> {
+    state = { error: null };
+
+    static getDerivedStateFromError(error: unknown) {
+        return { error: error instanceof Error ? error.message : String(error) };
+    }
+
+    componentDidCatch(error: unknown) {
+        console.error("[chat] message render failed:", error);
+    }
+
+    render() {
+        if (!this.state.error) return this.props.children;
+        return (
+            <SharedStreamPocket summary="A message renderer failed, but the page stayed mounted.">
+                <SharedStreamNode title="Render error" kind="error" status="failed">
+                    <SharedStreamNotice tone="error" title="Render error">
+                        {this.state.error}
+                    </SharedStreamNotice>
+                </SharedStreamNode>
+            </SharedStreamPocket>
+        );
     }
 }
 
@@ -205,13 +1070,14 @@ function toolKindClass(kind?: string): string {
 // Chat Message Item
 // =============================================================================
 
-export interface ChatMessageItemProps {
-    message: ChatMessage;
+export interface MessageItemProps {
+    message: Message;
     variant?: "agent" | "workflow" | "playground";
     showActions?: boolean;
     onCopy?: (content: string) => void;
     onRetry?: (content: string) => void;
     onDelete?: (id: string) => void;
+    onPlanDecision?: (messageId: string, plan: Plan, decision: NonNullable<Plan["decision"]>, feedback?: string) => void;
     assistantAvatar?: React.ReactNode;
 }
 
@@ -236,23 +1102,33 @@ const messageVariantStyles = {
     },
 };
 
-function ChatMessageItemInner({
+function MessageItemInner({
     message,
     variant = "agent",
     showActions = true,
     onCopy,
     onRetry,
     onDelete,
+    onPlanDecision,
     assistantAvatar,
-}: ChatMessageItemProps) {
+}: MessageItemProps) {
     const styles = messageVariantStyles[variant];
     const isUser = message.role === "user";
+    const hasDirectMedia = Boolean(message.imageUrl || message.audioUrl || message.videoUrl);
+    const hasStreamMedia = Boolean(message.artifacts?.some((item) => artifactMediaKind(item.artifactType)));
     // Only treat assistant message as "loading" when generating non-text media.
     // Text "thinking" status is owned exclusively by the activityState bar (see line ~608),
     // so we don't render a second per-bubble spinner for plain text turns.
     const isLoadingMedia = !message.content
         && message.role === "assistant"
+        && !hasDirectMedia
+        && !hasStreamMedia
         && (message.type === "image" || message.type === "audio" || message.type === "video");
+    const foldedFailure = !message.content && Boolean(message.stream?.errors.length);
+    const hasText = message.content.trim().length > 0;
+    const shouldRenderText = message.type === "embedding"
+        || isLoadingMedia
+        || (isUser ? hasText || !hasDirectMedia : hasText && !foldedFailure);
 
     const getAssistantIcon = () => {
         if (assistantAvatar) return assistantAvatar;
@@ -305,59 +1181,35 @@ function ChatMessageItemInner({
                     </div>
                 )}
 
-                {message.imageUrl && (
-                    <img
-                        src={message.imageUrl}
-                        alt="Generated"
-                        className={cn(
-                            "rounded-lg max-w-full mb-2 transition-all duration-300",
-                            message.partialImage ? "blur-md saturate-75 scale-[1.01]" : "blur-0 saturate-100 scale-100",
-                        )}
+                {message.proposal && (
+                    <PlanReview
+                        messageId={message.id}
+                        plan={message.proposal}
+                        onPlanDecision={onPlanDecision}
                     />
                 )}
-                {message.audioUrl && <AudioBlock src={message.audioUrl} content={!isUser ? message.content : undefined} />}
-                {message.videoUrl && <video controls className="rounded-lg max-w-full mb-2"><source src={message.videoUrl} /></video>}
 
-                {!!message.reasoning && (
-                    <details className="mb-2 rounded-md border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs">
-                        <summary className="cursor-pointer font-mono text-amber-300">Thinking</summary>
-                        <pre className="mt-2 whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-amber-100/80">{message.reasoning}</pre>
-                    </details>
-                )}
+                {message.stream && <StreamTreeView stream={message.stream} />}
+                {message.stream && <Thinking stream={message.stream} />}
 
-                {!!message.progressEvents?.length && (
-                    <div className="mb-2 space-y-1 rounded-md border border-cyan-500/20 bg-cyan-500/5 px-3 py-2">
-                        {message.progressEvents.map((event) => (
-                            <div key={event.id} className="text-[11px] font-mono text-cyan-200/85">
-                                <span className="mr-2 uppercase tracking-wide text-cyan-400/70">{event.phase}</span>
-                                <span>{event.message}</span>
-                            </div>
-                        ))}
-                    </div>
-                )}
-
-                {!!message.toolCalls?.length && (
-                    <div className="mb-2 flex flex-wrap gap-1.5">
-                        {message.toolCalls.map((tool) => (
-                            <ToolBadge key={tool.id} tool={tool} />
-                        ))}
-                    </div>
-                )}
-
-                {message.audioUrl ? null : message.type === "embedding" ? (
+                {shouldRenderText && message.type === "embedding" ? (
                     <EmbeddingBlock content={message.content || "..."} />
                 ) : isLoadingMedia ? (
-                    <GenerationCanvas
+                    <PendingMedia
                         type={message.type as "image" | "audio" | "video"}
                         status={message.content || undefined}
                     />
-                ) : isUser ? (
-                    <p className="whitespace-pre-wrap text-sm">{message.content || "..."}</p>
+                ) : !shouldRenderText ? null : isUser ? (
+                    <p className="whitespace-pre-wrap text-sm">{message.content}</p>
                 ) : (
-                    <Suspense fallback={<p className="whitespace-pre-wrap text-sm">{message.content || "..."}</p>}>
-                        <LazyMarkdownRenderer content={message.content || "..."} />
+                    <Suspense fallback={<p className="whitespace-pre-wrap text-sm">{message.content}</p>}>
+                        <LazyMarkdownRenderer content={message.content} />
                     </Suspense>
                 )}
+
+                {hasDirectMedia && <DirectMedia message={message} />}
+
+                {!!message.artifacts?.length && <ArtifactBlock artifacts={message.artifacts} />}
             </div>
 
             {isUser && (
@@ -369,14 +1221,20 @@ function ChatMessageItemInner({
     );
 }
 
-export const ChatMessageItem = memo(ChatMessageItemInner);
+export const MessageItem = memo(function MessageItem(props: MessageItemProps) {
+    return (
+        <MessageBoundary>
+            <MessageItemInner {...props} />
+        </MessageBoundary>
+    );
+});
 
 // =============================================================================
 // Multimodal Canvas
 // =============================================================================
 
 export interface MultimodalCanvasProps {
-    messages: ChatMessage[];
+    messages: Message[];
     inputValue: string;
     onInputChange: (value: string) => void;
     onSend: () => void;
@@ -407,6 +1265,7 @@ export interface MultimodalCanvasProps {
     onCopyMessage?: (content: string) => void;
     onRetryMessage?: (content: string) => void;
     onDeleteMessage?: (id: string) => void;
+    onPlanDecision?: (messageId: string, plan: Plan, decision: NonNullable<Plan["decision"]>, feedback?: string) => void;
     onClearChat?: () => void;
     onKnowledgeUpload?: () => void;
     scrollContainerRef?: React.RefObject<HTMLDivElement | null>;
@@ -471,6 +1330,7 @@ export function MultimodalCanvas({
     onCopyMessage,
     onRetryMessage,
     onDeleteMessage,
+    onPlanDecision,
     onClearChat,
     onKnowledgeUpload,
     scrollContainerRef,
@@ -564,13 +1424,14 @@ export function MultimodalCanvas({
                     <div className="cm-chat__messages">
                         {messages.map((msg) => (
                             <React.Fragment key={msg.id}>
-                                <ChatMessageItem
+                                <MessageItem
                                     message={msg}
                                     variant={variant}
                                     showActions={showMessageActions}
                                     onCopy={onCopyMessage}
                                     onRetry={onRetryMessage}
                                     onDelete={onDeleteMessage}
+                                    onPlanDecision={onPlanDecision}
                                 />
                             </React.Fragment>
                         ))}
