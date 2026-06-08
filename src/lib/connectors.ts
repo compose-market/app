@@ -1,5 +1,5 @@
-export type CanonicalConnectorOrigin = "tools" | "onchain";
-type ConnectorOriginInput = CanonicalConnectorOrigin | "mcp" | "goat";
+export type CanonicalConnectorOrigin = "mcp" | "onchain";
+type ConnectorOriginInput = CanonicalConnectorOrigin | "tools" | "goat";
 
 export interface ConnectorBindingInput {
   registryId?: string;
@@ -16,8 +16,8 @@ export interface NormalizedConnectorBinding {
 }
 
 const ORIGIN_ALIASES: Record<ConnectorOriginInput, CanonicalConnectorOrigin> = {
-  tools: "tools",
-  mcp: "tools",
+  tools: "mcp",
+  mcp: "mcp",
   onchain: "onchain",
   goat: "onchain",
 };
@@ -46,7 +46,7 @@ export function normalizeConnectorBinding(
   input: string | ConnectorBindingInput,
   options: { defaultOrigin?: CanonicalConnectorOrigin } = {},
 ): NormalizedConnectorBinding {
-  const defaultOrigin = options.defaultOrigin ?? "tools";
+  const defaultOrigin = options.defaultOrigin ?? "mcp";
   const original = typeof input === "string" ? input : input.registryId || input.slug || input.id || "";
   const explicitOrigin = typeof input === "string" ? undefined : input.origin;
   const { prefix, slug } = splitPrefixed(original);

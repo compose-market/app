@@ -184,12 +184,13 @@ export interface AgentCard {
   x402Support: boolean;
   image?: string; // Standard NFT metadata field (gateway URL for display and explorer compatibility)
   avatar?: string; // Legacy field for backward compatibility with explorers
+  avatarUrl?: string;
   dnaHash: string;
   walletAddress: string; // Agent's derived wallet address - SINGLE SOURCE OF TRUTH
   walletTimestamp?: number; // Timestamp used in wallet derivation (backend needs this)
   chain: number;
   model: string;
-  framework?: "manowar"; // Agent runtime framework
+  framework?: string; // Agent runtime framework
   licensePrice: string; // USDC in smallest unit (6 decimals) - cost to nest into Workflow
   creatorFee?: number;
   licenses: number; // License supply cap (0 = infinite)

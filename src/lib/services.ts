@@ -79,7 +79,7 @@ export interface WorkflowRunResult {
 
 interface ServerSummary {
   slug: string;
-  origin: "tools" | "onchain";
+  origin: "mcp" | "onchain";
   name: string;
   namespace: string;
   description: string;
@@ -102,7 +102,7 @@ const DEFAULT_CONNECTOR_LIMIT = 50;
 
 async function fetchToolSummariesPage(limit = DEFAULT_CONNECTOR_LIMIT, offset = 0): Promise<ServerSummary[]> {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
-  const res = await fetch(`${CONNECTORS_URL}/tools?${params}`);
+  const res = await fetch(`${CONNECTORS_URL}/mcps?${params}`);
   if (!res.ok) {
     throw new Error(`Failed to fetch connectors: ${res.status}`);
   }
@@ -121,7 +121,7 @@ export async function getConnectors(): Promise<ConnectorInfo[]> {
 }
 
 export async function getConnectorTools(connectorId: string): Promise<ConnectorTool[]> {
-  const res = await fetch(`${CONNECTORS_URL}/tools/${encodeURIComponent(connectorId)}`);
+  const res = await fetch(`${CONNECTORS_URL}/mcps/${encodeURIComponent(connectorId)}`);
   if (!res.ok) {
     throw new Error(`Failed to fetch tools for ${connectorId}: ${res.status}`);
   }
@@ -138,7 +138,7 @@ export async function callConnectorTool(
   args: Record<string, unknown>
 ): Promise<{ success: boolean; content: unknown; raw: unknown }> {
   const res = await sdk.fetch(
-    `/api/tools/${encodeURIComponent(connectorId)}/execute/${encodeURIComponent(toolName)}`,
+    `/api/mcps/${encodeURIComponent(connectorId)}/execute/${encodeURIComponent(toolName)}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -190,7 +190,7 @@ export async function executeSpawnedServer(
   args: Record<string, unknown>
 ): Promise<PluginExecutionResult> {
   const res = await sdk.fetch(
-    `/api/tools/${encodeURIComponent(slug)}/execute/${encodeURIComponent(tool)}`,
+    `/api/mcps/${encodeURIComponent(slug)}/execute/${encodeURIComponent(tool)}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -211,7 +211,7 @@ export async function executeSpawnedServer(
 export async function fetchToolsConnectorTools(
   serverSlug: string
 ): Promise<{ name: string; description?: string; inputSchema?: Record<string, unknown> }[]> {
-  const res = await fetch(`${CONNECTORS_URL}/tools/${encodeURIComponent(serverSlug)}`);
+  const res = await fetch(`${CONNECTORS_URL}/mcps/${encodeURIComponent(serverSlug)}`);
   if (!res.ok) {
     const data = await res.json().catch(() => ({ error: "Unknown error" }));
     throw new Error(data.error || `Failed to fetch tools: ${res.status}`);
@@ -222,7 +222,7 @@ export async function fetchToolsConnectorTools(
 
 export async function fetchRemoteToolsConnectorTools(serverSlug: string): Promise<ConnectorTool[]> {
   try {
-    const res = await fetch(`${CONNECTORS_URL}/tools/${encodeURIComponent(serverSlug)}`);
+    const res = await fetch(`${CONNECTORS_URL}/mcps/${encodeURIComponent(serverSlug)}`);
     if (!res.ok) {
       console.warn(`Failed to fetch tools for ${serverSlug}: ${res.status}`);
       return [];
@@ -246,7 +246,7 @@ export async function executeRegistryTool(
   args: Record<string, unknown>,
   _connectorId?: string
 ): Promise<PluginExecutionResult> {
-  const binding = normalizeConnectorBinding({ registryId, origin, slug }, { defaultOrigin: "tools" });
+  const binding = normalizeConnectorBinding({ registryId, origin, slug }, { defaultOrigin: "mcp" });
   if (binding.origin === "onchain") {
     const pluginId = binding.slug;
     return executeOnchainConnector(pluginId, tool, args);

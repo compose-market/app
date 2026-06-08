@@ -15,9 +15,14 @@ import {
   getContractAddressForChain,
 } from "./chains";
 import { keccak256, encodePacked, type Address } from "viem";
+import {
+  formatUsdcPrice,
+  weiToUsdc,
+} from "./performance/chains-data";
 
 // Re-export from chains.ts for backwards compatibility
 export { CONTRACT_ADDRESSES, getContractAddress, getContractAddressForChain };
+export { formatUsdcPrice, RFA_BOUNTY_LIMITS, weiToUsdc } from "./performance/chains-data";
 
 // =============================================================================
 // ABIs (Minimal - only functions we need on frontend)
@@ -761,21 +766,6 @@ export function usdcToWei(amount: number | string): bigint {
 }
 
 /**
- * Convert USDC wei to display amount
- */
-export function weiToUsdc(wei: bigint): string {
-  return (Number(wei) / 1_000_000).toFixed(6);
-}
-
-/**
- * Format price for display
- */
-export function formatUsdcPrice(wei: bigint): string {
-  const usdc = Number(wei) / 1_000_000;
-  return usdc < 0.01 ? `$${usdc.toFixed(4)}` : `$${usdc.toFixed(2)}`;
-}
-
-/**
  * Compute hash for external agent (used as originalAgentHash in Warp contract)
  * Creates a unique identifier for an agent from an external registry
  */
@@ -926,14 +916,3 @@ export function encodeSkillAsBytes32(skill: string): `0x${string}` {
     encodePacked(['string'], [skill.toLowerCase()])
   );
 }
-
-/**
- * RFA bounty constraints
- */
-export const RFA_BOUNTY_LIMITS = {
-  MIN_BOUNTY: 0.10, // $0.10 USDC minimum
-  MAX_BOUNTY: 1.00, // $1.00 USDC maximum
-  DEFAULT_BOUNTY: 0.50, // $0.50 USDC default
-  BASIC_BOUNTY: 0.10, // Basic form completion bounty
-  README_BONUS_MAX: 0.90, // Maximum README bonus
-} as const;
