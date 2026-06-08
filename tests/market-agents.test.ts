@@ -15,11 +15,28 @@ test("market agents tab uses the paged Agents API without legacy agent scans", (
   assert.doesNotMatch(agents, /useOnchainAgents/);
   assert.doesNotMatch(agents, /sdk\.directory\.agents\.list/);
   assert.match(agents, /useInfiniteQuery/);
-  assert.match(source, /\/agents\?/);
+  assert.match(source, /AGENTS_PATH\s*=\s*"\/agents"/);
   assert.match(agents, /cursor/);
   assert.match(agents, /q:/);
   assert.match(source, /params\.set\("sort", input\.sort\)/);
   assert.match(agents, /sort: q \? undefined : sort/);
   assert.doesNotMatch(agents, /sortedAgents/);
   assert.doesNotMatch(agents, /\.sort\(/);
+});
+
+test("default market agents path does not statically pull on-chain tab code", () => {
+  const source = readFileSync(resolve(root, "src/pages/market.tsx"), "utf8");
+  const card = readFileSync(resolve(root, "src/components/agent-card.tsx"), "utf8");
+
+  assert.doesNotMatch(source, /import\s+\{[^}]*useOnchainWorkflows[^}]*\}\s+from\s+"@\/hooks\/use-onchain"/);
+  assert.doesNotMatch(source, /import\s+\{[^}]*useOpenRFAs[^}]*\}\s+from\s+"@\/hooks\/use-onchain"/);
+  assert.doesNotMatch(source, /from\s+"@\/lib\/contracts"/);
+  assert.doesNotMatch(source, /from\s+"@\/lib\/chains"/);
+  assert.doesNotMatch(source, /import\s+\{[^}]*RFADetails[^}]*\}\s+from\s+"@\/components\/RFADetails"/);
+  assert.match(source, /import\("@\/hooks\/use-onchain"\)/);
+  assert.match(source, /React\.lazy\(\(\) =>\s*import\("@\/components\/RFADetails"\)/);
+
+  assert.doesNotMatch(card, /from\s+"@\/lib\/contracts"/);
+  assert.doesNotMatch(card, /from\s+"@\/hooks\/use-warp"/);
+  assert.match(card, /import\("@\/hooks\/use-warp"\)/);
 });
