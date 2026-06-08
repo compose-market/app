@@ -16,6 +16,7 @@ interface ImportMetaEnv {
   
   // Backend Services
   readonly VITE_CONNECTORS_URL?: string;
+  readonly VITE_PUBLIC_LOGO_DEV_PUBLISHABLE_KEY?: string;
 
   // Storage and knowledge
   readonly VITE_PINATA_JWT?: string;
