@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Check, ChevronDown, Clock, Copy, Key, Plus, Shield, Trash2, Wallet, Zap } from "lucide-react";
 import {
-  ComposeKeyDialogShell,
+  KeyDialogShell,
   SessionBudgetDialogShell,
   SessionIndicatorShell,
   SessionManageDialogShell,
@@ -30,7 +30,7 @@ interface SessionManageDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-interface ComposeKeyDialogProps {
+interface KeyDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
@@ -194,7 +194,7 @@ export function SessionIndicator({
         onOpenManage={() => setManageDialogOpen(true)}
       />
 
-      <ComposeKeyDialog open={keyDialogOpen} onOpenChange={setKeyDialogOpen} />
+      <KeyDialog open={keyDialogOpen} onOpenChange={setKeyDialogOpen} />
       <SessionManageDialog open={manageDialogOpen} onOpenChange={setManageDialogOpen} />
     </>
   );
@@ -315,7 +315,7 @@ function SessionManageDialog({ open, onOpenChange }: SessionManageDialogProps) {
         onClose={() => onOpenChange(false)}
         onCreateKey={() => setCreateDialogOpen(true)}
       />
-      <ComposeKeyDialog
+      <KeyDialog
         open={createDialogOpen}
         onOpenChange={(nextOpen) => {
           setCreateDialogOpen(nextOpen);
@@ -328,7 +328,7 @@ function SessionManageDialog({ open, onOpenChange }: SessionManageDialogProps) {
   );
 }
 
-function ComposeKeyDialog({ open, onOpenChange }: ComposeKeyDialogProps) {
+function KeyDialog({ open, onOpenChange }: KeyDialogProps) {
   const { session, ensureComposeKeyToken } = useSession();
   const { account } = useWalletAccount();
   const [isGenerating, setIsGenerating] = useState(false);
@@ -397,7 +397,7 @@ function ComposeKeyDialog({ open, onOpenChange }: ComposeKeyDialogProps) {
   };
 
   return (
-    <ComposeKeyDialogShell
+    <KeyDialogShell
       open={open}
       title="Generate API Key"
       subtitle="Create a key for external tools like Cursor or OpenClaw. Uses your current session budget."

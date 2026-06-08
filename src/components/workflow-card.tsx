@@ -12,12 +12,10 @@ import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Excerpt } from "@compose-market/theme/shell";
+import { WorkflowCard as WorkflowCardShell } from "@compose-market/theme/workflows";
 import {
-    Tooltip,
-    TooltipContent,
     TooltipProvider,
-    TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { getIpfsUrl } from "@/lib/pinata";
 import type { OnchainWorkflow, OnchainAgent } from "@/hooks/use-onchain";
@@ -196,7 +194,7 @@ export function WorkflowCard({ workflow, onCopyEndpoint }: WorkflowCardProps) {
                     </div>
 
                     {/* Agent List */}
-                    <ScrollArea className="cm-workflow-card__fold-body">
+                    <div className="cm-workflow-card__fold-body">
                         <div className="p-2 sm:p-3 space-y-2">
                             {agents.map((agent, idx) => {
                                 const avatarUrl = getAgentAvatarUrl(agent);
@@ -227,7 +225,7 @@ export function WorkflowCard({ workflow, onCopyEndpoint }: WorkflowCardProps) {
                                 );
                             })}
                         </div>
-                    </ScrollArea>
+                    </div>
                 </div>
             </TooltipProvider>
         );
@@ -238,195 +236,115 @@ export function WorkflowCard({ workflow, onCopyEndpoint }: WorkflowCardProps) {
     // =========================================================================
     return (
         <TooltipProvider>
-            <div className="cm-workflow-card cm-workflow-card--interactive">
-                {/* Banner */}
-                {bannerUrl ? (
-                    <div
-                        className="cm-workflow-card__banner"
-                        style={{ backgroundImage: `url(${bannerUrl})` }}
-                    />
-                ) : (
-                    <div className="cm-workflow-card__banner cm-workflow-card__banner--placeholder" />
+            <WorkflowCardShell
+                interactive
+                bannerSrc={bannerUrl}
+                title={workflow.title || `Workflow #${workflow.id}`}
+                titleIcon={<Layers />}
+                headerAction={(
+                    <button
+                        onClick={() => window.open(`${CHAIN_CONFIG[workflowChainId].explorer}/token/${getContractAddress("Workflow", workflowChainId)}?a=${workflow.id}`, "_blank")}
+                        className="text-muted-foreground hover:text-fuchsia-400 transition-colors shrink-0"
+                        aria-label="View on Explorer"
+                    >
+                        <ExternalLink className="w-4 h-4" />
+                    </button>
                 )}
-
-                <div className="cm-workflow-card__body">
-                    {/* Header: Title + Actions */}
-                    <div className="cm-workflow-card__header">
-                        <div className="cm-workflow-card__header-copy">
-                            <div className="cm-workflow-card__title-row">
-                                <Layers className="cm-workflow-card__icon" />
-                                <h3 className="cm-workflow-card__title">
-                                    {workflow.title || `Workflow #${workflow.id}`}
-                                </h3>
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <button
-                                            onClick={() => window.open(`${CHAIN_CONFIG[workflowChainId].explorer}/token/${getContractAddress("Workflow", workflowChainId)}?a=${workflow.id}`, "_blank")}
-                                            className="text-muted-foreground hover:text-fuchsia-400 transition-colors shrink-0"
-                                        >
-                                            <ExternalLink className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                                        </button>
-                                    </TooltipTrigger>
-                                    <TooltipContent>View on Explorer</TooltipContent>
-                                </Tooltip>
-                            </div>
-                            <p className="cm-workflow-card__description">
-                                {workflow.description || "No description available"}
-                            </p>
-                        </div>
-                    </div>
-
-                    {/* Badges */}
-                    <div className="cm-workflow-card__badges">
+                description={(
+                    <Excerpt
+                        title={workflow.title || `Workflow #${workflow.id}`}
+                        text={workflow.description || "No description available"}
+                        lines={3}
+                    >
+                        {workflow.description || "No description available"}
+                    </Excerpt>
+                )}
+                badges={(
+                    <>
                         {workflow.hasActiveRfa && (
-                            <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30 text-[10px] sm:text-xs">
-                                <AlertTriangle className="w-2.5 h-2.5 sm:w-3 sm:h-3 mr-0.5 sm:mr-1" />
+                            <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30 text-xs">
+                                <AlertTriangle className="w-3 h-3 mr-1" />
                                 Active RFA
                             </Badge>
                         )}
                         {workflow.leaseEnabled && (
-                            <Badge className="bg-cyan-500/20 text-cyan-400 border-cyan-500/30 text-[10px] sm:text-xs">
-                                <Clock className="w-2.5 h-2.5 sm:w-3 sm:h-3 mr-0.5 sm:mr-1" />
+                            <Badge className="bg-cyan-500/20 text-cyan-400 border-cyan-500/30 text-xs">
+                                <Clock className="w-3 h-3 mr-1" />
                                 Leasable
                             </Badge>
                         )}
-                    </div>
-
-                    {/* Stats Row */}
-                    <div className="cm-workflow-card__stats">
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <div className="cm-workflow-card__stat">
-                                    <DollarSign className="cm-workflow-card__stat-icon" style={{ color: "hsl(var(--chart-2))" }} />
-                                    <p className="cm-workflow-card__stat-value" style={{ color: "hsl(var(--chart-2))" }}>${formatPrice(workflow.totalPrice)}</p>
-                                </div>
-                            </TooltipTrigger>
-                            <TooltipContent>Total Workflow Price</TooltipContent>
-                        </Tooltip>
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <div className="cm-workflow-card__stat">
-                                    <Package className="cm-workflow-card__stat-icon" style={{ color: "hsl(var(--primary))" }} />
-                                    <p className="cm-workflow-card__stat-value" style={{ color: "hsl(var(--primary))" }}>{unitsDisplay}</p>
-                                </div>
-                            </TooltipTrigger>
-                            <TooltipContent>Available Units</TooltipContent>
-                        </Tooltip>
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <div className="cm-workflow-card__stat">
-                                    <Bot className="cm-workflow-card__stat-icon" style={{ color: "hsl(var(--accent))" }} />
-                                    <p className="cm-workflow-card__stat-value" style={{ color: "hsl(var(--accent))" }}>{agents.length}</p>
-                                </div>
-                            </TooltipTrigger>
-                            <TooltipContent>Agents in Workflow</TooltipContent>
-                        </Tooltip>
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <div className="cm-workflow-card__stat">
-                                    <Globe className="cm-workflow-card__stat-icon" style={{ color: "hsl(var(--primary))" }} />
-                                    <p className="cm-workflow-card__stat-value" style={{ color: "hsl(var(--primary))" }}>{chainAbbr}</p>
-                                </div>
-                            </TooltipTrigger>
-                            <TooltipContent>{chainInfo.name}</TooltipContent>
-                        </Tooltip>
-                    </div>
-
-                    {/* Coordinator Model */}
-                    {workflow.hasCoordinator && workflow.coordinatorModel && (
-                        <div className="cm-workflow-card__coordinator">
-                            <Cpu className="cm-workflow-card__coordinator-icon" />
-                            <div className="cm-workflow-card__coordinator-copy">
-                                <span className="cm-workflow-card__coordinator-label">Coordinator</span>
-                                <span className="cm-workflow-card__coordinator-value" title={workflow.coordinatorModel}>
-                                    {workflow.coordinatorModel}
-                                </span>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Agents fold section */}
-                    {agents.length > 0 && (
-                        <div className="cm-workflow-card__agents">
-                            <button
-                                onClick={() => setCardView("agents")}
-                                className="cm-workflow-card__agents-header"
+                    </>
+                )}
+                stats={[
+                    { value: `$${formatPrice(workflow.totalPrice)}`, icon: <DollarSign />, tone: "fuchsia", tooltip: "Total Workflow Price" },
+                    { value: unitsDisplay, icon: <Package />, tone: "cyan", tooltip: "Available Units" },
+                    { value: String(agents.length), icon: <Bot />, tone: "fuchsia", tooltip: "Agents in Workflow" },
+                    { value: chainAbbr, icon: <Globe />, tone: "cyan", tooltip: chainInfo.name },
+                ]}
+                coordinatorIcon={<Cpu />}
+                coordinatorValue={workflow.hasCoordinator ? workflow.coordinatorModel : undefined}
+                agentsCount={agents.length}
+                agentsIcon={<Bot />}
+                onAgentsFold={() => setCardView("agents")}
+                agentsFoldChevron={<ChevronRight className="w-4 h-4 text-muted-foreground" />}
+                agentsBadges={(
+                    <>
+                        {agents.map((agent, idx) => (
+                            <Badge
+                                key={idx}
+                                variant="outline"
+                                className="text-xs px-2 py-0.5 border-cyan-500/30 text-cyan-400 cursor-default shrink-0"
                             >
-                                <div className="cm-workflow-card__agents-label">
-                                    <Bot className="cm-workflow-card__agents-label-icon" />
-                                    <span className="cm-workflow-card__agents-label-text">Agents ({agents.length})</span>
-                                </div>
-                                <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                            </button>
-                            <div className="cm-workflow-card__agents-badges">
-                                {agents.map((agent, idx) => (
-                                    <Badge
-                                        key={idx}
-                                        variant="outline"
-                                        className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 border-cyan-500/30 text-cyan-400 cursor-default shrink-0"
-                                    >
-                                        {agent.name || `Agent ${idx + 1}`}
-                                    </Badge>
-                                ))}
-                            </div>
+                                {agent.name || `Agent ${idx + 1}`}
+                            </Badge>
+                        ))}
+                    </>
+                )}
+                leaseSlot={workflow.leaseEnabled ? (
+                    <div className="cm-workflow-card__lease">
+                        <div className="cm-workflow-card__lease-item">
+                            <Clock className="w-4 h-4 text-cyan-400" />
+                            <span className="cm-workflow-card__lease-label">Duration:</span>
+                            <span className="cm-workflow-card__lease-value text-cyan-400">{workflow.leaseDuration} days</span>
                         </div>
-                    )}
-
-                    {/* Lease Info */}
-                    {workflow.leaseEnabled && (
-                        <div className="cm-workflow-card__lease">
-                            <div className="cm-workflow-card__lease-item">
-                                <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-cyan-400" />
-                                <span className="cm-workflow-card__lease-label">Duration:</span>
-                                <span className="cm-workflow-card__lease-value text-cyan-400">{workflow.leaseDuration} days</span>
-                            </div>
-                            <div className="cm-workflow-card__lease-item">
-                                <Percent className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-green-400" />
-                                <span className="cm-workflow-card__lease-label">Creator:</span>
-                                <span className="cm-workflow-card__lease-value text-green-400">{workflow.leasePercent}%</span>
-                            </div>
+                        <div className="cm-workflow-card__lease-item">
+                            <Percent className="w-4 h-4 text-green-400" />
+                            <span className="cm-workflow-card__lease-label">Creator:</span>
+                            <span className="cm-workflow-card__lease-value text-green-400">{workflow.leasePercent}%</span>
                         </div>
-                    )}
-
-                    {/* API Endpoint */}
-                    {apiEndpoint && (
-                        <div className="cm-workflow-card__endpoint-section">
-                            <div className="cm-workflow-card__endpoint-header">
-                                <Globe className="cm-workflow-card__endpoint-header-icon" />
-                                <span className="cm-workflow-card__endpoint-label">A2A Endpoint</span>
-                            </div>
-                            <div className="cm-workflow-card__endpoint-row">
-                                <code className="cm-workflow-card__endpoint-code">{apiEndpoint}</code>
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={handleCopyEndpoint}
-                                            className="h-5 w-5 sm:h-6 sm:w-6 p-0 hover:text-fuchsia-400"
-                                        >
-                                            <Copy className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                                        </Button>
-                                    </TooltipTrigger>
-                                    <TooltipContent>Copy Endpoint</TooltipContent>
-                                </Tooltip>
-                            </div>
-                            {/* Creator */}
-                            <div className="cm-workflow-card__creator">
-                                <span>Creator:</span>
-                                <a
-                                    href={`${CHAIN_CONFIG[workflowChainId].explorer}/address/${workflow.creator}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="cm-workflow-card__creator-value"
-                                >
-                                    {`${workflow.creator.slice(0, 6)}...${workflow.creator.slice(-4)}`}
-                                </a>
-                            </div>
+                    </div>
+                ) : undefined}
+                endpointSlot={apiEndpoint ? (
+                    <div className="cm-workflow-card__endpoint-section">
+                        <div className="cm-workflow-card__endpoint-header">
+                            <Globe className="cm-workflow-card__endpoint-header-icon" />
+                            <span className="cm-workflow-card__endpoint-label">A2A Endpoint</span>
                         </div>
-                    )}
-                </div>
-            </div>
+                        <div className="cm-workflow-card__endpoint-row">
+                            <code className="cm-workflow-card__endpoint-code">{apiEndpoint}</code>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={handleCopyEndpoint}
+                                className="h-6 w-6 p-0 hover:text-fuchsia-400"
+                            >
+                                <Copy className="w-3.5 h-3.5" />
+                            </Button>
+                        </div>
+                        <div className="cm-workflow-card__creator">
+                            <span>Creator:</span>
+                            <a
+                                href={`${CHAIN_CONFIG[workflowChainId].explorer}/address/${workflow.creator}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="cm-workflow-card__creator-value"
+                            >
+                                {`${workflow.creator.slice(0, 6)}...${workflow.creator.slice(-4)}`}
+                            </a>
+                        </div>
+                    </div>
+                ) : undefined}
+            />
         </TooltipProvider>
     );
 }

@@ -60,11 +60,26 @@ type ReceiptsSdk = typeof sdk & {
     };
 };
 
+function formatUsd(value: number): string {
+    if (value >= 1) return `$${value.toFixed(2)}`;
+    if (value >= 0.01) return `$${value.toFixed(4)}`;
+    return `$${value.toFixed(6)}`;
+}
+
 function formatWeiUsd(wei: string | undefined): string | null {
     if (!wei) return null;
     const n = Number(wei);
     if (!Number.isFinite(n) || n < 0) return null;
-    return `$${(n / 1_000_000).toFixed(4)}`;
+    return formatUsd(n / 1_000_000);
+}
+
+function formatReceiptUsd(total: string | undefined): string | null {
+    if (!total) return null;
+    if (total.includes("$")) return total;
+    const match = total.match(/([0-9]+(?:\.[0-9]+)?)/);
+    if (!match) return null;
+    const amount = Number(match[1]);
+    return Number.isFinite(amount) ? formatUsd(amount) : null;
 }
 
 function shortTx(hash: string | undefined): string | null {
@@ -73,7 +88,7 @@ function shortTx(hash: string | undefined): string | null {
 }
 
 function receiptTotal(receipt: ReceiptRecord | null): string | null {
-    return receipt?.bills?.[0]?.total ?? null;
+    return formatReceiptUsd(receipt?.bills?.[0]?.total);
 }
 
 function receiptTx(receipt: ReceiptRecord | null): string | undefined {
@@ -142,7 +157,7 @@ export function CostReceiptIndicator({ className }: { className?: string }) {
     return (
         <div
             className={`inline-flex items-center gap-1.5 rounded-sm border border-emerald-500/30 bg-emerald-500/5 px-2 py-1 text-[10px] font-mono text-emerald-300 ${className ?? ""}`}
-            title={`Session total ${usd ?? "0.000000 USDC"}${count ? ` across ${count} receipt${count === 1 ? "" : "s"}` : ""}${receipt?.runId ? ` · run ${receipt.runId}` : ""}${tx ? ` · tx ${receiptTx(receipt)}` : ""}`}
+            title={`Session total ${usd ?? "$0.000000"}${count ? ` across ${count} receipt${count === 1 ? "" : "s"}` : ""}${receipt?.runId ? ` · run ${receipt.runId}` : ""}${tx ? ` · tx ${receiptTx(receipt)}` : ""}`}
         >
             <ReceiptIcon className="h-3 w-3" aria-hidden="true" />
             <span>{usd ?? "—"}</span>
