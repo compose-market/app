@@ -54,7 +54,7 @@ export function ConnectorDetailDialog({
         setTestResult(null);
         setDynamicTools([]);
 
-        if (server.origin === "tools" && (!server.tools || server.tools.length === 0)) {
+        if (server.origin === "mcp" && (!server.tools || server.tools.length === 0)) {
             fetchToolsConnectorTools(server.slug)
                 .then((tools) => {
                     setDynamicTools(tools);

@@ -52,7 +52,7 @@ export function ConnectorPicker({ onSelect }: ConnectorPickerProps) {
 
     const getOriginBadge = (origin: string) => {
         switch (origin) {
-            case "tools": return <Badge variant="secondary" className="text-[8px] h-4 px-1">Tools</Badge>;
+            case "mcp": return <Badge variant="secondary" className="text-[8px] h-4 px-1">Tools</Badge>;
             case "onchain": return <Badge variant="outline" className="text-[8px] h-4 px-1 border-green-500/50 text-green-400">Onchain</Badge>;
             case "eliza": return <Badge variant="outline" className="text-[8px] h-4 px-1 border-fuchsia-500/50 text-fuchsia-400">Eliza</Badge>;
             default: return null;
