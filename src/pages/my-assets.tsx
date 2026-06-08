@@ -1,11 +1,21 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useRef, useDeferredValue } from "react";
 import { Link, useLocation } from "wouter";
 import { usePostHog } from "@posthog/react";
+import { useInfiniteQuery } from "@tanstack/react-query";
+import type { DirectoryAgent } from "@compose-market/sdk";
+import { Excerpt } from "@compose-market/theme/shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Bot,
   Layers,
@@ -24,29 +34,171 @@ import {
   CheckCircle,
   FileSearch,
   Loader2,
+  RefreshCw,
+  Search,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useActiveAccount, useSendTransaction } from "thirdweb/react";
 import { prepareContractCall } from "thirdweb";
-import { useAgentsByCreator, useWorkflowsByCreator, useRFAsByPublisher, type OnchainAgent, type OnchainWorkflow, type OnchainRFA } from "@/hooks/use-onchain";
+import { useWorkflowsByCreator, useRFAsByPublisher, type OnchainAgent, type OnchainWorkflow, type OnchainRFA } from "@/hooks/use-onchain";
 import { getIpfsUrl } from "@/lib/pinata";
 import { CHAIN_CONFIG } from "@/lib/chains";
-import { useChain } from "@/contexts/ChainContext";
-import { getContractAddress, getRFAContract } from "@/lib/contracts";
+import { formatUsdcPrice, getContractAddress, getRFAContract, weiToUsdc } from "@/lib/contracts";
+import { sdk } from "@/lib/sdk";
+import { useTabs } from "@/hooks/use-tabs";
 import { RFADetails } from "@/components/RFADetails";
 import { ShareSuccessDialog } from "@/components/share-dialog";
 import { getMintSuccessForShare, clearMintSuccessShare, type MintShareData } from "@/lib/share";
 import { AgentCard as SharedAgentCard } from "@/components/agent-card";
 
+const AGENTS_LIMIT = 24;
+
+type AgentSort = "newest" | "price-low" | "price-high";
+type WorkflowSort = "newest" | "price-low" | "price-high";
+type AssetTab = "agents" | "workflows" | "rfas";
+
+type TabStatus = {
+  count: string;
+  busy: boolean;
+};
+
+type AgentPage = {
+  agents: DirectoryAgent[];
+  total: number;
+  count?: number;
+  nextCursor?: string | null;
+  hasMore?: boolean;
+};
+
+function amount(value: string | undefined): bigint {
+  const raw = value?.trim();
+  if (!raw) return 0n;
+  if (/^\d+$/.test(raw)) return BigInt(raw);
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? BigInt(Math.round(parsed * 1_000_000)) : 0n;
+}
+
+function finite(value: unknown): number | null {
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function agent(card: DirectoryAgent): OnchainAgent {
+  const cost = amount(card.licensePrice);
+  const licenses = finite(card.licenses) ?? 0;
+  const minted = finite((card as { licensesMinted?: unknown }).licensesMinted) ?? 0;
+  const available = finite(card.licensesAvailable) ?? (licenses === 0 ? Infinity : Math.max(0, licenses - minted));
+  const creatorFee = finite(card.creatorFee) ?? 1;
+
+  return {
+    id: finite(card.agentId) ?? 0,
+    dnaHash: card.dnaHash || "",
+    walletAddress: card.walletAddress || "",
+    licenses,
+    licensesMinted: minted,
+    licensesAvailable: available,
+    licensePrice: weiToUsdc(cost),
+    licensePriceFormatted: formatUsdcPrice(cost),
+    creatorFee,
+    creator: card.creator || "",
+    cloneable: Boolean(card.cloneable),
+    isClone: Boolean(card.isClone),
+    parentAgentId: finite(card.parentAgentId) ?? 0,
+    agentCardUri: card.cid ? `ipfs://${card.cid}` : "",
+    metadata: {
+      ...card,
+      creatorFee,
+      x402: true,
+    } as OnchainAgent["metadata"],
+    isWarped: false,
+  };
+}
+
+async function page(input: { creator?: string; cursor?: string; q?: string; sort?: AgentSort; signal?: AbortSignal }): Promise<AgentPage> {
+  const params = new URLSearchParams({ limit: String(AGENTS_LIMIT) });
+  if (input.creator) params.set("creator", input.creator);
+  if (input.cursor) params.set("cursor", input.cursor);
+  if (input.q) params.set("q", input.q);
+  if (!input.q && input.sort) params.set("sort", input.sort);
+  const response = await sdk.fetch(`/agents?${params.toString()}`, {
+    headers: { Accept: "application/json" },
+    signal: input.signal,
+  });
+  if (!response.ok) {
+    throw new Error(`Agent lookup failed with status ${response.status}`);
+  }
+  return await response.json() as AgentPage;
+}
+
 export default function MyAssetsPage() {
   const { toast } = useToast();
   const account = useActiveAccount();
-  const { paymentChainId } = useChain();
-  const [activeTab, setActiveTab] = useState("agents");
+  const [activeTab, setActiveTab] = useTabs("my-assets", "agents");
+  const tab: AssetTab = activeTab === "workflows" || activeTab === "rfas" ? activeTab : "agents";
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const deferredQuery = useDeferredValue(searchQuery);
+  const [sort, setSort] = useState<AgentSort>("newest");
+  const [workflowSort, setWorkflowSort] = useState<WorkflowSort>("newest");
+  const refreshers = useRef<Partial<Record<AssetTab, () => void>>>({});
+  const [status, setStatus] = useState<Record<AssetTab, TabStatus>>({
+    agents: { count: "0/0 agents", busy: false },
+    workflows: { count: "0 workflows", busy: false },
+    rfas: { count: "0 RFAs", busy: false },
+  });
+  const owner = account?.address;
+  const q = deferredQuery.trim();
 
-  const { data: agents, isLoading: isLoadingAgents } = useAgentsByCreator(account?.address);
-  const { data: workflows, isLoading: isLoadingWorkflows } = useWorkflowsByCreator(account?.address);
-  const { data: rfas, isLoading: isLoadingRFAs, refetch: refetchRFAs } = useRFAsByPublisher(account?.address);
+  const onStatus = useMemo(() => {
+    return (key: AssetTab, next: TabStatus & { refresh?: () => void }) => {
+      refreshers.current[key] = next.refresh;
+      setStatus((current) => {
+        const previous = current[key];
+        if (previous.count === next.count && previous.busy === next.busy) return current;
+        return { ...current, [key]: { count: next.count, busy: next.busy } };
+      });
+    };
+  }, []);
+
+  const {
+    data: agentData,
+    isLoading: isLoadingAgents,
+    isFetchingNextPage,
+    hasNextPage,
+    error: agentError,
+    refetch: refetchAgents,
+    fetchNextPage,
+  } = useInfiniteQuery({
+    queryKey: ["agents", "my-assets", owner?.toLowerCase() || "", q, q ? "relevance" : sort],
+    queryFn: async ({ pageParam, signal }) => {
+      const cursor = typeof pageParam === "string" ? pageParam : undefined;
+      return await page({ creator: owner, cursor, q: q || undefined, sort: q ? undefined : sort, signal });
+    },
+    initialPageParam: null as string | null,
+    getNextPageParam: (page) => page.hasMore ? page.nextCursor ?? undefined : undefined,
+    enabled: Boolean(owner),
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+    retry: 1,
+  });
+
+  const agents = useMemo(() => {
+    const seen = new Set<string>();
+    const out: OnchainAgent[] = [];
+    for (const current of agentData?.pages || []) {
+      for (const card of current.agents || []) {
+        if (!card.walletAddress) continue;
+        const key = card.walletAddress.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(agent(card));
+      }
+    }
+    return out;
+  }, [agentData]);
+
+  const agentCount = agentData?.pages[0]?.total ?? agents.length;
+  const currentStatus = status[tab];
 
   // RFA detail dialog state
   const [selectedRfaId, setSelectedRfaId] = useState<number | null>(null);
@@ -64,6 +216,15 @@ export default function MyAssetsPage() {
     }
   }, []);
 
+  useEffect(() => {
+    refreshers.current = {};
+    setStatus({
+      agents: { count: "0/0 agents", busy: false },
+      workflows: { count: "0 workflows", busy: false },
+      rfas: { count: "0 RFAs", busy: false },
+    });
+  }, [owner]);
+
   const handleCloseShareDialog = (open: boolean) => {
     setShowShareDialog(open);
     if (!open) {
@@ -75,6 +236,10 @@ export default function MyAssetsPage() {
   const copyAddress = (address: string) => {
     navigator.clipboard.writeText(address);
     toast({ title: "Address copied!" });
+  };
+
+  const handleRefresh = () => {
+    refreshers.current[tab]?.();
   };
 
   if (!account) {
@@ -95,7 +260,7 @@ export default function MyAssetsPage() {
             </div>
 
             <Card className="glass-panel border-primary/20">
-              <CardContent className="p-8 sm:p-12 text-center space-y-3 sm:space-y-4">
+              <CardContent className="p-6 sm:p-8 text-center space-y-3">
                 <Shield className="w-12 h-12 sm:w-16 sm:h-16 mx-auto text-muted-foreground/50" />
                 <h2 className="text-lg sm:text-xl font-display text-foreground">Sign In Required</h2>
                 <p className="text-muted-foreground font-mono text-xs sm:text-sm max-w-md mx-auto">
@@ -109,257 +274,534 @@ export default function MyAssetsPage() {
     );
   }
 
-  const agentCount = agents?.length || 0;
-  const workflowCount = workflows?.length || 0;
-  const openRfaCount = rfas?.filter(r => r.status === 'Open').length || 0;
-
   return (
-    <div className="cm-web-page">
-      <div className="cm-web-page__canvas cm-workspace-canvas--fade">
-        <div className="cm-web-page__body cm-web-page__body--wide cm-page-stack cm-page-stack--simple">
-      {/* Header */}
-      <div className="space-y-3 sm:space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <h1 className="cm-page-header__title">
-              <span className="text-cyan-500 mr-2">//</span>
-              MY ASSETS
-            </h1>
-            <p className="cm-page-header__subtitle mt-1">
-              Manage your on-chain Agents and Workflows.
-            </p>
-          </div>
-          <Link href="/create-agent" className="w-full sm:w-auto">
-            <Button className="w-full sm:w-auto bg-cyan-500 text-black hover:bg-cyan-400 font-bold font-mono text-sm h-9 sm:h-10">
-              <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
+    <div className="cm-market-workspace">
+      <div className="cm-page-header">
+        <div className="cm-page-header__title-row">
+          <h1 className="cm-page-header__title">
+            <span className="text-cyan-500 mr-2">//</span>
+            MY ASSETS
+          </h1>
+          <div className="cm-page-header__rule hidden md:block"></div>
+          <Link href="/create-agent" className="ml-auto w-full sm:w-auto">
+            <Button className="w-full sm:w-auto bg-cyan-500 text-black hover:bg-cyan-400 font-bold font-mono text-sm h-9">
+              <Plus className="w-3.5 h-3.5 mr-1.5" />
               CREATE AGENT
             </Button>
           </Link>
         </div>
-
-        {/* Account Info */}
-        <div className="cm-control-rail">
-          <div className="flex items-center gap-2.5 sm:gap-3 flex-1">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-cyan-500/20 flex items-center justify-center shrink-0">
-              <Activity className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-400" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="font-mono text-xs sm:text-sm text-foreground truncate">
-                {account.address.slice(0, 6)}...{account.address.slice(-4)}
-              </p>
-              <p className="text-[10px] sm:text-xs text-muted-foreground">{CHAIN_CONFIG[paymentChainId]?.name || 'testnet'}</p>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
+        <div className="cm-page-header__subtitle-row">
+          <p className="cm-page-header__subtitle">
+            All your agents, workflows, and RFAs at a glance.
+          </p>
+          <div className="cm-page-header__meta">
+            <button
+              type="button"
               onClick={() => copyAddress(account.address)}
-              className="text-muted-foreground hover:text-cyan-400 h-8 w-8"
+              className="cm-page-header__account"
             >
-              <Copy className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-            </Button>
-          </div>
-          <div className="flex items-center justify-center sm:justify-end gap-4 sm:gap-6 text-xs sm:text-sm font-mono sm:ml-auto">
-            <div className="text-center">
-              <p className="text-cyan-400 font-bold">{agentCount}</p>
-              <p className="text-muted-foreground text-[10px] sm:text-xs">Agents</p>
-            </div>
-            <div className="text-center">
-              <p className="text-fuchsia-400 font-bold">{workflowCount}</p>
-              <p className="text-muted-foreground text-[10px] sm:text-xs">Workflows</p>
-            </div>
+              <Activity className="w-3.5 h-3.5 text-cyan-400" />
+              <span>{account.address.slice(0, 6)}...{account.address.slice(-4)}</span>
+              <Copy className="w-3.5 h-3.5 text-muted-foreground" />
+            </button>
+            <Badge variant="outline" className="cm-page-header__metric">
+              {currentStatus.count}
+            </Badge>
           </div>
         </div>
       </div>
 
-      {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="cm-page-tabs">
-        <TabsList className="cm-shell-tab-strip w-full sm:w-auto">
-          <TabsTrigger
-            value="agents"
-            className="cm-shell-tab flex-1 sm:flex-none text-xs sm:text-sm px-3 sm:px-4"
-          >
-            <Bot className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
-            AGENTS ({agentCount})
-          </TabsTrigger>
-          <TabsTrigger
-            value="workflows"
-            className="cm-shell-tab flex-1 sm:flex-none text-xs sm:text-sm px-3 sm:px-4"
-          >
-            <Layers className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
-            WORKFLOWS ({workflowCount})
-          </TabsTrigger>
-          <TabsTrigger
-            value="rfas"
-            className="cm-shell-tab flex-1 sm:flex-none text-xs sm:text-sm px-3 sm:px-4"
-          >
-            <Award className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
-            RFAs ({openRfaCount})
-          </TabsTrigger>
-        </TabsList>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="cm-market-tabs w-full">
+        <div className="cm-control-rail cm-market-control-rail cm-market-control-rail--unified">
+          <TabsList className="cm-shell-tab-strip cm-market-control-rail__tabs">
+            <TabsTrigger value="agents" className="cm-shell-tab min-w-0">
+              <Bot className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">AGENTS</span>
+            </TabsTrigger>
+            <TabsTrigger value="workflows" className="cm-shell-tab min-w-0">
+              <Layers className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">WORKFLOWS</span>
+            </TabsTrigger>
+            <TabsTrigger value="rfas" className="cm-shell-tab min-w-0">
+              <Award className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">RFAs</span>
+            </TabsTrigger>
+          </TabsList>
+          <div className="cm-market-control-rail__middle">
+            <AssetSearch
+              open={searchOpen}
+              value={searchQuery}
+              onOpenChange={setSearchOpen}
+              onChange={setSearchQuery}
+            />
+          </div>
+          <div className="cm-market-control-rail__actions">
+            {tab === "agents" ? (
+              <Select value={sort} onValueChange={(value) => setSort(value as AgentSort)} disabled={Boolean(q)}>
+                <SelectTrigger className="w-[170px] bg-background/50 border-primary/20 h-9 text-sm">
+                  <SelectValue placeholder="Sort by" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="newest">Newest</SelectItem>
+                  <SelectItem value="price-low">Price: Low to High</SelectItem>
+                  <SelectItem value="price-high">Price: High to Low</SelectItem>
+                </SelectContent>
+              </Select>
+            ) : null}
+            {tab === "workflows" ? (
+              <Select value={workflowSort} onValueChange={(value) => setWorkflowSort(value as WorkflowSort)}>
+                <SelectTrigger className="w-[170px] bg-background/50 border-primary/20 h-9 text-sm">
+                  <SelectValue placeholder="Sort by" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="newest">Newest</SelectItem>
+                  <SelectItem value="price-low">Price: Low to High</SelectItem>
+                  <SelectItem value="price-high">Price: High to Low</SelectItem>
+                </SelectContent>
+              </Select>
+            ) : null}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRefresh}
+              className="border-primary/20 h-9 w-9"
+            >
+              <RefreshCw className={`w-4 h-4 ${currentStatus.busy ? "animate-spin" : ""}`} />
+            </Button>
+          </div>
+        </div>
 
-        {/* Agents Tab */}
-        <TabsContent value="agents" className="cm-page-tab-panel">
-          {isLoadingAgents && (
-            <div className="cm-card-grid cm-card-grid--2col">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <Card key={i} className="cm-surface-card">
-                  <CardContent className="p-4 sm:p-5 space-y-3 sm:space-y-4">
-                    <div className="flex items-start gap-2.5 sm:gap-3">
-                      <Skeleton className="w-10 h-10 sm:w-12 sm:h-12 rounded-full shrink-0" />
-                      <div className="flex-1 space-y-2 min-w-0">
-                        <Skeleton className="h-4 sm:h-5 w-3/4" />
-                        <Skeleton className="h-3 w-1/2" />
-                      </div>
-                    </div>
-                    <Skeleton className="h-14 sm:h-16 w-full" />
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
-
-          {!isLoadingAgents && agents && agents.length > 0 && (
-            <div className="cm-card-grid cm-card-grid--2col">
-              {agents.map((agent) => (
-                <AgentAssetCard key={agent.walletAddress || agent.id} agent={agent} />
-              ))}
-            </div>
-          )}
-
-          {!isLoadingAgents && (!agents || agents.length === 0) && (
-            <Card className="cm-surface-card">
-              <CardContent className="p-8 sm:p-12 text-center space-y-3 sm:space-y-4">
-                <Bot className="w-12 h-12 sm:w-16 sm:h-16 mx-auto text-muted-foreground/50" />
-                <h3 className="text-base sm:text-lg font-display text-foreground">No Agents Yet</h3>
-                <p className="text-muted-foreground font-mono text-xs sm:text-sm max-w-md mx-auto">
-                  Create your first ERC8004 agent to start earning from AI workflows.
-                </p>
-                <Link href="/create-agent">
-                  <Button className="bg-cyan-500 text-black hover:bg-cyan-400 font-bold font-mono text-sm">
-                    <Plus className="w-4 h-4 mr-2" />
-                    CREATE AGENT
-                  </Button>
-                </Link>
-              </CardContent>
-            </Card>
-          )}
+        <TabsContent value="agents" className="cm-market-tab-panel cm-market-tab-panel--agents mt-0">
+          {activeTab === "agents" ? (
+            <AssetAgentsTab
+              agents={agents}
+              total={agentCount}
+              sort={sort}
+              isLoading={isLoadingAgents}
+              isFetchingNextPage={isFetchingNextPage}
+              hasNextPage={Boolean(hasNextPage)}
+              error={agentError instanceof Error ? agentError : null}
+              refetch={() => void refetchAgents()}
+              fetchNextPage={() => void fetchNextPage()}
+              searchQuery={deferredQuery}
+              onStatus={onStatus}
+            />
+          ) : null}
         </TabsContent>
 
-        {/* Workflows Tab */}
-        <TabsContent value="workflows" className="cm-page-tab-panel">
-          {isLoadingWorkflows && (
-            <div className="cm-card-grid cm-card-grid--2col">
-              {Array.from({ length: 2 }).map((_, i) => (
-                <Card key={i} className="cm-surface-card">
-                  <CardContent className="p-4 sm:p-5 space-y-3 sm:space-y-4">
-                    <Skeleton className="h-24 sm:h-32 w-full rounded-sm" />
-                    <Skeleton className="h-4 sm:h-5 w-3/4" />
-                    <Skeleton className="h-14 sm:h-16 w-full" />
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
-
-          {!isLoadingWorkflows && workflows && workflows.length > 0 && (
-            <div className="cm-card-grid cm-card-grid--2col">
-              {workflows.map((workflow) => (
-                <WorkflowAssetCard key={workflow.id} workflow={workflow} />
-              ))}
-            </div>
-          )}
-
-          {!isLoadingWorkflows && (!workflows || workflows.length === 0) && (
-            <Card className="cm-surface-card">
-              <CardContent className="p-8 sm:p-12 text-center space-y-3 sm:space-y-4">
-                <Layers className="w-12 h-12 sm:w-16 sm:h-16 mx-auto text-muted-foreground/50" />
-                <h3 className="text-base sm:text-lg font-display text-foreground">No Workflows Yet</h3>
-                <p className="text-muted-foreground font-mono text-xs sm:text-sm max-w-md mx-auto">
-                  Compose your first Workflow by combining multiple agents.
-                </p>
-                <Link href="/compose">
-                  <Button className="bg-fuchsia-500 text-white hover:bg-fuchsia-400 font-bold font-mono text-sm">
-                    <Layers className="w-4 h-4 mr-2" />
-                    START COMPOSING
-                  </Button>
-                </Link>
-              </CardContent>
-            </Card>
-          )}
+        <TabsContent value="workflows" className="cm-market-tab-panel cm-market-tab-panel--scroll mt-0">
+          {activeTab === "workflows" ? (
+            <WorkflowsTab
+              creator={account.address}
+              searchQuery={deferredQuery}
+              sort={workflowSort}
+              onStatus={onStatus}
+            />
+          ) : null}
         </TabsContent>
 
-        {/* RFAs Tab */}
-        <TabsContent value="rfas" className="cm-page-tab-panel">
-          {isLoadingRFAs && (
-            <div className="grid grid-cols-1 gap-3 sm:gap-4">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <Card key={i} className="cm-surface-card">
-                  <CardContent className="p-4 sm:p-5 space-y-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex-1 space-y-2">
-                        <Skeleton className="h-5 w-2/3" />
-                        <Skeleton className="h-3 w-full" />
-                      </div>
-                      <Skeleton className="h-8 w-24" />
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
-
-          {!isLoadingRFAs && rfas && rfas.length > 0 && (
-            <div className="space-y-3">
-              {rfas.map((rfa) => (
-                <RFAAssetCard
-                  key={rfa.id}
-                  rfa={rfa}
-                  onViewDetails={() => {
-                    setSelectedRfaId(rfa.id);
-                    setShowRFADetails(true);
-                  }}
-                  onRefresh={refetchRFAs}
-                />
-              ))}
-            </div>
-          )}
-
-          {!isLoadingRFAs && (!rfas || rfas.length === 0) && (
-            <Card className="cm-surface-card">
-              <CardContent className="p-8 sm:p-12 text-center space-y-3 sm:space-y-4">
-                <FileSearch className="w-12 h-12 sm:w-16 sm:h-16 mx-auto text-muted-foreground/50" />
-                <h3 className="text-base sm:text-lg font-display text-foreground">No RFAs Published</h3>
-                <p className="text-muted-foreground font-mono text-xs sm:text-sm max-w-md mx-auto">
-                  You haven't published any Request-For-Agent bounties yet. Create one from the Compose page.
-                </p>
-                <Link href="/compose">
-                  <Button className="bg-amber-500 text-black hover:bg-amber-400 font-bold font-mono text-sm">
-                    <Award className="w-4 h-4 mr-2" />
-                    GO TO COMPOSE
-                  </Button>
-                </Link>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* RFA Details Dialog */}
-          <RFADetails
-            rfaId={selectedRfaId}
-            open={showRFADetails}
-            onOpenChange={setShowRFADetails}
-          />
+        <TabsContent value="rfas" className="cm-market-tab-panel cm-market-tab-panel--scroll mt-0">
+          {activeTab === "rfas" ? (
+            <RFAsTab
+              publisher={account.address}
+              searchQuery={deferredQuery}
+              onStatus={onStatus}
+              onView={(id) => {
+                setSelectedRfaId(id);
+                setShowRFADetails(true);
+              }}
+            />
+          ) : null}
         </TabsContent>
       </Tabs>
 
-      {/* Share Success Dialog */}
       <ShareSuccessDialog
         open={showShareDialog}
         onOpenChange={handleCloseShareDialog}
         data={shareData}
       />
-        </div>
-      </div>
+
+      <RFADetails
+        rfaId={selectedRfaId}
+        open={showRFADetails}
+        onOpenChange={setShowRFADetails}
+      />
     </div>
+  );
+}
+
+function AssetSearch({
+  open,
+  value,
+  onOpenChange,
+  onChange,
+}: {
+  open: boolean;
+  value: string;
+  onOpenChange: (open: boolean) => void;
+  onChange: (value: string) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const visible = open || value.trim().length > 0;
+
+  useEffect(() => {
+    if (!visible) return;
+    const frame = window.requestAnimationFrame(() => inputRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [visible]);
+
+  return (
+    <div className="cm-market-search-fold" data-open={visible}>
+      <label className="cm-search cm-search--market" aria-label="Search assets" aria-hidden={!visible}>
+        <Search size={16} aria-hidden="true" />
+        <input
+          ref={inputRef}
+          className="cm-search__input"
+          type="search"
+          placeholder="Search assets..."
+          value={value}
+          disabled={!visible}
+          tabIndex={visible ? 0 : -1}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              if (value) {
+                onChange("");
+              } else {
+                onOpenChange(false);
+              }
+            }
+          }}
+        />
+      </label>
+      <button
+        type="button"
+        className="cm-hud-button cm-hud-button--icon cm-market-search-fold__toggle"
+        aria-label="Search"
+        aria-expanded={visible}
+        onClick={() => onOpenChange(!visible)}
+      >
+        <Search className="cm-hud-icon" size={17} />
+      </button>
+    </div>
+  );
+}
+
+function AssetAgentsTab({
+  agents,
+  total,
+  sort,
+  isLoading,
+  isFetchingNextPage,
+  hasNextPage,
+  error,
+  refetch,
+  fetchNextPage,
+  searchQuery,
+  onStatus,
+}: {
+  agents: OnchainAgent[];
+  total: number;
+  sort: AgentSort;
+  isLoading: boolean;
+  isFetchingNextPage: boolean;
+  hasNextPage: boolean;
+  error: Error | null;
+  refetch: () => void;
+  fetchNextPage: () => void;
+  searchQuery: string;
+  onStatus: (tab: AssetTab, status: TabStatus & { refresh?: () => void }) => void;
+}) {
+  const [shown, setShown] = useState(120);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const moreRef = useRef<HTMLDivElement | null>(null);
+  const visibleAgents = agents.length > 120 ? agents.slice(0, shown) : agents;
+  const canReveal = visibleAgents.length < agents.length;
+
+  useEffect(() => {
+    setShown(120);
+  }, [sort]);
+
+  useEffect(() => {
+    const query = searchQuery.trim();
+    onStatus("agents", {
+      count: query ? `${agents.length} results` : `${agents.length}/${total} agents`,
+      busy: isLoading || isFetchingNextPage,
+      refresh: refetch,
+    });
+  }, [agents.length, isFetchingNextPage, isLoading, onStatus, refetch, searchQuery, total]);
+
+  useEffect(() => {
+    const root = canvasRef.current;
+    const node = moreRef.current;
+    if (!root || !node) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      if (canReveal) {
+        setShown((value) => Math.min(value + 48, agents.length));
+        return;
+      }
+      if (hasNextPage && !isFetchingNextPage) {
+        fetchNextPage();
+      }
+    }, { root, rootMargin: "640px 0px" });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [agents.length, canReveal, fetchNextPage, hasNextPage, isFetchingNextPage]);
+
+  return (
+    <div className="cm-market-agents">
+      {isLoading && (
+        <div className="cm-market-agent-canvas cm-market-agent-canvas--loading">
+          <div className="cm-market-agent-grid">
+            {Array.from({ length: 9 }).map((_, i) => (
+              <Card key={i} className="glass-panel cm-agent-card cm-agent-card--market">
+                <CardContent className="p-4 sm:p-5 space-y-3 sm:space-y-4">
+                  <div className="flex items-start gap-2.5 sm:gap-3">
+                    <Skeleton className="w-10 h-10 sm:w-12 sm:h-12 rounded-full shrink-0" />
+                    <div className="flex-1 space-y-2 min-w-0">
+                      <Skeleton className="h-4 sm:h-5 w-3/4" />
+                      <Skeleton className="h-3 w-1/2" />
+                    </div>
+                  </div>
+                  <Skeleton className="h-14 sm:h-16 w-full" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <div className="text-center py-10 sm:py-12">
+          <Bot className="w-12 h-12 mx-auto text-red-400/50 mb-4" />
+          <p className="text-red-400">{error.message}</p>
+          <Button variant="outline" className="mt-4" onClick={refetch}>
+            Try Again
+          </Button>
+        </div>
+      )}
+
+      {!isLoading && visibleAgents.length > 0 && (
+        <div className="cm-market-agent-canvas" ref={canvasRef} aria-label="My agents">
+          <div className="cm-market-agent-grid">
+            {visibleAgents.map((agent) => (
+              <div
+                key={agent.walletAddress || `agent-${agent.id}`}
+                className="cm-market-agent-slot [content-visibility:auto] [contain-intrinsic-size:360px]"
+              >
+                <AgentAssetCard agent={agent} />
+              </div>
+            ))}
+            {(canReveal || hasNextPage) ? (
+              <div ref={moreRef} className="cm-market-agent-more">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    if (canReveal) {
+                      setShown((value) => Math.min(value + 48, agents.length));
+                    } else {
+                      fetchNextPage();
+                    }
+                  }}
+                  disabled={isFetchingNextPage}
+                  className="border-sidebar-border h-9 text-xs"
+                >
+                  {isFetchingNextPage ? "Loading..." : "Load more"}
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      )}
+
+      {agents.length === 0 && !isLoading && !error && (
+        <div className="text-center py-8 sm:py-10">
+          <Bot className="w-10 h-10 sm:w-12 sm:h-12 mx-auto text-muted-foreground/30 mb-4" />
+          <p className="text-muted-foreground text-sm sm:text-base">
+            No agents minted by this account yet
+          </p>
+          <Link href="/create-agent">
+            <Button className="mt-4 bg-cyan-500 text-black hover:bg-cyan-400 font-bold font-mono text-sm">
+              <Plus className="w-4 h-4 mr-2" />
+              CREATE AGENT
+            </Button>
+          </Link>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WorkflowsTab({
+  creator,
+  searchQuery,
+  sort,
+  onStatus,
+}: {
+  creator: string;
+  searchQuery: string;
+  sort: WorkflowSort;
+  onStatus: (tab: AssetTab, status: TabStatus & { refresh?: () => void }) => void;
+}) {
+  const { data: workflows, isLoading: isLoadingWorkflows, refetch } = useWorkflowsByCreator(creator);
+  const filteredWorkflows = useMemo(() => {
+    let filtered = workflows || [];
+    const query = searchQuery.trim().toLowerCase();
+    if (query) {
+      filtered = filtered.filter((workflow) =>
+        workflow.title.toLowerCase().includes(query) ||
+        workflow.description.toLowerCase().includes(query)
+      );
+    }
+    return [...filtered].sort((a, b) => {
+      switch (sort) {
+        case "price-low":
+          return parseFloat(a.totalPrice) - parseFloat(b.totalPrice);
+        case "price-high":
+          return parseFloat(b.totalPrice) - parseFloat(a.totalPrice);
+        case "newest":
+        default:
+          return (b.metadata?.createdAt ? new Date(b.metadata.createdAt).getTime() : 0) -
+            (a.metadata?.createdAt ? new Date(a.metadata.createdAt).getTime() : 0);
+      }
+    });
+  }, [searchQuery, sort, workflows]);
+
+  useEffect(() => {
+    onStatus("workflows", {
+      count: searchQuery.trim() ? `${filteredWorkflows.length} results` : `${filteredWorkflows.length} workflows`,
+      busy: isLoadingWorkflows,
+      refresh: () => void refetch(),
+    });
+  }, [filteredWorkflows.length, isLoadingWorkflows, onStatus, refetch, searchQuery]);
+
+  if (isLoadingWorkflows) {
+    return (
+      <div className="cm-market-row-grid">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <Card key={i} className="cm-surface-card">
+            <CardContent className="p-4 sm:p-5 space-y-3 sm:space-y-4">
+              <Skeleton className="h-24 sm:h-32 w-full rounded-sm" />
+              <Skeleton className="h-4 sm:h-5 w-3/4" />
+              <Skeleton className="h-14 sm:h-16 w-full" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    );
+  }
+
+  if (filteredWorkflows.length > 0) {
+    return (
+      <div className="cm-market-row-grid">
+        {filteredWorkflows.map((workflow) => (
+          <WorkflowAssetCard key={workflow.id} workflow={workflow} />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <Card className="cm-surface-card">
+      <CardContent className="p-6 sm:p-8 text-center space-y-3">
+        <Layers className="w-12 h-12 sm:w-16 sm:h-16 mx-auto text-muted-foreground/50" />
+        <h3 className="text-base sm:text-lg font-display text-foreground">No Workflows Yet</h3>
+        <p className="text-muted-foreground font-mono text-xs sm:text-sm max-w-md mx-auto">
+          {searchQuery ? "No workflows match your search." : "Compose your first Workflow by combining multiple agents."}
+        </p>
+        <Link href="/compose">
+          <Button className="bg-fuchsia-500 text-white hover:bg-fuchsia-400 font-bold font-mono text-sm">
+            <Layers className="w-4 h-4 mr-2" />
+            START COMPOSING
+          </Button>
+        </Link>
+      </CardContent>
+    </Card>
+  );
+}
+
+function RFAsTab({
+  publisher,
+  searchQuery,
+  onStatus,
+  onView,
+}: {
+  publisher: string;
+  searchQuery: string;
+  onStatus: (tab: AssetTab, status: TabStatus & { refresh?: () => void }) => void;
+  onView: (id: number) => void;
+}) {
+  const { data: rfas, isLoading: isLoadingRFAs, refetch: refetchRFAs } = useRFAsByPublisher(publisher);
+  const filteredRFAs = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    const source = rfas || [];
+    if (!query) return source;
+    return source.filter((rfa) =>
+      rfa.title.toLowerCase().includes(query) ||
+      rfa.description.toLowerCase().includes(query)
+    );
+  }, [rfas, searchQuery]);
+
+  useEffect(() => {
+    onStatus("rfas", {
+      count: searchQuery.trim() ? `${filteredRFAs.length} results` : `${filteredRFAs.length} RFAs`,
+      busy: isLoadingRFAs,
+      refresh: () => void refetchRFAs(),
+    });
+  }, [filteredRFAs.length, isLoadingRFAs, onStatus, refetchRFAs, searchQuery]);
+
+  if (isLoadingRFAs) {
+    return (
+      <div className="space-y-3">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Card key={i} className="cm-surface-card">
+            <CardContent className="p-4 sm:p-5 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-5 w-2/3" />
+                  <Skeleton className="h-3 w-full" />
+                </div>
+                <Skeleton className="h-8 w-24" />
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    );
+  }
+
+  if (filteredRFAs.length > 0) {
+    return (
+      <div className="space-y-3">
+        {filteredRFAs.map((rfa) => (
+          <RFAAssetCard
+            key={rfa.id}
+            rfa={rfa}
+            onViewDetails={() => onView(rfa.id)}
+            onRefresh={refetchRFAs}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <Card className="cm-surface-card">
+      <CardContent className="p-6 sm:p-8 text-center space-y-3">
+        <FileSearch className="w-12 h-12 sm:w-16 sm:h-16 mx-auto text-muted-foreground/50" />
+        <h3 className="text-base sm:text-lg font-display text-foreground">No RFAs Published</h3>
+        <p className="text-muted-foreground font-mono text-xs sm:text-sm max-w-md mx-auto">
+          {searchQuery ? "No RFAs match your search." : "You haven't published any Request-For-Agent bounties yet. Create one from the Compose page."}
+        </p>
+        <Link href="/compose">
+          <Button className="bg-amber-500 text-black hover:bg-amber-400 font-bold font-mono text-sm">
+            <Award className="w-4 h-4 mr-2" />
+            GO TO COMPOSE
+          </Button>
+        </Link>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -374,7 +816,7 @@ function AgentAssetCard({ agent }: { agent: OnchainAgent }) {
   return (
     <SharedAgentCard
       agent={agent}
-      className="cm-agent-card--asset"
+      variant="market"
       onOpen={() => setLocation(agentPageUrl)}
     />
   );
@@ -434,9 +876,11 @@ function WorkflowAssetCard({ workflow }: { workflow: OnchainWorkflow }) {
           </div>
 
           {workflow.description && (
-            <p className="text-[10px] sm:text-xs text-muted-foreground line-clamp-2">
-              {workflow.description}
-            </p>
+            <div className="text-[10px] sm:text-xs text-muted-foreground">
+              <Excerpt title={workflow.title || `Workflow #${workflow.id}`} text={workflow.description} lines={2}>
+                {workflow.description}
+              </Excerpt>
+            </div>
           )}
 
           <div className="flex flex-wrap gap-1 sm:gap-1.5">
@@ -526,11 +970,6 @@ function RFAAssetCard({
         rfa_title: rfa.title,
         offer_amount: rfa.offerAmount,
         workflow_id: rfa.workflowId,
-      });
-
-      toast({
-        title: "RFA Cancelled",
-        description: `Bounty of ${rfa.offerAmountFormatted} has been refunded to your wallet.`,
       });
 
       onRefresh();

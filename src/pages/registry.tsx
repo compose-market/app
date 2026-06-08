@@ -214,7 +214,7 @@ function ServerDetailDialog({
       server_name: server.name,
       server_origin: server.origin,
     });
-    const source = isOnchain ? "onchain" : isEliza ? "eliza" : "tools";
+    const source = isOnchain ? "onchain" : isEliza ? "eliza" : "mcp";
     const pluginParam = server.slug;
 
     // Navigate to playground with source and plugin pre-selected
@@ -337,7 +337,7 @@ function ServerDetailDialog({
 
           {/* Actions */}
           <div className="flex gap-2 pt-4 border-t border-sidebar-border">
-            {(isExecutable || server.origin === "tools" || isEliza) && (
+            {(isExecutable || server.origin === "mcp" || isEliza) && (
               <Button
                 onClick={handleTestPlugin}
                 className={cn(
@@ -357,7 +357,7 @@ function ServerDetailDialog({
               onClick={handleAddToWorkflow}
               className={cn(
                 "bg-cyan-500 hover:bg-cyan-600 text-black font-bold",
-                !(isExecutable || server.origin === "tools" || isEliza) && "flex-1"
+                !(isExecutable || server.origin === "mcp" || isEliza) && "flex-1"
               )}
             >
               <Plus className="w-4 h-4 mr-2" />
@@ -393,7 +393,7 @@ function ServerDetailDialog({
 export default function RegistryPage() {
   const posthog = usePostHog();
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedOrigin, setSelectedOrigin] = useState<"all" | "tools" | "onchain" | "eliza">("all");
+  const [selectedOrigin, setSelectedOrigin] = useState<"all" | "mcp" | "onchain" | "eliza">("all");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [selectedServer, setSelectedServer] = useState<RegistryServer | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -496,7 +496,7 @@ export default function RegistryPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Sources</SelectItem>
-                <SelectItem value="tools">Tools</SelectItem>
+                <SelectItem value="mcp">Tools</SelectItem>
                 <SelectItem value="onchain">Onchain</SelectItem>
                 <SelectItem value="eliza">ElizaOS</SelectItem>
               </SelectContent>
@@ -523,11 +523,11 @@ export default function RegistryPage() {
 
       {/* Results */}
       {isLoading ? (
-        <div className="flex items-center justify-center py-20">
+        <div className="flex items-center justify-center py-10 sm:py-12">
           <Loader2 className="w-8 h-8 animate-spin text-cyan-400" />
         </div>
       ) : allServers.length === 0 ? (
-        <div className="text-center py-20">
+        <div className="text-center py-10 sm:py-12">
           <Server className="w-12 h-12 mx-auto text-muted-foreground/30 mb-4" />
           <p className="text-muted-foreground">
             {searchQuery ? "No servers match your search" : "No servers found"}

@@ -24,10 +24,9 @@ import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
 import { useOnchainAgentByIdentifier } from "@/hooks/use-onchain";
 import { MultimodalCanvas } from "@/components/chat";
-import { toComposeAttachment, useChat } from "@/hooks/use-chat";
-import { useComposeStream } from "@/hooks/use-stream";
+import { toAttachment, useChat, type Plan } from "@/hooks/use-chat";
+import { useStream } from "@/hooks/use-stream";
 import { CostReceiptIndicator } from "@/components/receipt-indicator";
-import { ToolTimeline } from "@/components/tool-timeline";
 import {
   getCachedBackpackPermissions,
   grantBackpackPermission,
@@ -80,6 +79,7 @@ export default function AgentDetailPage() {
   });
   const { messages, setMessages, clearMessages, scrollContainerRef, messagesEndRef,
     addUserMessage, createAssistantPlaceholder, updateAssistantMessage,
+    failAssistant,
     activityState,
     // Attachments
     attachedFiles, fileInputRef, handleFileSelect, handleRemoveFile, clearFiles,
@@ -90,7 +90,7 @@ export default function AgentDetailPage() {
   // Shared SDK streaming dispatcher. All rich SSE events (text, thinking,
   // tool-use, receipts, budget, sessionInvalid) are dispatched into the
   // chat activity sink + the sdk.events bus — nothing handled per-page.
-  const streamer = useComposeStream(chat, {
+  const streamer = useStream(chat, {
     onError: (e) => setChatError(e.message),
     onDone: () => setSending(false),
   });
@@ -312,7 +312,7 @@ export default function AgentDetailPage() {
 
       const threadId = ensureConversationThread();
 
-      const attachmentPart = toComposeAttachment(attached);
+      const attachmentPart = toAttachment(attached);
       await streamer.runAgent({
         agentWallet,
         message: prompt,
@@ -332,13 +332,77 @@ export default function AgentDetailPage() {
       if (!(err instanceof DOMException && err.name === "AbortError")) {
         const errorMsg = err instanceof Error ? err.message : String(err);
         setChatError(errorMsg);
-        updateAssistantMessage(assistantId, { content: `Error: ${errorMsg}` });
+        failAssistant(assistantId, errorMsg);
         mpError("agent_chat", errorMsg, { agent_wallet: agentWallet });
       }
     } finally {
       setSending(false);
     }
-  }, [inputValue, sending, agentWallet, wallet, account, toast, agent, attachedFiles, addUserMessage, clearFiles, createAssistantPlaceholder, updateAssistantMessage, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, ensureConversationThread, streamer, posthog]);
+  }, [inputValue, sending, agentWallet, wallet, account, toast, agent, attachedFiles, addUserMessage, clearFiles, createAssistantPlaceholder, failAssistant, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, ensureConversationThread, streamer, posthog]);
+
+  const handlePlanDecision = useCallback(async (
+    messageId: string,
+    plan: Plan,
+    decision: NonNullable<Plan["decision"]>,
+    feedback?: string,
+  ) => {
+    if (!agentWallet) return;
+    const runId = plan.composeRunId;
+    if (!runId) {
+      updateAssistantMessage(messageId, {
+        proposal: { ...plan, error: "Plan decision is missing composeRunId." },
+      });
+      return;
+    }
+    updateAssistantMessage(messageId, { proposal: { ...plan, pending: true, error: undefined } });
+    try {
+      const activeComposeKeyToken = composeKeyToken || sdk.keys.currentToken() || await ensureComposeKeyToken();
+      if (activeComposeKeyToken) sdk.keys.use(activeComposeKeyToken);
+      await (sdk.agent as typeof sdk.agent & {
+        decide: (input: {
+          agentWallet: string;
+          runId: string;
+          proposalId: string;
+          version: number;
+          decision: NonNullable<Plan["decision"]>;
+          approver?: string;
+          reason?: string;
+          feedback?: string;
+        }) => Promise<unknown>;
+      }).decide({
+        agentWallet,
+        runId,
+        proposalId: plan.proposalId,
+        version: plan.version,
+        decision,
+        approver: account?.address,
+        ...(feedback ? { feedback, reason: feedback } : {}),
+      });
+      updateAssistantMessage(messageId, {
+        proposal: {
+          ...plan,
+          pending: false,
+          decision,
+          state: decision === "approved" ? "approved" : decision,
+          feedback,
+        },
+      });
+      toast({
+        title: decision === "approved" ? "Plan approved" : decision === "changes_requested" ? "Changes requested" : "Plan rejected",
+        description: "Decision submitted without sending a chat message.",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      updateAssistantMessage(messageId, {
+        proposal: { ...plan, pending: false, error: message },
+      });
+      toast({
+        title: "Plan decision failed",
+        description: message,
+        variant: "destructive",
+      });
+    }
+  }, [account?.address, agentWallet, composeKeyToken, ensureComposeKeyToken, toast, updateAssistantMessage]);
 
   const copyEndpoint = () => {
     toast({
@@ -356,11 +420,11 @@ export default function AgentDetailPage() {
           <Skeleton className="h-6 w-20" />
         </div>
         {/* Main Grid */}
-        <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2">
+        <div className="cm-agent-detail-layout">
+          <div className="cm-agent-detail-chat">
             <Skeleton className="h-full w-full rounded-lg" />
           </div>
-          <div className="lg:col-span-1 hidden lg:block">
+          <div className="cm-agent-detail-rail hidden lg:grid">
             <AgentCardSkeleton />
           </div>
         </div>
@@ -400,7 +464,6 @@ export default function AgentDetailPage() {
         </Button>
 
         <div className="flex items-center gap-2">
-          <ToolTimeline />
           <CostReceiptIndicator />
           <Button
             asChild
@@ -432,9 +495,9 @@ export default function AgentDetailPage() {
       </div>
 
       {/* Main Layout: Chat on Left, Card on Right - fills remaining space */}
-      <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="cm-agent-detail-layout">
         {/* Chat Section (2/3 width on desktop, full on mobile) */}
-        <div className="lg:col-span-2 min-h-0 flex flex-col">
+        <div className="cm-agent-detail-chat">
           <MultimodalCanvas
             variant="agent"
             title={`Chat with ${agentLabel}`}
@@ -470,6 +533,7 @@ export default function AgentDetailPage() {
               toast({ title: "Retry", description: "Message loaded for re-sending" });
             }}
             onDeleteMessage={(id) => setMessages(prev => prev.filter(m => m.id !== id))}
+            onPlanDecision={handlePlanDecision}
             onClearChat={handleClearChat}
             height="h-full"
             emptyStateText="Start a conversation with this agent."
@@ -478,7 +542,7 @@ export default function AgentDetailPage() {
         </div>
 
         {/* Agent Card (1/3 width on desktop, hidden on mobile by default) */}
-        <div className="lg:col-span-1 hidden lg:flex flex-col min-h-0 overflow-hidden pr-1">
+        <div className="cm-agent-detail-rail hidden lg:grid">
           <AgentCard
             agent={agent}
             onCopyEndpoint={copyEndpoint}
@@ -507,7 +571,7 @@ export default function AgentDetailPage() {
               className="block w-full text-sm text-muted-foreground file:mr-3 file:rounded-sm file:border-0 file:bg-cyan-500/20 file:px-3 file:py-2 file:text-xs file:font-mono file:text-cyan-300"
             />
             {workspaceFiles.length > 0 ? (
-              <div className="space-y-2 max-h-56 overflow-y-auto">
+              <div className="cm-file-list space-y-2">
                 {workspaceFiles.map((file) => (
                   <div
                     key={`${file.name}:${file.size}:${file.lastModified}`}
@@ -551,14 +615,14 @@ export default function AgentDetailPage() {
 
       {/* Mobile Card Sheet */}
       <Sheet open={mobileCardOpen} onOpenChange={setMobileCardOpen}>
-        <SheetContent side="right" className="w-[340px] sm:w-[400px] p-0 overflow-hidden flex flex-col">
+        <SheetContent side="right" className="cm-sheet-panel w-[340px] sm:w-[400px] p-0">
           <SheetHeader className="p-4 border-b border-sidebar-border shrink-0">
             <SheetTitle className="font-display text-cyan-400 flex items-center gap-2">
               <IdCard className="w-4 h-4" />
               Agent Details
             </SheetTitle>
           </SheetHeader>
-          <div className="flex-1 min-h-0 overflow-y-auto p-4">
+          <div className="cm-sheet-body p-4">
             <AgentCard
               agent={agent}
               onCopyEndpoint={copyEndpoint}

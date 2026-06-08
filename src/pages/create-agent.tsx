@@ -165,11 +165,11 @@ export default function CreateAgent() {
   // Fetch connectors
   const pluginSearchReady = pluginSearch.trim().length >= 2;
   const { data: searchData, isLoading: isSearching } = useRegistrySearch(pluginSearch, 50, {
-    origin: "onchain,tools",
+    origin: "onchain,mcp",
   });
 
   const { data: defaultPlugins, isLoading: isLoadingDefault } = useRegistryServers({
-    origin: "onchain,tools",
+    origin: "onchain,mcp",
   });
 
   const defaultPluginServers = defaultPlugins?.servers ?? [];
@@ -203,7 +203,7 @@ export default function CreateAgent() {
   const getOriginColor = (origin: ServerOrigin) => {
     switch (origin) {
       case "onchain": return "border-green-500/50 text-green-400 bg-green-500/10";
-      case "tools": return "border-cyan-500/50 text-cyan-400 bg-cyan-500/10";
+      case "mcp": return "border-cyan-500/50 text-cyan-400 bg-cyan-500/10";
       default: return "border-slate-500/50 text-slate-400 bg-slate-500/10";
     }
   };
@@ -211,7 +211,7 @@ export default function CreateAgent() {
   const getOriginLabel = (origin: ServerOrigin) => {
     switch (origin) {
       case "onchain": return "Onchain";
-      case "tools": return "Tools";
+      case "mcp": return "Tools";
       default: return origin;
     }
   };

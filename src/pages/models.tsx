@@ -160,7 +160,7 @@ export default function ModelsPage() {
       )}
 
       {!isLoading && filteredModels.length === 0 && (
-        <div className="text-center py-16 space-y-4">
+        <div className="text-center py-8 sm:py-10 space-y-3">
           <Cpu className="w-16 h-16 mx-auto text-muted-foreground/50" />
           <p className="text-muted-foreground font-mono">No models found matching your criteria.</p>
           <Button

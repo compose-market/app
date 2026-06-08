@@ -17,8 +17,8 @@ import { useActiveWallet, useActiveAccount } from "thirdweb/react";
 import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
 import { sdk } from "@/lib/sdk";
-import { toComposeAttachment, toComposeMessage } from "@/hooks/use-chat";
-import type { ChatMessage, ComposeCallOptions } from "@compose-market/sdk";
+import { toAttachment, toMessage } from "@/hooks/use-chat";
+import type { Message as Message, ComposeCallOptions } from "@compose-market/sdk";
 import { useChain } from "@/contexts/ChainContext";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -45,14 +45,14 @@ import { CapabilityChips } from "@/components/capability-chips";
 import { useChat } from "@/hooks/use-chat";
 import { useModels } from "@/hooks/use-model";
 import { CostReceiptIndicator } from "@/components/receipt-indicator";
-import { ToolTimeline } from "@/components/tool-timeline";
 import { useToast } from "@/hooks/use-toast";
-import { useComposeStream } from "@/hooks/use-stream";
+import { useStream } from "@/hooks/use-stream";
 import {
   buildProviderCategories,
   buildTypeCategories,
   formatModelTypeLabel,
   getModelTypeValues,
+  type CatalogModel,
 } from "@/lib/models";
 
 const PANE_COLLAPSED_KEY = "playground_pane_collapsed";
@@ -63,7 +63,29 @@ const LazyPluginTester = lazy(() =>
 
 function getDefaultParamValues(schema: ModelParamsSchema | null): Record<string, unknown> {
   if (!schema) return {};
-  return schema.defaults || {};
+  const values: Record<string, unknown> = { ...(schema.defaults || {}) };
+  for (const [key, definition] of Object.entries(schema.params)) {
+    if (definition.required === true || values[key] !== undefined) continue;
+    if (definition.default !== undefined) {
+      values[key] = definition.default;
+      continue;
+    }
+    if (definition.options && definition.options.length > 0) {
+      values[key] = definition.options[0];
+    }
+  }
+  return values;
+}
+
+function modelOutputType(model: CatalogModel): "text" | "image" | "audio" | "video" | "embedding" {
+  if (Array.isArray(model.output)) {
+    const output = model.output.filter((value): value is string => typeof value === "string");
+    if (output.includes("image")) return "image";
+    if (output.includes("video")) return "video";
+    if (output.includes("audio")) return "audio";
+    if (output.includes("embedding")) return "embedding";
+  }
+  return "text";
 }
 
 // =============================================================================
@@ -87,7 +109,9 @@ export default function PlaygroundPage() {
   const initialPluginSource = useMemo(() => {
     const params = new URLSearchParams(window.location.search);
     const source = params.get("source");
-    return source === "tools" || source === "onchain" ? source : "tools";
+    if (source === "onchain") return "onchain";
+    if (source === "mcp" || source === "tools") return "mcp";
+    return "mcp";
   }, []);
 
   const initialPlugin = useMemo(() => {
@@ -177,7 +201,7 @@ export default function PlaygroundPage() {
     attachedFiles, fileInputRef, handleFileSelect, handleRemoveFile, uploadedCids, cleanupFiles, clearFiles,
     isRecording, recordingSupported, startRecording, stopRecording,
   } = chat;
-  const streamer = useComposeStream(chat, {
+  const streamer = useStream(chat, {
     onError: (err) => setInferenceError(err.message),
   });
 
@@ -205,13 +229,18 @@ export default function PlaygroundPage() {
   // Track conversation context boundary on model switch
   const [conversationStartIndex, setConversationStartIndex] = useState(0);
   const prevModelRef = useRef<string | null>(null);
+  const messagesLengthRef = useRef(0);
 
   useEffect(() => {
-    if (prevModelRef.current !== null && prevModelRef.current !== selectedModel && messages.length > 0) {
-      setConversationStartIndex(messages.length);
+    messagesLengthRef.current = messages.length;
+  }, [messages.length]);
+
+  useEffect(() => {
+    if (prevModelRef.current !== null && prevModelRef.current !== selectedModel && messagesLengthRef.current > 0) {
+      setConversationStartIndex(messagesLengthRef.current);
     }
     prevModelRef.current = selectedModel;
-  }, [selectedModel, messages.length]);
+  }, [selectedModel]);
 
   // Selected model info
   const selectedModelInfo = useMemo(
@@ -252,13 +281,39 @@ export default function PlaygroundPage() {
     return () => { abortController.abort(); };
   }, [selectedModel, selectedModelInfo]);
 
-  // ==========================================================================
-  // Handlers (unchanged from original)
-  // ==========================================================================
+  // Refs for hot values used in handleSendMessage (avoids callback churn)
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  const inputValueRef = useRef(inputValue);
+  inputValueRef.current = inputValue;
+  const streamingRef = useRef(streaming);
+  streamingRef.current = streaming;
+  const attachedFilesRef = useRef(attachedFiles);
+  attachedFilesRef.current = attachedFiles;
+  const selectedModelRef = useRef(selectedModel);
+  selectedModelRef.current = selectedModel;
+  const selectedModelInfoRef = useRef(selectedModelInfo);
+  selectedModelInfoRef.current = selectedModelInfo;
+  const systemPromptRef = useRef(systemPrompt);
+  systemPromptRef.current = systemPrompt;
+  const paramValuesRef = useRef(paramValues);
+  paramValuesRef.current = paramValues;
+  const conversationStartIndexRef = useRef(conversationStartIndex);
+  conversationStartIndexRef.current = conversationStartIndex;
 
   const handleSendMessage = useCallback(async () => {
-    if (attachedFiles.some(f => f.uploading)) return;
-    if ((!inputValue.trim() && attachedFiles.length === 0) || streaming || !selectedModel || !selectedModelInfo) return;
+    const currentAttachedFiles = attachedFilesRef.current;
+    const currentInputValue = inputValueRef.current;
+    const currentStreaming = streamingRef.current;
+    const currentSelectedModel = selectedModelRef.current;
+    const currentSelectedModelInfo = selectedModelInfoRef.current;
+    const currentMessages = messagesRef.current;
+    const currentSystemPrompt = systemPromptRef.current;
+    const currentParamValues = paramValuesRef.current;
+    const currentConversationStartIndex = conversationStartIndexRef.current;
+
+    if (currentAttachedFiles.some(f => f.uploading)) return;
+    if ((!currentInputValue.trim() && currentAttachedFiles.length === 0) || currentStreaming || !currentSelectedModel || !currentSelectedModelInfo) return;
 
     if (!sessionActive || budgetRemaining <= 0) {
       toast({
@@ -270,14 +325,14 @@ export default function PlaygroundPage() {
       return;
     }
 
-    const attached = attachedFiles[0];
-    const attachments = attachedFiles
-      .map(toComposeAttachment)
+    const attached = currentAttachedFiles[0];
+    const attachments = currentAttachedFiles
+      .map(toAttachment)
       .filter((attachment): attachment is NonNullable<typeof attachment> => Boolean(attachment));
     const userMessage = {
       id: crypto.randomUUID(),
       role: "user" as const,
-      content: inputValue.trim(),
+      content: currentInputValue.trim(),
       timestamp: Date.now(),
       type: attached?.type ?? "text",
       imageUrl: attached?.type === "image" ? attached.url : undefined,
@@ -286,15 +341,15 @@ export default function PlaygroundPage() {
     };
 
     posthog?.capture("playground_message_sent", {
-      model_id: selectedModel,
-      has_attachment: attachedFiles.length > 0,
-      attachment_type: attachedFiles[0]?.type ?? null,
+      model_id: currentSelectedModel,
+      has_attachment: currentAttachedFiles.length > 0,
+      attachment_type: currentAttachedFiles[0]?.type ?? null,
       chain_id: paymentChainId,
     });
 
     mpTrack("Launch AI");
     mpTrack("AI Prompt Sent and Prompt Text", {
-      "Prompt Text": inputValue.trim().slice(0, 500),
+      "Prompt Text": currentInputValue.trim().slice(0, 500),
     });
 
     setMessages((prev) => [...prev, userMessage]);
@@ -310,7 +365,7 @@ export default function PlaygroundPage() {
 
     setMessages((prev) => [
       ...prev,
-      { id: assistantId, role: "assistant", content: "", timestamp: Date.now(), type: "text" },
+      { id: assistantId, role: "assistant", content: "", timestamp: Date.now(), type: modelOutputType(currentSelectedModelInfo) },
     ]);
 
     try {
@@ -326,9 +381,9 @@ export default function PlaygroundPage() {
         sdk.keys.use(activeComposeKeyToken);
       }
 
-      const history = [...messages.slice(conversationStartIndex), userMessage];
-      const input: ChatMessage[] = history.map(toComposeMessage);
-      if (systemPrompt.trim()) input.unshift({ role: "system", content: systemPrompt.trim() });
+      const history = [...currentMessages.slice(currentConversationStartIndex), userMessage];
+      const input: Message[] = history.map(toMessage);
+      if (currentSystemPrompt.trim()) input.unshift({ role: "system", content: currentSystemPrompt.trim() });
 
       const callOptions: ComposeCallOptions = {
         ...(activeComposeKeyToken ? { composeKey: activeComposeKeyToken } : {}),
@@ -337,11 +392,11 @@ export default function PlaygroundPage() {
       };
       await streamer.runResponses({
         params: {
-          model: selectedModelInfo.modelId,
+          model: currentSelectedModelInfo.modelId,
           input,
           stream: true,
           ...(attachments.length > 0 ? { attachments } : {}),
-          ...paramValues,
+          ...currentParamValues,
         },
         assistantId,
         options: callOptions,
@@ -351,13 +406,11 @@ export default function PlaygroundPage() {
       console.error("[playground] inference failed:", err);
       setInferenceError(errorMsg);
       chat.setActivityPhase("error", errorMsg);
-      setMessages((prev) =>
-        prev.map((m) => m.id === assistantId ? { ...m, content: `Error: ${errorMsg}` } : m)
-      );
+      chat.failAssistant(assistantId, errorMsg);
     } finally {
       setStreaming(false);
     }
-  }, [inputValue, streaming, selectedModel, selectedModelInfo, messages, systemPrompt, wallet, account, budgetRemaining, attachedFiles, clearFiles, sessionActive, composeKeyToken, ensureComposeKeyToken, paymentChainId, paramValues, toast, setShowSessionDialog, posthog, chat, setMessages, conversationStartIndex, streamer]);
+  }, [wallet, account, budgetRemaining, clearFiles, sessionActive, composeKeyToken, ensureComposeKeyToken, paymentChainId, toast, posthog, chat, setMessages, streamer]);
   const handleClearChat = useCallback(() => {
     clearMessages();
     setInferenceError(null);
@@ -393,7 +446,6 @@ export default function PlaygroundPage() {
         </Tabs>
 
         <div className="cm-playground__toolbar-right">
-          <ToolTimeline />
           <CostReceiptIndicator />
           {activeTab === "model" && (
             <Button
@@ -583,14 +635,14 @@ export default function PlaygroundPage() {
 
       {/* ── Mobile MirrorPane Sheet ───────────────────────────────── */}
       <Sheet open={mobilePaneOpen} onOpenChange={setMobilePaneOpen}>
-        <SheetContent side="right" className="cm-shell-panel p-0 overflow-y-auto w-[min(28rem,calc(100vw-1rem))]">
+        <SheetContent side="right" className="cm-shell-panel cm-sheet-panel p-0 w-[min(28rem,calc(100vw-1rem))]">
           <SheetHeader className="border-b border-primary/15 p-4">
             <SheetTitle className="font-display text-cyan-300 flex items-center gap-2 text-base">
               <Settings2 className="h-5 w-5" />
               Model Settings
             </SheetTitle>
           </SheetHeader>
-          <div className="p-3 sm:p-4">
+          <div className="cm-sheet-body p-3 sm:p-4">
             <MirrorPane
               selectedModel={selectedModel}
               modelInfo={selectedModelInfo || null}

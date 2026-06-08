@@ -13,7 +13,7 @@ import {
   Dialog,
   DialogContent,
 } from "@/components/ui/dialog";
-import { ComposeAppShell } from "@compose-market/theme/app";
+import { AppShell } from "@compose-market/theme/app";
 import { ExternalLink, Monitor, Shield, ChevronRight } from "lucide-react";
 import "@/styles/install-local.css";
 
@@ -234,7 +234,7 @@ export function MeshDownloadDialog({ onOpenChange, open }: MeshDownloadDialogPro
 
 /* ══════════════════════════════════════════════════════════════════
    Page — standalone (no Layout wrapper)
-   Uses ComposeAppShell for the cyberpunk backdrop.
+   Uses AppShell for the cyberpunk backdrop.
    ══════════════════════════════════════════════════════════════════ */
 export default function InstallLocalPage() {
   const [token, setToken] = useState<string | null>(null);
@@ -263,7 +263,7 @@ export default function InstallLocalPage() {
   }, [token]);
 
   return (
-    <ComposeAppShell
+    <AppShell
       contentClassName="font-sans antialiased text-foreground selection:bg-fuchsia-500/30 selection:text-fuchsia-200"
     >
       <div className="cm-install-page">
@@ -275,6 +275,6 @@ export default function InstallLocalPage() {
           token={token}
         />
       </div>
-    </ComposeAppShell>
+    </AppShell>
   );
 }

@@ -377,7 +377,7 @@ function MintWorkflowDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-[95vw] sm:max-w-lg md:max-w-2xl bg-card border-fuchsia-500/30 max-h-[90vh] overflow-y-auto">
+        <DialogContent className="cm-dialog-panel max-w-[95vw] sm:max-w-lg md:max-w-2xl bg-card border-fuchsia-500/30">
           <DialogHeader>
             <DialogTitle className="font-display text-lg sm:text-xl flex items-center gap-2">
               <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-fuchsia-400" />
@@ -827,9 +827,9 @@ function ComposeFlow() {
   }, [currentWorkflow, inputJson, nodes, edges, setNodes, toast, wallet, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, paymentChainId]);
 
   return (
-    <div className="cm-compose-workspace">
+    <div className="cm-workspace">
       {/* Sidebar - Picker Tabs */}
-      <Card className="w-full lg:w-80 h-auto max-h-[40vh] lg:max-h-none lg:h-full flex flex-col glass-panel border-cyan-500/20 shrink-0 overflow-hidden">
+      <Card className="cm-sidebar glass-panel border-cyan-500/20">
         <CardHeader className="pb-2 border-b border-sidebar-border shrink-0">
           <CardTitle className="text-base lg:text-lg font-display font-bold text-cyan-400">ADD STEPS</CardTitle>
         </CardHeader>
@@ -843,10 +843,10 @@ function ComposeFlow() {
                 <Bot className="w-3 h-3 mr-1.5" />AGENTS
               </TabsTrigger>
             </TabsList>
-            <TabsContent value="connectors" className="flex-1 overflow-y-auto p-3 mt-0 min-h-0">
+            <TabsContent value="connectors" className="cm-picker-panel p-3 mt-0">
               <ConnectorPicker onSelect={handleAddStep} />
             </TabsContent>
-            <TabsContent value="agents" className="flex-1 overflow-y-auto p-3 mt-0 min-h-0">
+            <TabsContent value="agents" className="cm-picker-panel p-3 mt-0">
               <AgentsPicker onSelect={handleAddAgentStep} />
             </TabsContent>
           </Tabs>
@@ -854,8 +854,8 @@ function ComposeFlow() {
       </Card>
 
       {/* Canvas Area */}
-      <div className="flex-1 min-h-[50vh] lg:min-h-0 lg:h-full flex flex-col">
-        <div className="flex-1 relative rounded-t-sm border border-cyan-500/20 overflow-hidden shadow-2xl bg-black/40 min-h-[300px]">
+      <div className="flex-1 min-h-0 lg:h-full flex flex-col">
+        <div className="cm-canvas flex-1 relative rounded-t-sm border border-cyan-500/20 overflow-hidden shadow-2xl bg-black/40">
           {/* Toolbar */}
           <div className="absolute top-2 right-2 lg:top-4 lg:right-4 z-10 flex flex-wrap gap-1.5 lg:gap-2">
             <Button onClick={() => setShowRunDialog(true)} disabled={isRunning || nodes.length === 0} className="bg-green-500 text-white hover:bg-green-600 font-bold font-mono shadow-lg text-xs lg:text-sm h-8 lg:h-9 px-2.5 lg:px-4">

@@ -23,10 +23,9 @@ import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
 import { useOnchainWorkflowByIdentifier } from "@/hooks/use-onchain";
 import { MultimodalCanvas } from "@/components/chat";
-import { toComposeAttachment, useChat } from "@/hooks/use-chat";
-import { useComposeStream } from "@/hooks/use-stream";
+import { toAttachment, useChat } from "@/hooks/use-chat";
+import { useStream } from "@/hooks/use-stream";
 import { CostReceiptIndicator } from "@/components/receipt-indicator";
-import { ToolTimeline } from "@/components/tool-timeline";
 import { WorkflowCard, WorkflowCardSkeleton } from "@/components/workflow-card";
 import {
     Sheet,
@@ -67,7 +66,8 @@ export default function ManowarPage() {
         onError: (err) => setChatError(err),
     });
     const { messages, setMessages, scrollContainerRef, messagesEndRef,
-        addUserMessage, createAssistantPlaceholder, updateAssistantMessage,
+        addUserMessage, createAssistantPlaceholder,
+        failAssistant,
         activityState,
         // Attachments
         attachedFiles, fileInputRef, handleFileSelect, handleRemoveFile, clearFiles,
@@ -76,7 +76,7 @@ export default function ManowarPage() {
     } = chat;
 
     // Shared SDK streaming dispatcher for every workflow run.
-    const streamer = useComposeStream(chat, {
+    const streamer = useStream(chat, {
         onError: (e) => setChatError(e.message),
         onDone: () => setSending(false),
     });
@@ -172,7 +172,7 @@ export default function ManowarPage() {
             }
             setActiveThreadId(threadId);
 
-            const attachmentPart = toComposeAttachment(attached);
+            const attachmentPart = toAttachment(attached);
             await streamer.runWorkflow({
                 workflowWallet,
                 message: prompt,
@@ -196,13 +196,13 @@ export default function ManowarPage() {
             }
             const errorMsg = err instanceof Error ? err.message : String(err);
             setChatError(errorMsg);
-            updateAssistantMessage(assistantId, { content: `Error: ${errorMsg}` });
+            failAssistant(assistantId, errorMsg);
             mpError("workflow_execution", errorMsg, { workflow_wallet: workflowWallet });
         } finally {
             setSending(false);
             abortControllerRef.current = null;
         }
-    }, [inputValue, sending, workflow, workflowWallet, wallet, account, toast, attachedFiles, addUserMessage, clearFiles, createAssistantPlaceholder, updateAssistantMessage, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, continuousEnabled, streamer, posthog]);
+    }, [inputValue, sending, workflow, workflowWallet, wallet, account, toast, attachedFiles, addUserMessage, clearFiles, createAssistantPlaceholder, failAssistant, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, continuousEnabled, streamer, posthog]);
 
     const handleStopExecution = useCallback(async () => {
         if (!workflow?.walletAddress || !activeThreadId) return;
@@ -277,7 +277,6 @@ export default function ManowarPage() {
                 </Button>
 
                 <div className="flex items-center gap-3">
-                    <ToolTimeline />
                     <CostReceiptIndicator />
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                         <Checkbox
@@ -389,14 +388,14 @@ export default function ManowarPage() {
 
             {/* Mobile Card Sheet */}
             <Sheet open={mobileCardOpen} onOpenChange={setMobileCardOpen}>
-                <SheetContent side="right" className="w-[340px] sm:w-[400px] p-0 overflow-y-auto">
-                    <SheetHeader className="p-4 border-b border-sidebar-border">
+                <SheetContent side="right" className="cm-sheet-panel w-[340px] sm:w-[400px] p-0">
+                    <SheetHeader className="p-4 border-b border-sidebar-border shrink-0">
                         <SheetTitle className="font-display text-fuchsia-400 flex items-center gap-2">
                             <IdCard className="w-4 h-4" />
                             Workflow Details
                         </SheetTitle>
                     </SheetHeader>
-                    <div className="p-4">
+                    <div className="cm-sheet-body p-4">
                         <WorkflowCard
                             workflow={workflow}
                             onCopyEndpoint={copyEndpoint}
