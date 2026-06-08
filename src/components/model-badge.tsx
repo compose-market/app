@@ -35,7 +35,7 @@ export function ModelBadge({ model, onClick }: ModelBadgeProps) {
   if (!model) {
     return (
       <ShellModelBadge
-        label="Select model..."
+        label="Model"
         shortcut="⌘K"
         placeholder
         onClick={onClick}
