@@ -11,7 +11,7 @@ import {
   Sparkles,
   Vault,
 } from "lucide-react";
-import { ComposeAppShell } from "@compose-market/theme/app";
+import { AppShell } from "@compose-market/theme/app";
 import { WalletConnector, useWalletAccount } from "@/components/connector";
 import { BackpackDialog } from "@/components/backpack";
 import { SessionIndicator } from "@/components/session";
@@ -61,7 +61,7 @@ export function Layout({ children }: LayoutProps) {
   }, [overflowOpen, searchOpen]);
 
   return (
-    <ComposeAppShell
+    <AppShell
       className="cm-app-shell--luminescent"
       contentClassName="h-dvh min-h-0 text-foreground font-sans selection:bg-fuchsia-500/30 selection:text-fuchsia-200 overflow-hidden"
     >
@@ -114,7 +114,7 @@ export function Layout({ children }: LayoutProps) {
           </div>
         </main>
       </div>
-    </ComposeAppShell>
+    </AppShell>
   );
 }
 
