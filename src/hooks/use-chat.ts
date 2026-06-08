@@ -8,12 +8,15 @@
  * 
  * Provides O(1) message updates, RAF-batched streaming, and stick-to-bottom scroll.
  */
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import type {
-    ChatMessage as ComposeMessage,
-    ChatMessageContentPart,
-    ComposeAttachmentInput,
+    Message as ComposeMessage,
+    MessageContentPart,
+    AttachmentInput,
+    StreamEvent,
+    StreamTree,
 } from "@compose-market/sdk";
+import { createStreamTree, reduceStreamTree } from "@compose-market/sdk";
 import { uploadConversationFile, cleanupConversationFiles } from "@/lib/pinata";
 import {
     createObjectUrlPreview,
@@ -27,7 +30,49 @@ import {
 
 export type MessageType = "text" | "image" | "audio" | "video" | "embedding" | "pdf" | "file";
 
-export interface ChatMessage {
+export interface Plan {
+    type: "harness_plan_proposed" | "harness_plan_decided";
+    proposalId: string;
+    version: number;
+    state: string;
+    decision?: "approved" | "rejected" | "changes_requested";
+    rootComposeRunId?: string;
+    composeRunId?: string;
+    requestedBy?: string;
+    proposal?: unknown;
+    markdown?: string;
+    ts?: number;
+    updatedAt?: number;
+    approver?: string;
+    reason?: string;
+    feedback?: string;
+    pending?: boolean;
+    error?: string;
+}
+
+export interface Artifact {
+    id: string;
+    artifactType: "image" | "audio" | "video" | "embedding" | "realtime" | "file" | "artifact";
+    url?: string;
+    inline?: boolean;
+    partial?: boolean;
+    embedding?: number[] | number[][];
+    mimeType?: string;
+    bytes?: number;
+    responseId?: string;
+    outputIndex?: number;
+    status?: string;
+    progress?: number;
+    jobId?: string;
+    sourceTool?: string;
+    source?: "agent" | "child";
+    runKey?: string;
+    raw?: Record<string, unknown>;
+    hydrating?: boolean;
+    error?: string;
+}
+
+export interface Message {
     id: string;
     role: "user" | "assistant";
     content: string;
@@ -37,24 +82,9 @@ export interface ChatMessage {
     audioUrl?: string;
     videoUrl?: string;
     partialImage?: boolean;
-    reasoning?: string;
-    toolCalls?: Array<{
-        id: string;
-        name: string;
-        displayName?: string;
-        targetKind?: string;
-        target?: string;
-        source?: "chat" | "responses" | "agent" | "workflow";
-        summary?: string;
-        arguments?: string;
-        status: "running" | "completed" | "error";
-        error?: string;
-    }>;
-    progressEvents?: Array<{
-        id: string;
-        phase: "thinking" | "start" | "step" | "agent" | "progress" | "complete";
-        message: string;
-    }>;
+    stream?: StreamTree;
+    proposal?: Plan;
+    artifacts?: Artifact[];
 }
 
 export interface AttachedFile {
@@ -66,7 +96,7 @@ export interface AttachedFile {
     type: "image" | "audio" | "video" | "pdf" | "file";
 }
 
-export function toComposeAttachment(attached: Pick<AttachedFile, "type" | "url" | "file"> | undefined): ComposeAttachmentInput | undefined {
+export function toAttachment(attached: Pick<AttachedFile, "type" | "url" | "file"> | undefined): AttachmentInput | undefined {
     if (!attached?.url) {
         return undefined;
     }
@@ -79,8 +109,8 @@ export function toComposeAttachment(attached: Pick<AttachedFile, "type" | "url" 
     };
 }
 
-export function toComposeMessage(message: ChatMessage): ComposeMessage {
-    const parts: ChatMessageContentPart[] = [];
+export function toMessage(message: Message): ComposeMessage {
+    const parts: MessageContentPart[] = [];
     if (message.content.trim().length > 0) {
         parts.push({ type: "text", text: message.content });
     }
@@ -96,7 +126,7 @@ export interface UseChatOptions {
     /** Conversation ID for Pinata grouping */
     conversationId?: string;
     /** Called when a full response is received */
-    onResponse?: (message: ChatMessage) => void;
+    onResponse?: (message: Message) => void;
     /** Called when an error occurs */
     onError?: (error: string) => void;
     /** Max files allowed (default: 1) */
@@ -131,25 +161,25 @@ function summarizeActivity(value: string | undefined): string | undefined {
 
 export interface UseChatReturn {
     // === Messages ===
-    messages: ChatMessage[];
-    setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
+    messages: Message[];
+    setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
     /** Add a user message, returns the message ID */
     addUserMessage: (content: string, options?: {
-        type?: ChatMessage["type"];
+        type?: Message["type"];
         imageUrl?: string;
         audioUrl?: string;
         videoUrl?: string;
     }) => string;
     /** Create an assistant placeholder, returns the message ID */
-    createAssistantPlaceholder: (type?: ChatMessage["type"]) => string;
+    createAssistantPlaceholder: (type?: Message["type"]) => string;
     /** Update assistant message by ID (O(1) for last message) */
-    updateAssistantMessage: (id: string, update: Partial<ChatMessage>) => void;
-    /** Append reasoning text to an assistant message. */
-    appendAssistantReasoning: (id: string, delta: string) => void;
-    /** Upsert a persisted tool-call entry on an assistant message. */
-    upsertAssistantToolCall: (id: string, tool: NonNullable<ChatMessage["toolCalls"]>[number]) => void;
-    /** Append a workflow / agent progress breadcrumb to an assistant message. */
-    appendAssistantProgressEvent: (id: string, event: NonNullable<ChatMessage["progressEvents"]>[number]) => void;
+    updateAssistantMessage: (id: string, update: Partial<Message>) => void;
+    /** Reduce a canonical stream event into an assistant message stream tree. */
+    applyAssistantStreamEvent: (id: string, event: StreamEvent) => void;
+    /** Fold a local/transport failure into the same stream tree used by SSE errors. */
+    failAssistant: (id: string, message: string) => void;
+    /** Upsert a generated media/artifact reference on an assistant message. */
+    upsertAssistantArtifact: (id: string, artifact: Artifact) => void;
     /** Clear all messages */
     clearMessages: () => void;
 
@@ -204,11 +234,15 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         maxFiles = 1,
     } = options;
 
+    // Stabilize onError with a ref — prevents handleFileSelect/startRecording churn
+    const onErrorRef = useRef(onError);
+    onErrorRef.current = onError;
+
     // Stable conversationId - capture on first render only
     const conversationIdRef = useRef(providedId ?? `conv-${Date.now()}`);
 
     // === Message State ===
-    const [messages, setMessages] = useState<ChatMessage[]>([]);
+    const [messages, setMessages] = useState<Message[]>([]);
     const [activityState, setActivityState] = useState<ChatActivityState>({
         phase: "idle",
         label: "",
@@ -257,14 +291,15 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     const addUserMessage = useCallback((
         content: string,
         msgOptions?: {
-            type?: ChatMessage["type"];
+            type?: Message["type"];
             imageUrl?: string;
             audioUrl?: string;
             videoUrl?: string;
         }
     ): string => {
         const id = crypto.randomUUID();
-        const message: ChatMessage = {
+        stickToBottomRef.current = true;
+        const message: Message = {
             id,
             role: "user",
             content,
@@ -278,10 +313,11 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         return id;
     }, []);
 
-    const createAssistantPlaceholder = useCallback((type?: ChatMessage["type"]): string => {
+    const createAssistantPlaceholder = useCallback((type?: Message["type"]): string => {
         const id = crypto.randomUUID();
         currentAssistantIdRef.current = id;
         streamedTextRef.current = "";
+        stickToBottomRef.current = true;
 
         setMessages(prev => [...prev, {
             id,
@@ -294,7 +330,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         return id;
     }, []);
 
-    const updateAssistantMessage = useCallback((id: string, update: Partial<ChatMessage>) => {
+    const updateAssistantMessage = useCallback((id: string, update: Partial<Message>) => {
         setMessages(prev => {
             const next = [...prev];
             const last = next[next.length - 1];
@@ -314,15 +350,14 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         });
     }, []);
 
-    const appendAssistantReasoning = useCallback((id: string, delta: string) => {
-        if (!delta) return;
+    const applyAssistantStreamEvent = useCallback((id: string, event: StreamEvent) => {
         setMessages((prev) => {
             const next = [...prev];
-            const last = next[next.length - 1];
-            const merge = (message: ChatMessage): ChatMessage => ({
+            const merge = (message: Message): Message => ({
                 ...message,
-                reasoning: (message.reasoning || "") + delta,
+                stream: reduceStreamTree(message.stream ?? createStreamTree(), event),
             });
+            const last = next[next.length - 1];
             if (last?.id === id) {
                 next[next.length - 1] = merge(last);
                 return next;
@@ -333,18 +368,53 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         });
     }, []);
 
-    const upsertAssistantToolCall = useCallback((id: string, tool: NonNullable<ChatMessage["toolCalls"]>[number]) => {
+    const failAssistant = useCallback((id: string, message: string) => {
+        const event: StreamEvent = {
+            type: "stream",
+            id: `error:${id}:${Date.now()}`,
+            kind: "error",
+            source: "web",
+            status: "failed",
+            ts: Date.now(),
+            display: {
+                title: "Error",
+                summary: message,
+            },
+            payload: {
+                error: { message },
+            },
+        };
+
         setMessages((prev) => {
             const next = [...prev];
-            const merge = (message: ChatMessage): ChatMessage => {
-                const tools = [...(message.toolCalls || [])];
-                const idx = tools.findIndex((t) => t.id === tool.id);
+            const merge = (current: Message): Message => ({
+                ...current,
+                stream: reduceStreamTree(current.stream ?? createStreamTree(), event),
+            });
+            const last = next[next.length - 1];
+            if (last?.id === id) {
+                next[next.length - 1] = merge(last);
+                return next;
+            }
+            const idx = next.findIndex((m) => m.id === id);
+            if (idx >= 0) next[idx] = merge(next[idx]);
+            return next;
+        });
+    }, []);
+
+    const upsertAssistantArtifact = useCallback((id: string, artifact: Artifact) => {
+        setMessages((prev) => {
+            const next = [...prev];
+            const merge = (message: Message): Message => {
+                const artifacts = [...(message.artifacts || [])];
+                const key = artifactKey(artifact);
+                const idx = artifacts.findIndex((item) => item.id === artifact.id || (key !== undefined && artifactKey(item) === key));
                 if (idx >= 0) {
-                    tools[idx] = { ...tools[idx], ...tool };
+                    artifacts[idx] = { ...artifacts[idx], ...artifact, id: artifacts[idx].id };
                 } else {
-                    tools.push(tool);
+                    artifacts.push(artifact);
                 }
-                return { ...message, toolCalls: tools };
+                return { ...message, artifacts };
             };
             const last = next[next.length - 1];
             if (last?.id === id) {
@@ -357,23 +427,21 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         });
     }, []);
 
-    const appendAssistantProgressEvent = useCallback((id: string, event: NonNullable<ChatMessage["progressEvents"]>[number]) => {
-        setMessages((prev) => {
-            const next = [...prev];
-            const merge = (message: ChatMessage): ChatMessage => ({
-                ...message,
-                progressEvents: [...(message.progressEvents || []), event],
-            });
-            const last = next[next.length - 1];
-            if (last?.id === id) {
-                next[next.length - 1] = merge(last);
-                return next;
-            }
-            const idx = next.findIndex((m) => m.id === id);
-            if (idx >= 0) next[idx] = merge(next[idx]);
-            return next;
-        });
-    }, []);
+    function artifactKey(artifact: Artifact): string | undefined {
+        const index = artifact.outputIndex ?? rawNumber(artifact.raw, "outputIndex") ?? rawNumber(artifact.raw, "output_index");
+        if (artifact.responseId) {
+            return `${artifact.artifactType}:${artifact.responseId}:${artifact.jobId ?? index ?? 0}`;
+        }
+        if (artifact.jobId) {
+            return `${artifact.artifactType}:job:${artifact.jobId}`;
+        }
+        return undefined;
+    }
+
+    function rawNumber(raw: Record<string, unknown> | undefined, key: string): number | undefined {
+        const value = raw?.[key];
+        return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+    }
 
     const clearMessages = useCallback(() => {
         setMessages([]);
@@ -498,9 +566,18 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         const updateStickiness = () => {
             stickToBottomRef.current = isNearBottom();
         };
+        const markUserScroll = () => {
+            if (!isNearBottom()) stickToBottomRef.current = false;
+        };
         updateStickiness();
+        el.addEventListener("wheel", markUserScroll, { passive: true });
+        el.addEventListener("touchmove", markUserScroll, { passive: true });
         el.addEventListener("scroll", updateStickiness, { passive: true });
-        return () => el.removeEventListener("scroll", updateStickiness);
+        return () => {
+            el.removeEventListener("wheel", markUserScroll);
+            el.removeEventListener("touchmove", markUserScroll);
+            el.removeEventListener("scroll", updateStickiness);
+        };
     }, [isNearBottom]);
 
     useEffect(() => {
@@ -576,11 +653,11 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
                 previewUrlsRef.current.delete(attachedPreview);
             }
             setAttachedFiles(prev => prev.filter(f => f.file !== file));
-            onError?.("Failed to upload file");
+            onErrorRef.current?.("Failed to upload file");
         }
 
         e.target.value = "";
-    }, [maxFiles, onError]);
+    }, [maxFiles]);
 
     const handleRemoveFile = useCallback((file: File) => {
         const attachedFile = attachedFilesRef.current.find((currentFile) => currentFile.file === file);
@@ -615,7 +692,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
 
     const startRecording = useCallback(async () => {
         if (!recordingSupported) {
-            onError?.("Audio recording not supported in this browser");
+            onErrorRef.current?.("Audio recording not supported in this browser");
             return;
         }
 
@@ -689,7 +766,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
                         previewUrlsRef.current.delete(attachedPreview);
                     }
                     setAttachedFiles(prev => prev.filter((currentFile) => currentFile.file !== audioFile));
-                    onError?.("Failed to upload recording");
+                    onErrorRef.current?.("Failed to upload recording");
                 }
             };
 
@@ -698,9 +775,9 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
 
         } catch (err) {
             console.error("Failed to start recording:", err);
-            onError?.("Failed to access microphone. Please check permissions.");
+            onErrorRef.current?.("Failed to access microphone. Please check permissions.");
         }
-    }, [recordingSupported, maxFiles, onError]);
+    }, [recordingSupported, maxFiles]);
 
     const stopRecording = useCallback(() => {
         if (mediaRecorderRef.current && isRecording) {
@@ -723,16 +800,16 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         };
     }, []);
 
-    return {
+    return useMemo(() => ({
         // Messages
         messages,
         setMessages,
         addUserMessage,
         createAssistantPlaceholder,
         updateAssistantMessage,
-        appendAssistantReasoning,
-        upsertAssistantToolCall,
-        appendAssistantProgressEvent,
+        applyAssistantStreamEvent,
+        failAssistant,
+        upsertAssistantArtifact,
         clearMessages,
         // Streaming
         streamedTextRef,
@@ -762,5 +839,14 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         recordingSupported,
         startRecording,
         stopRecording,
-    };
+    }), [
+        messages, activityState, attachedFiles, isUploading, uploadedCids,
+        isRecording, recordingSupported,
+        addUserMessage, createAssistantPlaceholder, updateAssistantMessage,
+        applyAssistantStreamEvent, failAssistant, upsertAssistantArtifact,
+        clearMessages, scheduleStreamUpdate, flushStreamContent,
+        clearActivityState, setActivityPhase, startToolActivity, finishToolActivity,
+        isNearBottom, handleFileSelect, handleRemoveFile, clearFiles, cleanupFiles,
+        startRecording, stopRecording,
+    ]);
 }

@@ -573,6 +573,49 @@ export function useAgentsByCreator(creator: string | undefined) {
  * Fetch all on-chain workflows from ALL supported chains
  * Chain info comes from nested agents[0].chain in metadata
  */
+export async function fetchOnchainWorkflows(options?: {
+  includeRFA?: boolean;
+  onlyComplete?: boolean;
+}): Promise<OnchainWorkflow[]> {
+  const { includeRFA = false, onlyComplete = true } = options || {};
+
+  const chainPromises = SUPPORTED_CHAINS.map(async ({ id: chainId }) => {
+    try {
+      const contract = getWorkflowContractForChain(chainId);
+
+      const total = await readContract({
+        contract,
+        method: "function totalWorkflows() view returns (uint256)",
+        params: [],
+      }) as bigint;
+
+      const totalNum = Number(total);
+      if (totalNum === 0) return [];
+
+      const workflowPromises = Array.from({ length: totalNum }, (_, i) =>
+        fetchWorkflowData(i + 1, chainId)
+      );
+
+      let workflows = (await Promise.all(workflowPromises)).filter((m): m is OnchainWorkflow => m !== null);
+      workflows = await Promise.all(workflows.map(m => fetchWorkflowMetadata(m, chainId)));
+
+      if (onlyComplete && !includeRFA) {
+        workflows = workflows.filter(m => !m.hasActiveRfa);
+      } else if (includeRFA && !onlyComplete) {
+        workflows = workflows.filter(m => m.hasActiveRfa);
+      }
+
+      return workflows;
+    } catch (error) {
+      console.warn(`Failed to fetch workflows from chain ${chainId}:`, error);
+      return [];
+    }
+  });
+
+  const chainsWorkflows = await Promise.all(chainPromises);
+  return chainsWorkflows.flat();
+}
+
 export function useOnchainWorkflows(options?: {
   includeRFA?: boolean;
   onlyComplete?: boolean;
@@ -581,50 +624,7 @@ export function useOnchainWorkflows(options?: {
 
   return useQuery({
     queryKey: ["onchain-workflows", "all-chains", includeRFA, onlyComplete],
-    queryFn: async () => {
-      // Fetch from all supported chains in parallel
-      const chainPromises = SUPPORTED_CHAINS.map(async ({ id: chainId }) => {
-        try {
-          const contract = getWorkflowContractForChain(chainId);
-
-          // Get total workflows count for this chain
-          const total = await readContract({
-            contract,
-            method: "function totalWorkflows() view returns (uint256)",
-            params: [],
-          }) as bigint;
-
-          const totalNum = Number(total);
-          if (totalNum === 0) return [];
-
-          // Fetch all workflows from this chain (IDs start at 1)
-          const workflowPromises = Array.from({ length: totalNum }, (_, i) =>
-            fetchWorkflowData(i + 1, chainId)
-          );
-
-          let workflows = (await Promise.all(workflowPromises)).filter((m): m is OnchainWorkflow => m !== null);
-
-          // Fetch metadata for each workflow (to get walletAddress from IPFS)
-          workflows = await Promise.all(workflows.map(m => fetchWorkflowMetadata(m, chainId)));
-
-          // Filter based on options
-          if (onlyComplete && !includeRFA) {
-            workflows = workflows.filter(m => !m.hasActiveRfa);
-          } else if (includeRFA && !onlyComplete) {
-            workflows = workflows.filter(m => m.hasActiveRfa);
-          }
-
-          return workflows;
-        } catch (error) {
-          console.warn(`Failed to fetch workflows from chain ${chainId}:`, error);
-          return [];
-        }
-      });
-
-      // Merge all workflows from all chains
-      const chainsWorkflows = await Promise.all(chainPromises);
-      return chainsWorkflows.flat();
-    },
+    queryFn: () => fetchOnchainWorkflows({ includeRFA, onlyComplete }),
     staleTime: 30 * 1000,
     gcTime: 5 * 60 * 1000, // Keep in cache 5 minutes
     retry: 2,
@@ -877,27 +877,27 @@ async function fetchRFASubmissions(rfaId: number): Promise<RFASubmission[]> {
 /**
  * Fetch all open RFAs
  */
+export async function fetchOpenRFAs(): Promise<OnchainRFA[]> {
+  const contract = getRFAContract();
+
+  const rfaIds = await readContract({
+    contract,
+    method: "function getOpenRFAs() view returns (uint256[])",
+    params: [],
+  }) as bigint[];
+
+  if (rfaIds.length === 0) return [];
+
+  const rfaPromises = rfaIds.map(id => fetchRFAData(Number(id)));
+  const rfas = await Promise.all(rfaPromises);
+
+  return rfas.filter((r): r is OnchainRFA => r !== null);
+}
+
 export function useOpenRFAs() {
   return useQuery({
     queryKey: ["rfa", "open"],
-    queryFn: async () => {
-      const contract = getRFAContract();
-
-      // Get all open RFA IDs
-      const rfaIds = await readContract({
-        contract,
-        method: "function getOpenRFAs() view returns (uint256[])",
-        params: [],
-      }) as bigint[];
-
-      if (rfaIds.length === 0) return [];
-
-      // Fetch data for each RFA
-      const rfaPromises = rfaIds.map(id => fetchRFAData(Number(id)));
-      const rfas = await Promise.all(rfaPromises);
-
-      return rfas.filter((r): r is OnchainRFA => r !== null);
-    },
+    queryFn: fetchOpenRFAs,
     staleTime: 30 * 1000,
     gcTime: 5 * 60 * 1000, // Keep in cache 5 minutes
     retry: 2,

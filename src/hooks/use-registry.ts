@@ -236,7 +236,7 @@ function pluginToRegistryServer(p: BrokerOnchainPlugin): RegistryServer {
 
 async function fetchServers(options: ListServersOptions = {}): Promise<RegistryListResponse> {
     const { enabled: _enabled, ...listOptions } = options;
-    const origins = (options.origin ? String(options.origin).split(",") : ["tools", "onchain"])
+    const origins = (options.origin ? String(options.origin).split(",") : ["mcp", "onchain"])
         .map((origin) => normalizeConnectorBinding({ registryId: "placeholder", origin }).origin);
     const requestedLimit = listOptions.limit;
     const offset = listOptions.offset ?? 0;
@@ -244,12 +244,12 @@ async function fetchServers(options: ListServersOptions = {}): Promise<RegistryL
 
     const tasks: Array<Promise<{ total: number; servers: RegistryServer[] }>> = [];
 
-    if (origins.includes("tools")) {
+    if (origins.includes("mcp")) {
         tasks.push(
             (async () => {
                 const params = new URLSearchParams({ limit: String(toolsLimit), offset: String(offset) });
                 if (listOptions.category) params.set("category", listOptions.category);
-                const res = await fetch(`${BROKER_BASE}/tools?${params}`);
+                const res = await fetch(`${BROKER_BASE}/mcps?${params}`);
                 if (!res.ok) throw new Error(`Failed to fetch tools catalog: ${res.status}`);
                 const data = await res.json() as BrokerToolsListResponse;
                 return {
@@ -301,14 +301,14 @@ async function searchServers(query: string, limit = DEFAULT_REGISTRY_PAGE_SIZE, 
         return { query: normalizedQuery, total: 0, servers: [] };
     }
     const { enabled: _enabled, ...searchOptions } = options;
-    const origins = (searchOptions.origin ? String(searchOptions.origin).split(",") : ["tools", "onchain"])
+    const origins = (searchOptions.origin ? String(searchOptions.origin).split(",") : ["mcp", "onchain"])
         .map((origin) => normalizeConnectorBinding({ registryId: "placeholder", origin }).origin);
     const boundedLimit = Math.min(Math.max(1, limit), MAX_SEARCH_RESULTS);
     const params = new URLSearchParams({ q: query });
     params.set("limit", String(boundedLimit));
     const [toolsData, onchainData] = await Promise.all([
-        origins.includes("tools")
-            ? fetch(`${BROKER_BASE}/tools/search?${params}`).then(async (res) => {
+        origins.includes("mcp")
+            ? fetch(`${BROKER_BASE}/mcps/search?${params}`).then(async (res) => {
                 if (!res.ok) throw new Error(`Failed to search servers: ${res.status}`);
                 return await res.json() as { query: string; total: number; servers: BrokerServerSummary[] };
             })
@@ -348,7 +348,7 @@ async function searchServers(query: string, limit = DEFAULT_REGISTRY_PAGE_SIZE, 
 }
 
 async function fetchServer(registryId: string): Promise<RegistryServer> {
-    const binding = normalizeConnectorBinding(registryId, { defaultOrigin: "tools" });
+    const binding = normalizeConnectorBinding(registryId, { defaultOrigin: "mcp" });
     if (binding.origin === "onchain") {
         const id = binding.slug;
         const res = await fetch(`${BROKER_BASE}/onchain/${encodeURIComponent(id)}`);
@@ -357,7 +357,7 @@ async function fetchServer(registryId: string): Promise<RegistryServer> {
         return pluginToRegistryServer(plugin);
     }
     const slug = binding.slug;
-    const res = await fetch(`${BROKER_BASE}/tools/${encodeURIComponent(slug)}`);
+    const res = await fetch(`${BROKER_BASE}/mcps/${encodeURIComponent(slug)}`);
     if (!res.ok) throw new Error(`Failed to fetch server: ${res.status}`);
     const card = await res.json() as BrokerServerCard;
     return cardToRegistryServer(card);
@@ -365,26 +365,26 @@ async function fetchServer(registryId: string): Promise<RegistryServer> {
 
 async function fetchRegistryMeta(): Promise<RegistryMeta> {
     const [toolsMeta, onchain] = await Promise.all([
-        fetch(`${BROKER_BASE}/tools/meta`).then((r) => r.json() as Promise<{ origins: Record<string, number>; total: number }>),
+        fetch(`${BROKER_BASE}/mcps/meta`).then((r) => r.json() as Promise<{ origins: Record<string, number>; total: number }>),
         fetch(`${BROKER_BASE}/onchain`).then((r) => r.ok ? r.json() as Promise<BrokerOnchainResponse> : Promise.resolve(null)),
     ]);
     return {
         totalServers: toolsMeta.total + (onchain?.plugins.length ?? 0),
-        toolsServers: toolsMeta.origins["tools"] ?? 0,
+        toolsServers: toolsMeta.origins["mcp"] ?? 0,
         onchainServers: onchain?.plugins.length ?? 0,
         loadedAt: new Date().toISOString(),
     };
 }
 
 async function fetchCategories(): Promise<string[]> {
-    const res = await fetch(`${BROKER_BASE}/tools/categories`);
+    const res = await fetch(`${BROKER_BASE}/mcps/categories`);
     if (!res.ok) throw new Error(`Failed to fetch categories: ${res.status}`);
     const data = await res.json() as { categories: string[] };
     return data.categories;
 }
 
 async function fetchTags(): Promise<string[]> {
-    const res = await fetch(`${BROKER_BASE}/tools/tags`);
+    const res = await fetch(`${BROKER_BASE}/mcps/tags`);
     if (!res.ok) throw new Error(`Failed to fetch tags: ${res.status}`);
     const data = await res.json() as { tags: string[] };
     return data.tags;
@@ -524,7 +524,7 @@ export function mergeRegistrySearchResults(
 }
 
 export const ORIGIN_COLORS: Record<ServerOrigin, string> = {
-    tools: "purple",
+    mcp: "purple",
     onchain: "green",
     eliza: "orange",
 };
@@ -540,7 +540,7 @@ export function getOriginBadgeVariant(origin: ServerOrigin): "default" | "second
 
 export function getOriginLabel(origin: ServerOrigin): string {
     switch (origin) {
-        case "tools":
+        case "mcp":
             return "Tools";
         case "onchain":
             return "Onchain";

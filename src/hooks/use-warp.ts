@@ -98,6 +98,17 @@ async function getWarpedAgentIdByHash(externalHash: `0x${string}`): Promise<numb
   }
 }
 
+export async function fetchExternalWarpStatus(registry: string, address: string) {
+  const externalHash = computeExternalAgentHash(registry, address);
+  const warpedAgentId = await getWarpedAgentIdByHash(externalHash);
+
+  return {
+    isWarped: warpedAgentId > 0,
+    warpedAgentId,
+    externalHash,
+  };
+}
+
 // =============================================================================
 // React Query Hooks
 // =============================================================================
@@ -141,15 +152,7 @@ export function useIsExternalWarped(registry: string | null, address: string | n
     queryKey: ["is-external-warped", registry, address],
     queryFn: async () => {
       if (!registry || !address) return { isWarped: false, warpedAgentId: 0 };
-      
-      const externalHash = computeExternalAgentHash(registry, address);
-      const warpedAgentId = await getWarpedAgentIdByHash(externalHash);
-      
-      return {
-        isWarped: warpedAgentId > 0,
-        warpedAgentId,
-        externalHash,
-      };
+      return fetchExternalWarpStatus(registry, address);
     },
     enabled: !!registry && !!address,
     staleTime: 60 * 1000,
