@@ -71,7 +71,7 @@ interface PluginResult {
     txHash?: string;
     explorer?: string;
     executedBy?: string;
-    source?: "onchain" | "tools";
+    source?: "onchain" | "mcp";
     executionTime?: number;
 }
 
@@ -114,7 +114,7 @@ interface McpServerCard {
     credentials: Array<{ varName: string; description?: string | null; obtainUrl?: string | null }>;
 }
 
-type PluginSource = "onchain" | "tools";
+type PluginSource = "onchain" | "mcp";
 
 const CONNECTORS_URL = (import.meta.env.VITE_CONNECTORS_URL || "https://connectors.compose.market").replace(/\/+$/, "");
 
@@ -192,7 +192,7 @@ export function PluginTester({
     sessionActive,
     budgetRemaining,
     formatBudget,
-    initialSource = "tools",
+    initialSource = "mcp",
     initialPlugin = "",
 }: PluginTesterProps) {
     const wallet = useActiveWallet();
@@ -220,10 +220,10 @@ export function PluginTester({
     // Tools state
     const [mcpServerPickerOpen, setMcpServerPickerOpen] = useState(false);
     const mcpRegistryOptions = useMemo(() => ({
-        origin: "tools" as const,
+        origin: "mcp" as const,
         limit: 50,
         offset: 0,
-        enabled: pluginSource === "tools" && mcpServerPickerOpen,
+        enabled: pluginSource === "mcp" && mcpServerPickerOpen,
     }), [mcpServerPickerOpen, pluginSource]);
     const { data: mcpRegistryData, isLoading: mcpLoading, forceRefresh: forceRefreshMcpRegistry } = useRegistryServers(mcpRegistryOptions);
     const mcpServers = mcpRegistryData?.servers ?? [];
@@ -233,13 +233,13 @@ export function PluginTester({
     const trimmedMcpServerSearch = mcpServerSearch.trim();
     const mcpSearchReady = trimmedMcpServerSearch.length >= 2;
     const { data: mcpSearchData, isLoading: mcpSearchLoading } = useRegistrySearch(trimmedMcpServerSearch, 50, {
-        origin: "tools",
-        enabled: pluginSource === "tools" && mcpServerPickerOpen,
+        origin: "mcp",
+        enabled: pluginSource === "mcp" && mcpServerPickerOpen,
     });
     const [selectedMcpCard, setSelectedMcpCard] = useState<McpServerCard | null>(null);
     const [mcpTools, setMcpTools] = useState<McpTool[]>([]);
     const [selectedMcpServer, setSelectedMcpServer] = useState<string>(
-        initialSource === "tools" && initialPlugin ? normalizePluginSlug(initialPlugin, "tools") : ""
+        initialSource === "mcp" && initialPlugin ? normalizePluginSlug(initialPlugin, "mcp") : ""
     );
 
     // Filtered tool servers
@@ -248,7 +248,7 @@ export function PluginTester({
             return mcpServers.slice(0, 50);
         }
         return (mcpSearchData?.servers ?? [])
-            .filter((server) => server.origin === "tools")
+            .filter((server) => server.origin === "mcp")
             .slice(0, 50);
     }, [mcpSearchData?.servers, mcpSearchReady, mcpServers]);
 
@@ -392,7 +392,7 @@ export function PluginTester({
     const fetchMcpTools = async (slug: string) => {
         setPluginsLoading(true);
         try {
-            const response = await fetch(`${CONNECTORS_URL}/tools/${encodeURIComponent(slug)}`);
+            const response = await fetch(`${CONNECTORS_URL}/mcps/${encodeURIComponent(slug)}`);
             if (!response.ok) throw new Error(`Failed to fetch tools: ${response.status}`);
             const data = await response.json() as McpServerCard;
             setSelectedMcpCard(data);
@@ -419,7 +419,7 @@ export function PluginTester({
     };
 
     const handleMcpServerChange = useCallback((registryId: string) => {
-        setSelectedMcpServer(normalizePluginSlug(registryId, "tools"));
+        setSelectedMcpServer(normalizePluginSlug(registryId, "mcp"));
         setSelectedTool("");
         setToolSchema(null);
         setToolArgs("{}");
@@ -439,7 +439,7 @@ export function PluginTester({
 
     const currentMcpTool = mcpTools.find(t => t.name === selectedTool);
     const selectedMcpCredentials = selectedMcpCard?.credentials ?? [];
-    const mcpCredentialsRequired = pluginSource === "tools" && selectedMcpCard?.status === "credential_gated";
+    const mcpCredentialsRequired = pluginSource === "mcp" && selectedMcpCard?.status === "credential_gated";
 
     const handleExecuteMcpTool = useCallback(async () => {
         if (!selectedMcpServer || !selectedTool || executingPlugin) return;
@@ -468,10 +468,10 @@ export function PluginTester({
                 throw new Error("Compose key session is required");
             }
 
-            const slug = normalizePluginSlug(selectedMcpServer, "tools");
+            const slug = normalizePluginSlug(selectedMcpServer, "mcp");
             const headers: Record<string, string> = { "Content-Type": "application/json" };
             const response = await sdk.fetch(
-                `/api/tools/${encodeURIComponent(slug)}/execute/${encodeURIComponent(selectedTool)}`,
+                `/api/mcps/${encodeURIComponent(slug)}/execute/${encodeURIComponent(selectedTool)}`,
                 {
                     method: "POST",
                     headers,
@@ -486,7 +486,7 @@ export function PluginTester({
                 tool: selectedTool,
                 result: data.result,
                 error: data.ok === false ? (data.message || data.kind) : (data.error || data.hint),
-                source: "tools",
+                source: "mcp",
             };
 
             setPluginResults(prev => [...prev, result]);
@@ -495,7 +495,7 @@ export function PluginTester({
             setPluginError(errorMsg);
             setPluginResults(prev => [
                 ...prev,
-                { success: false, pluginId: selectedMcpServer, tool: selectedTool, error: errorMsg, source: "tools" },
+                { success: false, pluginId: selectedMcpServer, tool: selectedTool, error: errorMsg, source: "mcp" },
             ]);
         } finally {
             setExecutingPlugin(false);
@@ -513,7 +513,7 @@ export function PluginTester({
         setToolArgs("{}");
         setPluginError(null);
         if (source !== "onchain") setSelectedPlugin("");
-        if (source !== "tools") {
+        if (source !== "mcp") {
             setSelectedMcpServer("");
             setSelectedMcpCard(null);
             setMcpTools([]);
@@ -536,8 +536,8 @@ export function PluginTester({
     }, [pluginSource, goatStatus]);
 
     useEffect(() => {
-        if (selectedMcpServer && pluginSource === "tools") {
-            const slug = normalizePluginSlug(selectedMcpServer, "tools");
+        if (selectedMcpServer && pluginSource === "mcp") {
+            const slug = normalizePluginSlug(selectedMcpServer, "mcp");
             if (slug) fetchMcpTools(slug);
         }
     }, [selectedMcpServer, pluginSource]);
@@ -573,7 +573,7 @@ export function PluginTester({
                                     <span className="text-[10px] text-muted-foreground">DeFi</span>
                                 </div>
                             </SelectItem>
-                            <SelectItem value="tools">
+                            <SelectItem value="mcp">
                                 <div className="flex items-center gap-2">
                                     <Badge className="bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/40 text-[10px] px-1.5">Tools</Badge>
                                     <span className="text-[10px] text-muted-foreground">Servers</span>
@@ -637,7 +637,7 @@ export function PluginTester({
                     )}
 
                     {/* Tools Server selector */}
-                    {pluginSource === "tools" && (
+                    {pluginSource === "mcp" && (
                         <>
                             <Popover open={mcpServerPickerOpen} onOpenChange={setMcpServerPickerOpen}>
                                 <PopoverTrigger asChild>
@@ -650,7 +650,7 @@ export function PluginTester({
                                             {mcpLoading
                                                 ? "Loading..."
                                                 : selectedMcpServer
-                                                    ? selectedMcpCard?.name || mcpServers.find(s => s.slug === normalizePluginSlug(selectedMcpServer, "tools"))?.name || normalizePluginSlug(selectedMcpServer, "tools")
+                                                    ? selectedMcpCard?.name || mcpServers.find(s => s.slug === normalizePluginSlug(selectedMcpServer, "mcp"))?.name || normalizePluginSlug(selectedMcpServer, "mcp")
                                                     : "Select server..."}
                                         </span>
                                         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
@@ -693,7 +693,7 @@ export function PluginTester({
                                                                 <Check
                                                                     className={cn(
                                                                         "h-4 w-4 shrink-0",
-                                                                        normalizePluginSlug(selectedMcpServer, "tools") === server.slug ? "opacity-100" : "opacity-0"
+                                                                        normalizePluginSlug(selectedMcpServer, "mcp") === server.slug ? "opacity-100" : "opacity-0"
                                                                     )}
                                                                 />
                                                                 <div className="flex flex-col min-w-0 flex-1">
@@ -804,7 +804,7 @@ export function PluginTester({
                                 </div>
                             )}
 
-                            {pluginSource === "tools" && mcpCatalogTotal > 0 && (
+                            {pluginSource === "mcp" && mcpCatalogTotal > 0 && (
                                 <div className="mt-6 text-left max-w-md mx-auto">
                                     <p className="text-xs text-muted-foreground uppercase tracking-wider mb-3 text-center">
                                         {mcpCatalogTotal.toLocaleString()} Tool Servers Available
@@ -840,12 +840,12 @@ export function PluginTester({
                                     <Badge
                                         className={cn(
                                             "text-[10px] px-1.5",
-                                            result.source === "tools"
+                                            result.source === "mcp"
                                                 ? "bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/40"
                                                 : "bg-green-500/20 text-green-400 border-green-500/40"
                                         )}
                                     >
-                                        {result.source === "tools" ? "Tools" : "Onchain"}
+                                        {result.source === "mcp" ? "Tools" : "Onchain"}
                                     </Badge>
                                     <span className="font-mono text-sm text-foreground">
                                         {result.pluginId}/{result.tool}
@@ -970,7 +970,7 @@ export function PluginTester({
                                         if (pluginSource === "onchain" && currentTool) {
                                             const defaultArgs = generateDefaultArgs(currentTool.parameters);
                                             setToolArgs(JSON.stringify(defaultArgs, null, 2));
-                                        } else if (pluginSource === "tools" && currentMcpTool) {
+                                        } else if (pluginSource === "mcp" && currentMcpTool) {
                                             const defaultArgs = generateDefaultArgs(currentMcpTool.inputSchema);
                                             setToolArgs(JSON.stringify(defaultArgs, null, 2));
                                         }

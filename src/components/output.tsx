@@ -7,6 +7,7 @@
  * Uses fuchsia brand color (Manowar theme) for consistency.
  */
 import React, { memo } from "react";
+import { StreamMedia as SharedStreamMedia } from "@compose-market/theme/workflows";
 import {
     Sheet,
     SheetContent,
@@ -138,6 +139,13 @@ function formatCost(weiString: string): string {
     return `$${(wei / 1_000_000).toFixed(4)}`;
 }
 
+function mediaDataUrl(kind: "image" | "audio" | "video", value: string): string {
+    if (value.startsWith("data:")) return value;
+    if (kind === "image") return `data:image/png;base64,${value}`;
+    if (kind === "audio") return `data:audio/wav;base64,${value}`;
+    return `data:video/mp4;base64,${value}`;
+}
+
 // =============================================================================
 // Step Result Item
 // =============================================================================
@@ -194,11 +202,7 @@ const StepResultItem = memo(function StepResultItem({
                     {/* Image Output */}
                     {outputType === "image" && mediaUrl && (
                         <div className="relative group">
-                            <img
-                                src={mediaUrl}
-                                alt={`Output from ${step.stepName}`}
-                                className="rounded-md max-w-full max-h-64 object-contain border border-sidebar-border"
-                            />
+                            <SharedStreamMedia kind="image" url={mediaUrl} alt={`Output from ${step.stepName}`} />
                             <Button
                                 size="sm"
                                 variant="ghost"
@@ -212,16 +216,12 @@ const StepResultItem = memo(function StepResultItem({
 
                     {/* Audio Output */}
                     {outputType === "audio" && mediaUrl && (
-                        <audio controls className="w-full h-10">
-                            <source src={mediaUrl} />
-                        </audio>
+                        <SharedStreamMedia kind="audio" url={mediaUrl} />
                     )}
 
                     {/* Video Output */}
                     {outputType === "video" && mediaUrl && (
-                        <video controls className="rounded-md max-w-full max-h-64">
-                            <source src={mediaUrl} />
-                        </video>
+                        <SharedStreamMedia kind="video" url={mediaUrl} />
                     )}
 
                     {/* Text Output */}
@@ -351,21 +351,17 @@ export const WorkflowOutputPanel = memo(function WorkflowOutputPanel({
                         {/* Image Output */}
                         {result.output.multimodal.outputType === "image" && (
                             <div className="relative group">
-                                <img
-                                    src={result.output.multimodal.output.startsWith("data:")
-                                        ? result.output.multimodal.output
-                                        : `data:image/png;base64,${result.output.multimodal.output}`}
+                                <SharedStreamMedia
+                                    kind="image"
+                                    url={mediaDataUrl("image", result.output.multimodal.output)}
                                     alt="Generated output"
-                                    className="rounded-md max-w-full max-h-80 object-contain border border-sidebar-border"
                                 />
                                 <Button
                                     size="sm"
                                     variant="ghost"
                                     className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity h-7 w-7 p-0"
                                     onClick={() => {
-                                        const src = result.output.multimodal!.output.startsWith("data:")
-                                            ? result.output.multimodal!.output
-                                            : `data:image/png;base64,${result.output.multimodal!.output}`;
+                                        const src = mediaDataUrl("image", result.output.multimodal!.output);
                                         window.open(src, "_blank");
                                     }}
                                 >
@@ -376,20 +372,12 @@ export const WorkflowOutputPanel = memo(function WorkflowOutputPanel({
 
                         {/* Audio Output */}
                         {result.output.multimodal.outputType === "audio" && (
-                            <audio controls className="w-full">
-                                <source src={result.output.multimodal.output.startsWith("data:")
-                                    ? result.output.multimodal.output
-                                    : `data:audio/wav;base64,${result.output.multimodal.output}`} />
-                            </audio>
+                            <SharedStreamMedia kind="audio" url={mediaDataUrl("audio", result.output.multimodal.output)} />
                         )}
 
                         {/* Video Output */}
                         {result.output.multimodal.outputType === "video" && (
-                            <video controls className="rounded-md max-w-full max-h-80">
-                                <source src={result.output.multimodal.output.startsWith("data:")
-                                    ? result.output.multimodal.output
-                                    : `data:video/mp4;base64,${result.output.multimodal.output}`} />
-                            </video>
+                            <SharedStreamMedia kind="video" url={mediaDataUrl("video", result.output.multimodal.output)} />
                         )}
                     </div>
                 )}
