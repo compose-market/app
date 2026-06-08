@@ -1,33 +1,39 @@
-import { Copy, Cpu, DollarSign, ExternalLink, Globe, Package, Zap, ArrowRightLeft, Check, CheckCircle2, Eye, Layers, Shield, Star } from "lucide-react";
+import { Copy, Cpu, DollarSign, ExternalLink, Globe, Percent, ScrollText, Zap, ArrowRightLeft, Check, CheckCircle2, Eye, Layers, Shield, Star } from "lucide-react";
 import type { KeyboardEvent, MouseEvent } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
-  ComposeAgentCard as ThemeAgentCard,
-  ComposeAgentCardSkeleton as ThemeAgentCardSkeleton,
-  type ComposeAgentBadge as AgentBadge,
-  type ComposeAgentMetric as AgentMetric,
-  type ComposeAgentTag as AgentTag,
+  AgentCard as ThemeAgentCard,
+  AgentCardSkeleton as ThemeAgentCardSkeleton,
+  type AgentBadge as AgentBadge,
+  type AgentMetric as AgentMetric,
+  type AgentTag as AgentTag,
 } from "@compose-market/theme/agents";
-import { ShellButton } from "@compose-market/theme/shell";
+import { chainLogo, chainLogoUrl } from "@compose-market/theme/chain-logos";
+import { Excerpt, Hint, ShellButton } from "@compose-market/theme/shell";
 import { useLocation } from "wouter";
 import { usePostHog } from "@posthog/react";
-import { getIpfsUrl } from "@/lib/pinata";
 import type { OnchainAgent } from "@/hooks/use-onchain";
-import { useIsExternalWarped } from "@/hooks/use-warp";
 import {
   AGENT_REGISTRIES,
   formatInteractions,
   getReadmeExcerpt,
   type Agent,
 } from "@/lib/agents";
-import { CHAIN_CONFIG } from "@/lib/performance/chains-data";
-import { getContractAddress } from "@/lib/contracts";
+import { CHAIN_CONFIG, getContractAddress } from "@/lib/performance/chains-data";
 import { API_BASE_URL } from "@/lib/sdk";
+
+const LOGO_DEV_KEY = import.meta.env.VITE_PUBLIC_LOGO_DEV_PUBLISHABLE_KEY;
+
+function logoToken(value: string | undefined): value is string {
+  return Boolean(value?.trim() && !/^sk[_-]/i.test(value.trim()));
+}
 
 export interface AgentCardProps {
   agent: OnchainAgent;
   onCopyEndpoint?: () => void;
   onOpen?: () => void;
   className?: string;
+  variant?: "default" | "market" | "compact";
 }
 
 export interface DiscoveryAgent extends Agent {
@@ -55,17 +61,11 @@ function initials(value: string): string {
 }
 
 function resolveAvatarUrl(agent: OnchainAgent): string | null {
-  const image = agent.metadata?.image;
-  if (!image || image === "none") {
-    return null;
-  }
-  if (image.startsWith("ipfs://")) {
-    return getIpfsUrl(image.replace("ipfs://", ""));
-  }
-  return image.startsWith("https://") ? image : null;
+  const avatarUrl = (agent.metadata as { avatarUrl?: string | null } | undefined)?.avatarUrl;
+  return typeof avatarUrl === "string" && /^https?:\/\//i.test(avatarUrl) ? avatarUrl : null;
 }
 
-function badge(agent: OnchainAgent): string {
+function chainLabel(agent: OnchainAgent): string {
   const chainId = chain(agent);
   const chainInfo = conf(chainId);
   if (chainInfo) {
@@ -74,32 +74,34 @@ function badge(agent: OnchainAgent): string {
   return typeof chainId === "number" ? `Chain ${chainId}` : "Unknown Chain";
 }
 
-function buildBadges(agent: OnchainAgent): AgentBadge[] {
-  const badges: AgentBadge[] = [
-    {
-      label: "Verified",
-      tone: "green",
-    },
-    {
-      label: "Manowar",
-      tone: "warning",
-      icon: <Zap size={12} />,
-    },
-    {
-      label: badge(agent),
-      tone: "cyan",
-      icon: <Globe size={12} />,
-    },
-  ];
-
-  if (agent.cloneable) {
-    badges.splice(1, 0, {
-      label: "Cloneable",
-      tone: "fuchsia",
-    });
+function buildBadges(agent: OnchainAgent, market: boolean): AgentBadge[] {
+  if (market) {
+    return [];
   }
+  void agent;
+  return [];
+}
 
-  return badges;
+function NetworkMark({ agent }: { agent: OnchainAgent }) {
+  const logo = chainLogo(chain(agent));
+  if (!logo || !logoToken(LOGO_DEV_KEY)) {
+    return null;
+  }
+  const label = chainLabel(agent);
+  return (
+    <Hint label={label}>
+      <span className="cm-agent-card__network" aria-label={label}>
+        <img
+          className="cm-agent-card__network-image"
+          src={chainLogoUrl(logo, LOGO_DEV_KEY, { size: 32 })}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          referrerPolicy="origin"
+        />
+      </span>
+    </Hint>
+  );
 }
 
 function chain(agent: OnchainAgent): number | undefined {
@@ -148,33 +150,47 @@ function buildMetrics(agent: OnchainAgent): AgentMetric[] {
     {
       label: "Licenses",
       value: licenses,
-      icon: <Package size={16} />,
+      icon: <ScrollText size={16} />,
       tone: "cyan",
     },
     {
       label: "Creator Fee",
       value: `${agent.creatorFee ?? agent.metadata?.creatorFee ?? 1}%`,
-      icon: <DollarSign size={16} />,
+      icon: <Percent size={16} />,
       tone: "green",
     },
   ];
 }
 
-function buildTags(agent: OnchainAgent): AgentTag[] {
+function buildTags(agent: OnchainAgent, limit?: number): AgentTag[] {
   const plugins = agent.metadata?.plugins || [];
   if (plugins.length === 0) {
     return [{ label: "No tools", title: "No tools registered" }];
   }
-  return plugins.map((plugin) => ({
+
+  const visible = typeof limit === "number" ? plugins.slice(0, limit) : plugins;
+  const tags = visible.map((plugin) => ({
     label: plugin.name || plugin.registryId,
     title: plugin.origin || plugin.registryId,
   }));
+  const hidden = plugins.length - visible.length;
+
+  return hidden > 0
+    ? [...tags, { label: `+${hidden}`, title: `${hidden} more tools` }]
+    : tags;
 }
 
-export function AgentCard({ agent, onCopyEndpoint, onOpen, className }: AgentCardProps) {
+export function AgentCard({ agent, onCopyEndpoint, onOpen, className, variant = "default" }: AgentCardProps) {
+  const isMarketCard = variant === "market";
+  const compact = className?.split(/\s+/).some((name) => (
+    name === "cm-agent-card--match-chat"
+    || name === "cm-agent-card--asset"
+  )) ?? false;
   const name = agent.metadata?.name || (agent.walletAddress ? short(agent.walletAddress) : `Agent ${agent.id}`);
   const address = agent.walletAddress ? short(agent.walletAddress) : null;
   const model = agent.metadata?.model || "Unknown";
+  const framework = agent.metadata?.framework === "other" ? "Other" : "Manowar";
+  const description = agent.metadata?.description || "No description available";
   const chainId = chain(agent);
   const chainInfo = conf(chainId);
   const tokenUrl = token(agent, chainId);
@@ -196,6 +212,7 @@ export function AgentCard({ agent, onCopyEndpoint, onOpen, className }: AgentCar
   return (
     <ThemeAgentCard
       interactive
+      variant={isMarketCard ? "market" : variant}
       className={className}
       role={onOpen ? "link" : undefined}
       tabIndex={onOpen ? 0 : undefined}
@@ -214,19 +231,39 @@ export function AgentCard({ agent, onCopyEndpoint, onOpen, className }: AgentCar
         <span className="cm-agent-card__identity">
           <span className="cm-agent-card__identity-head">
             <span className="cm-agent-card__identity-name">{name}</span>
-            {address ? <span className="cm-agent-card__identity-address">{address}</span> : null}
+            <Hint label="Verified">
+              <span className="cm-agent-card__verified" aria-label="Verified">
+                <Check size={18} />
+              </span>
+            </Hint>
+            <NetworkMark agent={agent} />
           </span>
-          <span className="cm-agent-card__model" title={model}>
-            <Cpu size={11} />
-            <span className="cm-agent-card__model-name">{model}</span>
+          {address ? <span className="cm-agent-card__identity-address">{address}</span> : null}
+          <span className="cm-agent-card__identity-meta">
+            <Hint label={model}>
+              <span className="cm-agent-card__model">
+                <Cpu size={11} />
+                <span className="cm-agent-card__model-name">{model}</span>
+              </span>
+            </Hint>
+            <Hint label={framework}>
+              <span className="cm-agent-card__model" data-tone="warning">
+                <Zap size={11} />
+                <span className="cm-agent-card__model-name">{framework}</span>
+              </span>
+            </Hint>
           </span>
         </span>
       )}
-      description={agent.metadata?.description || "No description available"}
-      badges={buildBadges(agent)}
+      description={(
+        <Excerpt title={name} text={description} lines={isMarketCard ? 3 : 4}>
+          {description}
+        </Excerpt>
+      )}
+      badges={buildBadges(agent, isMarketCard)}
       metrics={buildMetrics(agent)}
       tagsTitle={`Tools (${agent.metadata?.plugins?.length || 0})`}
-      tags={buildTags(agent)}
+      tags={buildTags(agent, isMarketCard ? 4 : compact ? 6 : undefined)}
       headerAction={tokenUrl ? (
         <ShellButton
           tone="ghost"
@@ -242,7 +279,7 @@ export function AgentCard({ agent, onCopyEndpoint, onOpen, className }: AgentCar
           <ExternalLink size={16} />
         </ShellButton>
       ) : undefined}
-      footer={apiEndpoint ? (
+      footer={!isMarketCard && apiEndpoint ? (
         <div className="cm-agent-card__footer-stack">
           <div className="cm-agent-card__endpoint">
             <div className="cm-agent-card__endpoint-label">A2A Endpoint</div>
@@ -372,6 +409,21 @@ function discoveryMetrics(agent: DiscoveryAgent): AgentMetric[] {
   ];
 }
 
+function useExternalWarpStatus(registry: string | null, address: string | null) {
+  return useQuery({
+    queryKey: ["is-external-warped", registry, address],
+    queryFn: async () => {
+      if (!registry || !address) {
+        return { isWarped: false, warpedAgentId: 0 };
+      }
+      const { fetchExternalWarpStatus } = await import("@/hooks/use-warp");
+      return fetchExternalWarpStatus(registry, address);
+    },
+    enabled: Boolean(registry && address),
+    staleTime: 60 * 1000,
+  });
+}
+
 export function DiscoveryAgentCard({ agent, onSelect, className }: DiscoveryAgentCardProps) {
   const [, setLocation] = useLocation();
   const posthog = usePostHog();
@@ -379,7 +431,7 @@ export function DiscoveryAgentCard({ agent, onSelect, className }: DiscoveryAgen
   const registryInfo = AGENT_REGISTRIES[agent.registry];
   const externalRegistry = !isManowar ? agent.registry : null;
   const externalAddress = !isManowar ? agent.address : null;
-  const { data: externalWarpData } = useIsExternalWarped(externalRegistry, externalAddress);
+  const { data: externalWarpData } = useExternalWarpStatus(externalRegistry, externalAddress);
   const warped = isManowar ? agent.isWarped : externalWarpData?.isWarped;
   const excerpt = agent.description || (agent.readme ? getReadmeExcerpt(agent.readme, 100) : "");
   const registry = registryInfo?.name || agent.registry;
@@ -415,7 +467,11 @@ export function DiscoveryAgentCard({ agent, onSelect, className }: DiscoveryAgen
           <span className="cm-agent-card__identity-address">{registry}</span>
         </span>
       )}
-      description={excerpt}
+      description={(
+        <Excerpt title={agent.name} text={excerpt} lines={3}>
+          {excerpt}
+        </Excerpt>
+      )}
       badges={discoveryBadges(agent, registry, warped)}
       metrics={discoveryMetrics(agent)}
       tagsTitle="Tags"
