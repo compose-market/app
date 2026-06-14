@@ -12,16 +12,9 @@ import { Excerpt } from "@compose-market/theme/shell";
 import { WorkflowCard as WorkflowCardShell, WorkflowCardSkeleton } from "@compose-market/theme/workflows";
 import { mpTrack } from "@/lib/mixpanel";
 import { Link, useLocation } from "wouter";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import type { OnchainAgent, OnchainWorkflow, OnchainRFA } from "@/hooks/use-onchain";
 import { useTabs } from "@/hooks/use-tabs";
 import { getIpfsUrl } from "@/lib/pinata";
@@ -32,12 +25,11 @@ import {
   getContractAddress,
   weiToUsdc,
 } from "@/lib/performance/chains-data";
-import { sdk } from "@/lib/sdk";
 import { AgentCard as SharedAgentCard, AgentCardSkeleton as SharedAgentCardSkeleton } from "@/components/agent-card";
+import { Ordering, SearchFold, Switcher, type Option } from "@/components/control";
 import {
   Box,
   Layers,
-  Search,
   Sparkles,
   RefreshCw,
   DollarSign,
@@ -65,6 +57,18 @@ type TabStatus = {
   count: string;
   busy: boolean;
 };
+
+const tabs: Option<MarketTab>[] = [
+  { value: "agents", label: "Agents", icon: Bot },
+  { value: "workflows", label: "Workflows", icon: Layers },
+  { value: "rfas", label: "RFAs", icon: FileQuestion },
+];
+
+const orders: Option<AgentSort>[] = [
+  { value: "newest", label: "Newest", icon: Clock },
+  { value: "price-low", label: "Price: Low to High", icon: DollarSign },
+  { value: "price-high", label: "Price: High to Low", icon: DollarSign },
+];
 
 export default function Market() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -102,45 +106,30 @@ export default function Market() {
 
   return (
     <div className="cm-market-workspace">
-      {/* Page Header */}
-      <div className="cm-page-header">
-        <div className="cm-page-header__title-row">
-          <h1 className="cm-page-header__title">
-            <span className="text-fuchsia-500 mr-2">//</span>
-            MARKET
-          </h1>
-          <div className="cm-page-header__rule hidden md:block"></div>
-        </div>
-        <div className="cm-page-header__subtitle-row">
-          <p className="cm-page-header__subtitle">
-            Discover workflows and RFA bounties on the Manowar protocol.
-          </p>
-          <Badge variant="outline" className="cm-page-header__metric">
-            {currentStatus.count}
-          </Badge>
-        </div>
-      </div>
-
       <Tabs value={activeTab} onValueChange={setActiveTab} className="cm-market-tabs w-full">
-        <div className="cm-control-rail cm-market-control-rail cm-market-control-rail--unified">
-          <TabsList className="cm-shell-tab-strip cm-market-control-rail__tabs">
-            <TabsTrigger value="agents" className="cm-shell-tab min-w-0">
-              <Bot className="w-3.5 h-3.5 shrink-0" />
-              <span className="truncate">AGENTS</span>
-            </TabsTrigger>
-            <TabsTrigger value="workflows" className="cm-shell-tab min-w-0">
-              <Layers className="w-3.5 h-3.5 shrink-0" />
-              <span className="truncate">WORKFLOWS</span>
-            </TabsTrigger>
-            <TabsTrigger value="rfas" className="cm-shell-tab min-w-0">
-              <FileQuestion className="w-3.5 h-3.5 shrink-0" />
-              <span className="truncate">RFAs</span>
-            </TabsTrigger>
-          </TabsList>
-          <div className="cm-market-control-rail__middle">
-            <MarketSearch
+        <div className="cm-control-rail cm-market-control-rail">
+          <div className="cm-market-control-rail__brand">
+            <h1 className="cm-page-header__title cm-market-control-rail__title">
+              <span className="text-fuchsia-500 mr-2">//</span>
+              MARKET
+            </h1>
+            <Badge variant="outline" className="cm-page-header__metric cm-market-control-rail__count">
+              {currentStatus.count}
+            </Badge>
+          </div>
+          <Switcher
+            value={tab}
+            options={tabs}
+            label="Market section"
+            onChange={setActiveTab}
+            className="cm-market-control-rail__tabs"
+          />
+          <div className="cm-market-control-rail__actions">
+            <SearchFold
               open={searchOpen}
               value={searchQuery}
+              label="Search market"
+              placeholder="Search market..."
               onOpenChange={setSearchOpen}
               onChange={(value) => {
                 setSearchQuery(value);
@@ -149,31 +138,11 @@ export default function Market() {
                 }
               }}
             />
-          </div>
-          <div className="cm-market-control-rail__actions">
             {tab === "agents" ? (
-              <Select value={agentSort} onValueChange={(value) => setAgentSort(value as AgentSort)} disabled={Boolean(q)}>
-                <SelectTrigger className="w-[170px] bg-background/50 border-primary/20 h-9 text-sm">
-                  <SelectValue placeholder="Sort by" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="newest">Newest</SelectItem>
-                  <SelectItem value="price-low">Price: Low to High</SelectItem>
-                  <SelectItem value="price-high">Price: High to Low</SelectItem>
-                </SelectContent>
-              </Select>
+              <Ordering value={agentSort} options={orders} onChange={setAgentSort} disabled={Boolean(q)} />
             ) : null}
             {tab === "workflows" ? (
-              <Select value={workflowSort} onValueChange={(value) => setWorkflowSort(value as WorkflowSort)}>
-                <SelectTrigger className="w-[170px] bg-background/50 border-primary/20 h-9 text-sm">
-                  <SelectValue placeholder="Sort by" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="newest">Newest</SelectItem>
-                  <SelectItem value="price-low">Price: Low to High</SelectItem>
-                  <SelectItem value="price-high">Price: High to Low</SelectItem>
-                </SelectContent>
-              </Select>
+              <Ordering value={workflowSort} options={orders} onChange={setWorkflowSort} />
             ) : null}
             <Button
               variant="outline"
@@ -202,63 +171,6 @@ export default function Market() {
           {activeTab === "rfas" ? <RFAsTab searchQuery={deferredQuery} onStatus={onStatus} /> : null}
         </TabsContent>
       </Tabs>
-    </div>
-  );
-}
-
-function MarketSearch({
-  open,
-  value,
-  onOpenChange,
-  onChange,
-}: {
-  open: boolean;
-  value: string;
-  onOpenChange: (open: boolean) => void;
-  onChange: (value: string) => void;
-}) {
-  const inputRef = React.useRef<HTMLInputElement | null>(null);
-  const visible = open || value.trim().length > 0;
-
-  React.useEffect(() => {
-    if (!visible) return;
-    const frame = window.requestAnimationFrame(() => inputRef.current?.focus());
-    return () => window.cancelAnimationFrame(frame);
-  }, [visible]);
-
-  return (
-    <div className="cm-market-search-fold" data-open={visible}>
-      <label className="cm-search cm-search--market" aria-label="Search market" aria-hidden={!visible}>
-        <Search size={16} aria-hidden="true" />
-        <input
-          ref={inputRef}
-          className="cm-search__input"
-          type="search"
-          placeholder="Search market..."
-          value={value}
-          disabled={!visible}
-          tabIndex={visible ? 0 : -1}
-          onChange={(event) => onChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              if (value) {
-                onChange("");
-              } else {
-                onOpenChange(false);
-              }
-            }
-          }}
-        />
-      </label>
-      <button
-        type="button"
-        className="cm-hud-button cm-hud-button--icon cm-market-search-fold__toggle"
-        aria-label="Search"
-        aria-expanded={visible}
-        onClick={() => onOpenChange(!visible)}
-      >
-        <Search className="cm-hud-icon" size={17} />
-      </button>
     </div>
   );
 }
@@ -717,7 +629,7 @@ const RFACard = React.memo(function RFACard({
 
 const AGENTS_LIMIT = 72;
 const AGENTS_PATH = "/agents";
-const AGENTS_SEARCH_PATH = "/agents/search";
+const AGENTS_URL = (import.meta.env.VITE_AGENTS_URL || "https://agents.compose.market").replace(/\/+$/, "");
 
 type AgentPage = {
   agents: DirectoryAgent[];
@@ -776,7 +688,7 @@ async function page(input: { cursor?: string; q?: string; sort?: AgentSort; sign
   if (input.cursor) params.set("cursor", input.cursor);
   if (input.q) params.set("q", input.q);
   if (!input.q && input.sort) params.set("sort", input.sort);
-  const response = await sdk.fetch(`${input.q ? AGENTS_SEARCH_PATH : AGENTS_PATH}?${params.toString()}`, {
+  const response = await fetch(`${AGENTS_URL}${AGENTS_PATH}?${params.toString()}`, {
     headers: { Accept: "application/json" },
     signal: input.signal,
   });
@@ -816,8 +728,8 @@ function AgentsTab({
     },
     initialPageParam: null as string | null,
     getNextPageParam: (page) => page.hasMore ? page.nextCursor ?? undefined : undefined,
-    staleTime: 10 * 60_000,
-    gcTime: 30 * 60_000,
+    staleTime: 0,
+    gcTime: 0,
     retry: 1,
   });
 

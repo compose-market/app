@@ -45,7 +45,7 @@ import {
 import { cn } from "@/lib/utils";
 
 // Note: Executability is now determined by the `executable` field from the backend
-// Plugin testing is now consolidated in the Playground page (/playground?tab=plugins)
+// Connector testing is now consolidated in the Playground page (/playground?tab=connectors)
 
 // =============================================================================
 // Server Card Component
@@ -208,17 +208,17 @@ function ServerDetailDialog({
 
   const isEliza = server.origin === "eliza";
 
-  const handleTestPlugin = () => {
+  const handleTestConnector = () => {
     posthog?.capture("registry_server_tested", {
       server_id: server.registryId,
       server_name: server.name,
       server_origin: server.origin,
     });
     const source = isOnchain ? "onchain" : isEliza ? "eliza" : "mcp";
-    const pluginParam = server.slug;
+    const connectorParam = server.slug;
 
-    // Navigate to playground with source and plugin pre-selected
-    navigate(`/playground?tab=plugins&source=${source}&plugin=${encodeURIComponent(pluginParam)}`);
+    // Navigate to playground with source and connector pre-selected
+    navigate(`/playground?tab=connectors&source=${source}&connector=${encodeURIComponent(connectorParam)}`);
     onOpenChange(false);
   };
 
@@ -339,7 +339,7 @@ function ServerDetailDialog({
           <div className="flex gap-2 pt-4 border-t border-sidebar-border">
             {(isExecutable || server.origin === "mcp" || isEliza) && (
               <Button
-                onClick={handleTestPlugin}
+                onClick={handleTestConnector}
                 className={cn(
                   "flex-1 font-bold",
                   isOnchain
@@ -444,126 +444,126 @@ export default function RegistryPage() {
     <div className="cm-web-page">
       <div className="cm-web-page__canvas cm-workspace-canvas--fade">
         <div className="cm-web-page__body cm-web-page__body--wide cm-page-stack">
-      {/* Header */}
-      <div className="cm-page-stack__header">
-        <div className="flex items-center justify-between gap-3 mb-3">
-          <div>
-            <h1 className="text-2xl font-display font-bold text-cyan-400 neon-text">
-              CONNECTOR REGISTRY
-            </h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              Browse and install tools for your workflows
-            </p>
+          {/* Header */}
+          <div className="cm-page-stack__header">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div>
+                <h1 className="text-2xl font-display font-bold text-cyan-400 neon-text">
+                  CONNECTOR REGISTRY
+                </h1>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Browse and install tools for your workflows
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                {meta && (
+                  <Badge variant="outline" className="font-mono text-xs">
+                    <Database className="w-3 h-3 mr-1" />
+                    {meta.totalServers.toLocaleString()} servers
+                  </Badge>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => forceRefresh()}
+                  className="border-sidebar-border"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+
+            {/* Search and Filters */}
           </div>
-          <div className="flex items-center gap-2">
-            {meta && (
-              <Badge variant="outline" className="font-mono text-xs">
-                <Database className="w-3 h-3 mr-1" />
-                {meta.totalServers.toLocaleString()} servers
-              </Badge>
+
+          <div className="cm-page-stack__controls">
+            <div className="cm-control-rail cm-control-rail--compact flex flex-col sm:flex-row gap-3">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search tools by name, description, or tags..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10 bg-background/50 border-sidebar-border font-mono"
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <Select value={selectedOrigin} onValueChange={handleFilterChange(setSelectedOrigin)}>
+                  <SelectTrigger className="w-[140px] bg-background/50 border-sidebar-border">
+                    <Filter className="w-3 h-3 mr-2 text-muted-foreground" />
+                    <SelectValue placeholder="Origin" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Sources</SelectItem>
+                    <SelectItem value="mcp">Tools</SelectItem>
+                    <SelectItem value="onchain">Onchain</SelectItem>
+                    <SelectItem value="eliza">ElizaOS</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <Select value={selectedCategory} onValueChange={handleFilterChange(setSelectedCategory)}>
+                  <SelectTrigger className="w-[140px] bg-background/50 border-sidebar-border">
+                    <SelectValue placeholder="Category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Categories</SelectItem>
+                    {categories?.map((cat) => (
+                      <SelectItem key={cat} value={cat}>
+                        {cat}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+
+          <div className="cm-page-list cm-workspace-canvas--fade">
+
+            {/* Results */}
+            {isLoading ? (
+              <div className="flex items-center justify-center py-10 sm:py-12">
+                <Loader2 className="w-8 h-8 animate-spin text-cyan-400" />
+              </div>
+            ) : allServers.length === 0 ? (
+              <div className="text-center py-10 sm:py-12">
+                <Server className="w-12 h-12 mx-auto text-muted-foreground/30 mb-4" />
+                <p className="text-muted-foreground">
+                  {searchQuery ? "No servers match your search" : "No servers found"}
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="mb-4 flex items-center justify-between">
+                  <p className="text-sm text-muted-foreground">
+                    {searchQuery ? (
+                      <>Found <span className="text-cyan-400 font-mono">{allServers.length.toLocaleString()}</span> servers matching "{searchQuery}"</>
+                    ) : (
+                      <>Showing <span className="text-cyan-400 font-mono">{allServers.length.toLocaleString()}</span> servers</>
+                    )}
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                  {allServers.map((server) => (
+                    <ServerCard
+                      key={server.registryId}
+                      server={server}
+                      onSelect={handleSelectServer}
+                    />
+                  ))}
+                </div>
+              </>
             )}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => forceRefresh()}
-              className="border-sidebar-border"
-            >
-              <RefreshCw className="w-4 h-4" />
-            </Button>
-          </div>
-        </div>
-
-        {/* Search and Filters */}
-      </div>
-
-      <div className="cm-page-stack__controls">
-        <div className="cm-control-rail cm-control-rail--compact flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              placeholder="Search tools by name, description, or tags..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10 bg-background/50 border-sidebar-border font-mono"
-            />
           </div>
 
-          <div className="flex gap-2">
-            <Select value={selectedOrigin} onValueChange={handleFilterChange(setSelectedOrigin)}>
-              <SelectTrigger className="w-[140px] bg-background/50 border-sidebar-border">
-                <Filter className="w-3 h-3 mr-2 text-muted-foreground" />
-                <SelectValue placeholder="Origin" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Sources</SelectItem>
-                <SelectItem value="mcp">Tools</SelectItem>
-                <SelectItem value="onchain">Onchain</SelectItem>
-                <SelectItem value="eliza">ElizaOS</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Select value={selectedCategory} onValueChange={handleFilterChange(setSelectedCategory)}>
-              <SelectTrigger className="w-[140px] bg-background/50 border-sidebar-border">
-                <SelectValue placeholder="Category" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Categories</SelectItem>
-                {categories?.map((cat) => (
-                  <SelectItem key={cat} value={cat}>
-                    {cat}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      </div>
-
-      <div className="cm-page-list cm-workspace-canvas--fade">
-
-      {/* Results */}
-      {isLoading ? (
-        <div className="flex items-center justify-center py-10 sm:py-12">
-          <Loader2 className="w-8 h-8 animate-spin text-cyan-400" />
-        </div>
-      ) : allServers.length === 0 ? (
-        <div className="text-center py-10 sm:py-12">
-          <Server className="w-12 h-12 mx-auto text-muted-foreground/30 mb-4" />
-          <p className="text-muted-foreground">
-            {searchQuery ? "No servers match your search" : "No servers found"}
-          </p>
-        </div>
-      ) : (
-        <>
-          <div className="mb-4 flex items-center justify-between">
-            <p className="text-sm text-muted-foreground">
-              {searchQuery ? (
-                <>Found <span className="text-cyan-400 font-mono">{allServers.length.toLocaleString()}</span> servers matching "{searchQuery}"</>
-              ) : (
-                <>Showing <span className="text-cyan-400 font-mono">{allServers.length.toLocaleString()}</span> servers</>
-              )}
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-            {allServers.map((server) => (
-              <ServerCard
-                key={server.registryId}
-                server={server}
-                onSelect={handleSelectServer}
-              />
-            ))}
-          </div>
-        </>
-      )}
-      </div>
-
-      {/* Detail Dialog */}
-      <ServerDetailDialog
-        server={selectedServer}
-        open={detailOpen}
-        onOpenChange={setDetailOpen}
-      />
+          {/* Detail Dialog */}
+          <ServerDetailDialog
+            server={selectedServer}
+            open={detailOpen}
+            onOpenChange={setDetailOpen}
+          />
         </div>
       </div>
     </div>

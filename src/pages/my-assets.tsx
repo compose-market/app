@@ -8,14 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import {
   Bot,
   Layers,
@@ -35,7 +28,9 @@ import {
   FileSearch,
   Loader2,
   RefreshCw,
-  Search,
+  Percent,
+  Package,
+  Users,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useActiveAccount, useSendTransaction } from "thirdweb/react";
@@ -44,14 +39,16 @@ import { useWorkflowsByCreator, useRFAsByPublisher, type OnchainAgent, type Onch
 import { getIpfsUrl } from "@/lib/pinata";
 import { CHAIN_CONFIG } from "@/lib/chains";
 import { formatUsdcPrice, getContractAddress, getRFAContract, weiToUsdc } from "@/lib/contracts";
-import { sdk } from "@/lib/sdk";
 import { useTabs } from "@/hooks/use-tabs";
 import { RFADetails } from "@/components/RFADetails";
 import { ShareSuccessDialog } from "@/components/share-dialog";
 import { getMintSuccessForShare, clearMintSuccessShare, type MintShareData } from "@/lib/share";
-import { AgentCard as SharedAgentCard } from "@/components/agent-card";
+import { AgentCard as SharedAgentCard, AgentCardSkeleton as SharedAgentCardSkeleton } from "@/components/agent-card";
+import { Ordering, SearchFold, Switcher, type Option } from "@/components/control";
+import { WorkflowCard as WorkflowCardShell, WorkflowCardSkeleton } from "@compose-market/theme/workflows";
 
 const AGENTS_LIMIT = 24;
+const AGENTS_URL = (import.meta.env.VITE_AGENTS_URL || "https://agents.compose.market").replace(/\/+$/, "");
 
 type AgentSort = "newest" | "price-low" | "price-high";
 type WorkflowSort = "newest" | "price-low" | "price-high";
@@ -69,6 +66,18 @@ type AgentPage = {
   nextCursor?: string | null;
   hasMore?: boolean;
 };
+
+const tabs: Option<AssetTab>[] = [
+  { value: "agents", label: "Agents", icon: Bot },
+  { value: "workflows", label: "Workflows", icon: Layers },
+  { value: "rfas", label: "RFAs", icon: Award },
+];
+
+const orders: Option<AgentSort>[] = [
+  { value: "newest", label: "Newest", icon: Clock },
+  { value: "price-low", label: "Price: Low to High", icon: DollarSign },
+  { value: "price-high", label: "Price: High to Low", icon: DollarSign },
+];
 
 function amount(value: string | undefined): bigint {
   const raw = value?.trim();
@@ -120,7 +129,7 @@ async function page(input: { creator?: string; cursor?: string; q?: string; sort
   if (input.cursor) params.set("cursor", input.cursor);
   if (input.q) params.set("q", input.q);
   if (!input.q && input.sort) params.set("sort", input.sort);
-  const response = await sdk.fetch(`/agents?${params.toString()}`, {
+  const response = await fetch(`${AGENTS_URL}/agents?${params.toString()}`, {
     headers: { Accept: "application/json" },
     signal: input.signal,
   });
@@ -177,8 +186,8 @@ export default function MyAssetsPage() {
     initialPageParam: null as string | null,
     getNextPageParam: (page) => page.hasMore ? page.nextCursor ?? undefined : undefined,
     enabled: Boolean(owner),
-    staleTime: 30_000,
-    gcTime: 5 * 60_000,
+    staleTime: 0,
+    gcTime: 0,
     retry: 1,
   });
 
@@ -276,89 +285,49 @@ export default function MyAssetsPage() {
 
   return (
     <div className="cm-market-workspace">
-      <div className="cm-page-header">
-        <div className="cm-page-header__title-row">
-          <h1 className="cm-page-header__title">
-            <span className="text-cyan-500 mr-2">//</span>
-            MY ASSETS
-          </h1>
-          <div className="cm-page-header__rule hidden md:block"></div>
-          <Link href="/create-agent" className="ml-auto w-full sm:w-auto">
-            <Button className="w-full sm:w-auto bg-cyan-500 text-black hover:bg-cyan-400 font-bold font-mono text-sm h-9">
-              <Plus className="w-3.5 h-3.5 mr-1.5" />
-              CREATE AGENT
-            </Button>
-          </Link>
-        </div>
-        <div className="cm-page-header__subtitle-row">
-          <p className="cm-page-header__subtitle">
-            All your agents, workflows, and RFAs at a glance.
-          </p>
-          <div className="cm-page-header__meta">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="cm-market-tabs w-full">
+        <div className="cm-control-rail cm-market-control-rail">
+          <div className="cm-market-control-rail__brand">
+            <h1 className="cm-page-header__title cm-market-control-rail__title">
+              <span className="text-cyan-500 mr-2">//</span>
+              MY ASSETS
+            </h1>
+            <Badge variant="outline" className="cm-page-header__metric cm-market-control-rail__count">
+              {currentStatus.count}
+            </Badge>
             <button
               type="button"
               onClick={() => copyAddress(account.address)}
-              className="cm-page-header__account"
+              className="cm-page-header__account hidden md:inline-flex"
             >
               <Activity className="w-3.5 h-3.5 text-cyan-400" />
               <span>{account.address.slice(0, 6)}...{account.address.slice(-4)}</span>
               <Copy className="w-3.5 h-3.5 text-muted-foreground" />
             </button>
-            <Badge variant="outline" className="cm-page-header__metric">
-              {currentStatus.count}
-            </Badge>
           </div>
-        </div>
-      </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="cm-market-tabs w-full">
-        <div className="cm-control-rail cm-market-control-rail cm-market-control-rail--unified">
-          <TabsList className="cm-shell-tab-strip cm-market-control-rail__tabs">
-            <TabsTrigger value="agents" className="cm-shell-tab min-w-0">
-              <Bot className="w-3.5 h-3.5 shrink-0" />
-              <span className="truncate">AGENTS</span>
-            </TabsTrigger>
-            <TabsTrigger value="workflows" className="cm-shell-tab min-w-0">
-              <Layers className="w-3.5 h-3.5 shrink-0" />
-              <span className="truncate">WORKFLOWS</span>
-            </TabsTrigger>
-            <TabsTrigger value="rfas" className="cm-shell-tab min-w-0">
-              <Award className="w-3.5 h-3.5 shrink-0" />
-              <span className="truncate">RFAs</span>
-            </TabsTrigger>
-          </TabsList>
-          <div className="cm-market-control-rail__middle">
-            <AssetSearch
+          <Switcher
+            value={tab}
+            options={tabs}
+            label="Asset section"
+            onChange={setActiveTab}
+            className="cm-market-control-rail__tabs"
+          />
+
+          <div className="cm-market-control-rail__actions">
+            <SearchFold
               open={searchOpen}
               value={searchQuery}
+              label="Search assets"
+              placeholder="Search assets..."
               onOpenChange={setSearchOpen}
               onChange={setSearchQuery}
             />
-          </div>
-          <div className="cm-market-control-rail__actions">
             {tab === "agents" ? (
-              <Select value={sort} onValueChange={(value) => setSort(value as AgentSort)} disabled={Boolean(q)}>
-                <SelectTrigger className="w-[170px] bg-background/50 border-primary/20 h-9 text-sm">
-                  <SelectValue placeholder="Sort by" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="newest">Newest</SelectItem>
-                  <SelectItem value="price-low">Price: Low to High</SelectItem>
-                  <SelectItem value="price-high">Price: High to Low</SelectItem>
-                </SelectContent>
-              </Select>
+              <Ordering value={sort} options={orders} onChange={setSort} disabled={Boolean(q)} />
             ) : null}
             {tab === "workflows" ? (
-              <Select value={workflowSort} onValueChange={(value) => setWorkflowSort(value as WorkflowSort)}>
-                <SelectTrigger className="w-[170px] bg-background/50 border-primary/20 h-9 text-sm">
-                  <SelectValue placeholder="Sort by" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="newest">Newest</SelectItem>
-                  <SelectItem value="price-low">Price: Low to High</SelectItem>
-                  <SelectItem value="price-high">Price: High to Low</SelectItem>
-                </SelectContent>
-              </Select>
+              <Ordering value={workflowSort} options={orders} onChange={setWorkflowSort} />
             ) : null}
             <Button
               variant="outline"
@@ -368,6 +337,12 @@ export default function MyAssetsPage() {
             >
               <RefreshCw className={`w-4 h-4 ${currentStatus.busy ? "animate-spin" : ""}`} />
             </Button>
+            <Link href="/create-agent">
+              <Button size="sm" className="bg-cyan-500 text-black hover:bg-cyan-400 font-bold font-mono text-xs h-9 px-2 sm:px-3">
+                <Plus className="w-3.5 h-3.5 sm:mr-1" />
+                <span className="hidden sm:inline">CREATE</span>
+              </Button>
+            </Link>
           </div>
         </div>
 
@@ -426,63 +401,6 @@ export default function MyAssetsPage() {
         open={showRFADetails}
         onOpenChange={setShowRFADetails}
       />
-    </div>
-  );
-}
-
-function AssetSearch({
-  open,
-  value,
-  onOpenChange,
-  onChange,
-}: {
-  open: boolean;
-  value: string;
-  onOpenChange: (open: boolean) => void;
-  onChange: (value: string) => void;
-}) {
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  const visible = open || value.trim().length > 0;
-
-  useEffect(() => {
-    if (!visible) return;
-    const frame = window.requestAnimationFrame(() => inputRef.current?.focus());
-    return () => window.cancelAnimationFrame(frame);
-  }, [visible]);
-
-  return (
-    <div className="cm-market-search-fold" data-open={visible}>
-      <label className="cm-search cm-search--market" aria-label="Search assets" aria-hidden={!visible}>
-        <Search size={16} aria-hidden="true" />
-        <input
-          ref={inputRef}
-          className="cm-search__input"
-          type="search"
-          placeholder="Search assets..."
-          value={value}
-          disabled={!visible}
-          tabIndex={visible ? 0 : -1}
-          onChange={(event) => onChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              if (value) {
-                onChange("");
-              } else {
-                onOpenChange(false);
-              }
-            }
-          }}
-        />
-      </label>
-      <button
-        type="button"
-        className="cm-hud-button cm-hud-button--icon cm-market-search-fold__toggle"
-        aria-label="Search"
-        aria-expanded={visible}
-        onClick={() => onOpenChange(!visible)}
-      >
-        <Search className="cm-hud-icon" size={17} />
-      </button>
     </div>
   );
 }
@@ -555,18 +473,7 @@ function AssetAgentsTab({
         <div className="cm-market-agent-canvas cm-market-agent-canvas--loading">
           <div className="cm-market-agent-grid">
             {Array.from({ length: 9 }).map((_, i) => (
-              <Card key={i} className="glass-panel cm-agent-card cm-agent-card--market">
-                <CardContent className="p-4 sm:p-5 space-y-3 sm:space-y-4">
-                  <div className="flex items-start gap-2.5 sm:gap-3">
-                    <Skeleton className="w-10 h-10 sm:w-12 sm:h-12 rounded-full shrink-0" />
-                    <div className="flex-1 space-y-2 min-w-0">
-                      <Skeleton className="h-4 sm:h-5 w-3/4" />
-                      <Skeleton className="h-3 w-1/2" />
-                    </div>
-                  </div>
-                  <Skeleton className="h-14 sm:h-16 w-full" />
-                </CardContent>
-              </Card>
+              <SharedAgentCardSkeleton key={i} />
             ))}
           </div>
         </div>
@@ -678,26 +585,24 @@ function WorkflowsTab({
 
   if (isLoadingWorkflows) {
     return (
-      <div className="cm-market-row-grid">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <Card key={i} className="cm-surface-card">
-            <CardContent className="p-4 sm:p-5 space-y-3 sm:space-y-4">
-              <Skeleton className="h-24 sm:h-32 w-full rounded-sm" />
-              <Skeleton className="h-4 sm:h-5 w-3/4" />
-              <Skeleton className="h-14 sm:h-16 w-full" />
-            </CardContent>
-          </Card>
-        ))}
+      <div className="cm-market-board">
+        <div className="cm-market-row-grid">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <WorkflowCardSkeleton key={i} />
+          ))}
+        </div>
       </div>
     );
   }
 
   if (filteredWorkflows.length > 0) {
     return (
-      <div className="cm-market-row-grid">
-        {filteredWorkflows.map((workflow) => (
-          <WorkflowAssetCard key={workflow.id} workflow={workflow} />
-        ))}
+      <div className="cm-market-board">
+        <div className="cm-market-row-grid">
+          {filteredWorkflows.map((workflow) => (
+            <WorkflowAssetCard key={workflow.id} workflow={workflow} />
+          ))}
+        </div>
       </div>
     );
   }
@@ -753,35 +658,29 @@ function RFAsTab({
 
   if (isLoadingRFAs) {
     return (
-      <div className="space-y-3">
-        {Array.from({ length: 3 }).map((_, i) => (
-          <Card key={i} className="cm-surface-card">
-            <CardContent className="p-4 sm:p-5 space-y-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 space-y-2">
-                  <Skeleton className="h-5 w-2/3" />
-                  <Skeleton className="h-3 w-full" />
-                </div>
-                <Skeleton className="h-8 w-24" />
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+      <div className="cm-market-board">
+        <div className="cm-market-row-grid">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <WorkflowCardSkeleton key={i} />
+          ))}
+        </div>
       </div>
     );
   }
 
   if (filteredRFAs.length > 0) {
     return (
-      <div className="space-y-3">
-        {filteredRFAs.map((rfa) => (
-          <RFAAssetCard
-            key={rfa.id}
-            rfa={rfa}
-            onViewDetails={() => onView(rfa.id)}
-            onRefresh={refetchRFAs}
-          />
-        ))}
+      <div className="cm-market-board">
+        <div className="cm-market-row-grid">
+          {filteredRFAs.map((rfa) => (
+            <RFAAssetCard
+              key={rfa.id}
+              rfa={rfa}
+              onViewDetails={() => onView(rfa.id)}
+              onRefresh={refetchRFAs}
+            />
+          ))}
+        </div>
       </div>
     );
   }
@@ -839,51 +738,25 @@ function WorkflowAssetCard({ workflow }: { workflow: OnchainWorkflow }) {
     ? `/workflow/${workflow.walletAddress}`
     : `/workflow/${workflow.id}`;
 
+  const unitsAvailable = workflow.units === 0 ? "∞" : `${workflow.units - workflow.unitsMinted}/${workflow.units}`;
+
   return (
     <Link href={workflowPageUrl} className="block">
-      <Card
-        className="cm-surface-card hover:border-fuchsia-500/50 transition-colors overflow-hidden cursor-pointer group"
-      >
-        {bannerUrl ? (
-          <div className="h-24 sm:h-32 bg-cover bg-center" style={{ backgroundImage: `url(${bannerUrl})` }} />
-        ) : (
-          <div className="h-24 sm:h-32 bg-gradient-to-br from-fuchsia-500/20 to-cyan-500/20 flex items-center justify-center">
-            <Layers className="w-10 h-10 sm:w-12 sm:h-12 text-fuchsia-400/50" />
-          </div>
+      <WorkflowCardShell
+        interactive
+        className="hover:border-fuchsia-500/50"
+        bannerSrc={bannerUrl}
+        title={workflow.title || `Workflow #${workflow.id}`}
+        titleIcon={<Layers />}
+        description={(
+          workflow.description && (
+            <Excerpt title={workflow.title || `Workflow #${workflow.id}`} text={workflow.description} lines={2}>
+              {workflow.description}
+            </Excerpt>
+          )
         )}
-
-        <CardContent className="p-4 sm:p-5 space-y-3 sm:space-y-4">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0 flex-1">
-              <h3 className="font-display font-bold text-foreground text-sm sm:text-base truncate group-hover:text-fuchsia-400 transition-colors">
-                {workflow.title || `Workflow #${workflow.id}`}
-              </h3>
-              <p className="text-[10px] sm:text-xs font-mono text-muted-foreground">
-                Workflow #{workflow.id} • ERC7401
-              </p>
-            </div>
-            {explorerUrl && (
-              <a
-                href={explorerUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="p-1 text-muted-foreground hover:text-fuchsia-400 transition-colors shrink-0"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <ExternalLink className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-              </a>
-            )}
-          </div>
-
-          {workflow.description && (
-            <div className="text-[10px] sm:text-xs text-muted-foreground">
-              <Excerpt title={workflow.title || `Workflow #${workflow.id}`} text={workflow.description} lines={2}>
-                {workflow.description}
-              </Excerpt>
-            </div>
-          )}
-
-          <div className="flex flex-wrap gap-1 sm:gap-1.5">
+        badges={(
+          <>
             <Badge variant="outline" className="text-[8px] sm:text-[10px] font-mono border-fuchsia-500/30 text-fuchsia-400 bg-fuchsia-500/10 px-1 sm:px-1.5 py-0">
               <Sparkles className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
               nestable NFT
@@ -904,29 +777,14 @@ function WorkflowAssetCard({ workflow }: { workflow: OnchainWorkflow }) {
                 + coordinator
               </Badge>
             )}
-          </div>
-
-          <div className="cm-stat-grid cm-stat-grid--3col">
-            <div className="cm-stat-grid__cell">
-              <DollarSign className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-green-400" />
-              <p className="text-foreground font-bold truncate">${workflow.totalPrice}</p>
-              <p className="text-muted-foreground text-[8px] sm:text-[10px]">total cost</p>
-            </div>
-            <div className="cm-stat-grid__cell">
-              <Layers className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-cyan-400" />
-              <p className="text-foreground font-bold">{workflow.agentIds?.length || 0}</p>
-              <p className="text-muted-foreground text-[8px] sm:text-[10px]">agents</p>
-            </div>
-            <div className="cm-stat-grid__cell">
-              <Zap className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-fuchsia-400" />
-              <p className="text-foreground font-bold">
-                {workflow.units === 0 ? "∞" : workflow.units - workflow.unitsMinted}
-              </p>
-              <p className="text-muted-foreground text-[8px] sm:text-[10px]">avail</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          </>
+        )}
+        stats={[
+          { value: `$${workflow.totalPrice}`, icon: <DollarSign />, tone: "green", tooltip: "total price" },
+          { value: String(workflow.agentIds?.length || 0), icon: <Layers />, tone: "cyan", tooltip: "agents" },
+          { value: unitsAvailable, icon: <Zap />, tone: "fuchsia", tooltip: "available supply" },
+        ]}
+      />
     </Link>
   );
 }
@@ -993,87 +851,72 @@ function RFAAssetCard({
   }[rfa.status];
 
   return (
-    <Card
-      className="cm-surface-card hover:border-amber-500/50 transition-colors cursor-pointer"
-      onClick={onViewDetails}
-    >
-      <CardContent className="p-4 sm:p-5 space-y-3">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
-              <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-[9px]">
-                <Target className="w-2 h-2 mr-1" />
-                RFA #{rfa.id}
-              </Badge>
-              <Badge variant="outline" className={`text-[9px] ${statusColor}`}>
-                {rfa.status === 'Open' && <Clock className="w-2 h-2 mr-1" />}
-                {rfa.status === 'Fulfilled' && <CheckCircle className="w-2 h-2 mr-1" />}
-                {rfa.status === 'Cancelled' && <XCircle className="w-2 h-2 mr-1" />}
-                {rfa.status}
-              </Badge>
-            </div>
-            <h3 className="font-display font-bold text-foreground truncate text-sm sm:text-base">
-              {rfa.title}
-            </h3>
-            <p className="text-[10px] sm:text-xs text-muted-foreground line-clamp-1 mt-0.5">
-              {rfa.description}
-            </p>
-          </div>
-
-          {/* Bounty Amount */}
-          <div className="text-right shrink-0">
-            <p className="text-[9px] text-muted-foreground uppercase">Bounty</p>
-            <p className="font-mono font-bold text-amber-400 text-lg">
-              {rfa.offerAmountFormatted}
-            </p>
-          </div>
-        </div>
-
-        {/* Meta Row */}
-        <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-          <span>For: Workflow #{rfa.workflowId}</span>
-          <span>{createdDate.toLocaleDateString()}</span>
-        </div>
-
-        {/* Actions */}
-        {rfa.status === 'Open' && (
-          <div className="flex items-center gap-2 pt-2 border-t border-primary/15">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onViewDetails}
-              className="flex-1 text-xs h-8"
-            >
-              <Bot className="w-3 h-3 mr-1" />
-              View Submissions
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleCancel}
-              disabled={isCancelling || isPending}
-              className="text-xs h-8 border-red-500/30 text-red-400 hover:bg-red-500/10"
-            >
-              {isCancelling ? (
-                <Loader2 className="w-3 h-3 animate-spin" />
-              ) : (
-                <>
-                  <XCircle className="w-3 h-3 mr-1" />
-                  Cancel
-                </>
-              )}
-            </Button>
-          </div>
+    <div onClick={onViewDetails} className="cursor-pointer block">
+      <WorkflowCardShell
+        interactive
+        className="hover:border-amber-500/50"
+        title={rfa.title}
+        titleIcon={<Target className="text-amber-400" />}
+        description={rfa.description}
+        badges={(
+          <>
+            <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-[9px]">
+              RFA #{rfa.id}
+            </Badge>
+            <Badge variant="outline" className={`text-[9px] ${statusColor}`}>
+              {rfa.status === 'Open' && <Clock className="w-2 h-2 mr-1" />}
+              {rfa.status === 'Fulfilled' && <CheckCircle className="w-2 h-2 mr-1" />}
+              {rfa.status === 'Cancelled' && <XCircle className="w-2 h-2 mr-1" />}
+              {rfa.status}
+            </Badge>
+          </>
         )}
+        stats={[
+          { value: rfa.offerAmountFormatted, icon: <DollarSign />, tone: "warning", tooltip: "Bounty" },
+          { value: `Workflow #${rfa.workflowId}`, icon: <Layers />, tone: "cyan", tooltip: "Target Workflow" },
+          { value: createdDate.toLocaleDateString(), icon: <Clock />, tooltip: "Created date" },
+        ]}
+        footer={(
+          <>
+            {rfa.status === 'Open' && (
+              <div className="flex items-center gap-2 w-full mt-2 pt-2 border-t border-primary/15">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={(e) => { e.stopPropagation(); onViewDetails(); }}
+                  className="flex-1 text-xs h-8"
+                >
+                  <Bot className="w-3 h-3 mr-1" />
+                  View Submissions
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCancel}
+                  disabled={isCancelling || isPending}
+                  className="text-xs h-8 border-red-500/30 text-red-400 hover:bg-red-500/10"
+                >
+                  {isCancelling ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <>
+                      <XCircle className="w-3 h-3 mr-1" />
+                      Cancel
+                    </>
+                  )}
+                </Button>
+              </div>
+            )}
 
-        {rfa.status === 'Fulfilled' && (
-          <div className="flex items-center gap-2 p-2 rounded-sm bg-cyan-500/5 border border-cyan-500/20 text-[10px]">
-            <CheckCircle className="w-3 h-3 text-cyan-400" />
-            <span className="text-cyan-400">Fulfilled by Agent #{rfa.fulfilledByAgentId}</span>
-          </div>
+            {rfa.status === 'Fulfilled' && (
+              <div className="flex items-center gap-2 p-2 rounded-sm bg-cyan-500/5 border border-cyan-500/20 text-[10px] w-full mt-2">
+                <CheckCircle className="w-3 h-3 text-cyan-400" />
+                <span className="text-cyan-400">Fulfilled by Agent #{rfa.fulfilledByAgentId}</span>
+              </div>
+            )}
+          </>
         )}
-      </CardContent>
-    </Card>
+      />
+    </div>
   );
 }

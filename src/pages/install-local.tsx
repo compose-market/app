@@ -15,7 +15,6 @@ import {
 } from "@/components/ui/dialog";
 import { AppShell } from "@compose-market/theme/app";
 import { ExternalLink, Monitor, Shield, ChevronRight } from "lucide-react";
-import "@/styles/install-local.css";
 
 /* ── helpers ── */
 function parseQuery(): { token: string | null } {

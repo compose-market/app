@@ -500,10 +500,10 @@ function MintWorkflowDialog({
                     <SelectItem value="none">No coordinator</SelectItem>
                     {coordinatorModels.map((model) => (
                       <SelectItem key={model.modelId} value={model.modelId}>
-                        <div className="flex items-center gap-2">
-                          <span>{model.name || model.modelId}</span>
-                          <span className="text-[10px] text-muted-foreground">({model.provider})</span>
-                        </div>
+                           <div className="flex items-center gap-2">
+                             <span>{model.name || model.modelId}</span>
+                             <span className="text-[10px] text-muted-foreground">({model.family || model.provider})</span>
+                           </div>
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -665,7 +665,7 @@ function ComposeFlow() {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
 
   // UI state - start in fullscreen mode by default
-  const [isFullscreen, setIsFullscreen] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [showMintDialog, setShowMintDialog] = useState(false);
   const [showRunDialog, setShowRunDialog] = useState(false);
   const [showOutputPanel, setShowOutputPanel] = useState(false);
@@ -827,7 +827,7 @@ function ComposeFlow() {
   }, [currentWorkflow, inputJson, nodes, edges, setNodes, toast, wallet, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, paymentChainId]);
 
   return (
-    <div className="cm-workspace">
+    <div className="cm-compose-workspace">
       {/* Sidebar - Picker Tabs */}
       <Card className="cm-sidebar glass-panel border-cyan-500/20">
         <CardHeader className="pb-2 border-b border-sidebar-border shrink-0">
@@ -837,7 +837,7 @@ function ComposeFlow() {
           <Tabs defaultValue="connectors" className="h-full flex flex-col">
             <TabsList className="w-full rounded-none border-b border-sidebar-border bg-transparent p-0 h-auto shrink-0">
               <TabsTrigger value="connectors" className="flex-1 rounded-none border-b-2 border-transparent data-[state=active]:border-cyan-500 data-[state=active]:text-cyan-400 py-2.5 font-mono text-xs">
-                <Plug className="w-3 h-3 mr-1.5" />PLUGINS
+                <Plug className="w-3 h-3 mr-1.5" />CONNECTORS
               </TabsTrigger>
               <TabsTrigger value="agents" className="flex-1 rounded-none border-b-2 border-transparent data-[state=active]:border-fuchsia-500 data-[state=active]:text-fuchsia-400 py-2.5 font-mono text-xs">
                 <Bot className="w-3 h-3 mr-1.5" />AGENTS
@@ -950,7 +950,7 @@ function ComposeFlow() {
                 </div>
                 <div className="space-y-1">
                   <p className="text-foreground/80 font-display text-base lg:text-lg">Start Building</p>
-                  <p className="text-muted-foreground font-mono text-[10px] lg:text-xs max-w-[200px] mx-auto">Select plugins or agents from the panel to add workflow steps</p>
+                  <p className="text-muted-foreground font-mono text-[10px] lg:text-xs max-w-[200px] mx-auto">Select connectors or agents from the panel to add workflow steps</p>
                 </div>
               </div>
             </div>

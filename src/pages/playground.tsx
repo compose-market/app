@@ -21,7 +21,7 @@ import { toAttachment, toMessage } from "@/hooks/use-chat";
 import type { Message as Message, ComposeCallOptions } from "@compose-market/sdk";
 import { useChain } from "@/contexts/ChainContext";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs } from "@/components/ui/tabs";
 import {
   Sheet,
   SheetContent,
@@ -39,26 +39,34 @@ import {
 } from "lucide-react";
 import { MultimodalCanvas } from "@/components/chat";
 import { MirrorPane, type ModelParamsSchema } from "@/components/mirror-pane";
-import { CommandBar } from "@/components/command-bar";
-import { ModelBadge } from "@/components/model-badge";
+import { ModelSelector } from "@/components/model-selector";
 import { CapabilityChips } from "@/components/capability-chips";
 import { useChat } from "@/hooks/use-chat";
 import { useModels } from "@/hooks/use-model";
 import { CostReceiptIndicator } from "@/components/receipt-indicator";
+import { Switcher, type Option } from "@/components/control";
 import { useToast } from "@/hooks/use-toast";
 import { useStream } from "@/hooks/use-stream";
 import {
-  buildProviderCategories,
+  buildFamilyCategories,
   buildTypeCategories,
   formatModelTypeLabel,
   getModelTypeValues,
+  getModelValueList,
   type CatalogModel,
 } from "@/lib/models";
 
 const PANE_COLLAPSED_KEY = "playground_pane_collapsed";
 
-const LazyPluginTester = lazy(() =>
-  import("@/components/plugin-tester").then((module) => ({ default: module.PluginTester }))
+type PlaygroundTab = "model" | "connectors";
+
+const tabs: Option<PlaygroundTab>[] = [
+  { value: "model", label: "Models", icon: Bot },
+  { value: "connectors", label: "Connectors", icon: Plug },
+];
+
+const LazyConnectorTester = lazy(() =>
+  import("@/components/connector-tester").then((module) => ({ default: module.ConnectorTester }))
 );
 
 function getDefaultParamValues(schema: ModelParamsSchema | null): Record<string, unknown> {
@@ -101,27 +109,27 @@ export default function PlaygroundPage() {
   const { toast } = useToast();
 
   // Tab state
-  const [activeTab, setActiveTab] = useState<"model" | "plugins">(() => {
+  const [activeTab, setActiveTab] = useState<"model" | "connectors">(() => {
     const params = new URLSearchParams(window.location.search);
-    return params.get("tab") === "plugins" ? "plugins" : "model";
+    return params.get("tab") === "connectors" ? "connectors" : "model";
   });
 
-  const initialPluginSource = useMemo(() => {
+  const initialConnectorSource = useMemo(() => {
     const params = new URLSearchParams(window.location.search);
     const source = params.get("source");
     if (source === "onchain") return "onchain";
-    if (source === "mcp" || source === "tools") return "mcp";
+    if (source === "mcp") return "mcp";
     return "mcp";
   }, []);
 
-  const initialPlugin = useMemo(() => {
+  const initialConnector = useMemo(() => {
     const params = new URLSearchParams(window.location.search);
-    return params.get("plugin") || "";
+    return params.get("connector") || "";
   }, []);
 
   // ============ Filter State ============
-  const [selectedType, setSelectedType] = useState("all");
-  const [selectedProvider, setSelectedProvider] = useState("all");
+  const [selectedType, setSelectedType] = useState("text-generation");
+  const [selectedFamily, setSelectedFamily] = useState("all");
 
   // ============ Models (single source — filters cascade to all consumers) ============
   const {
@@ -131,20 +139,20 @@ export default function PlaygroundPage() {
     forceRefresh: forceRefreshModels,
   } = useModels({
     type: selectedType === "all" ? undefined : selectedType,
-    provider: selectedProvider === "all" ? undefined : selectedProvider,
+    family: selectedFamily === "all" ? undefined : selectedFamily,
   });
 
   // ── Interconnected filters: each category list reflects the OTHER filter's selection ──
-  // Type categories built from models filtered ONLY by provider (so type-counts update when provider changes)
+  // Type categories built from models filtered ONLY by family (so type-counts update when family changes)
   const typeCategories = useMemo(() => {
-    if (selectedProvider === "all") return buildTypeCategories(models);
-    return buildTypeCategories(models.filter((m) => m.provider === selectedProvider));
-  }, [models, selectedProvider]);
+    if (selectedFamily === "all") return buildTypeCategories(models);
+    return buildTypeCategories(models.filter((m) => (m.family || m.provider) === selectedFamily));
+  }, [models, selectedFamily]);
 
-  // Provider categories built from models filtered ONLY by type (so provider-counts update when type changes)
-  const providerCategories = useMemo(() => {
-    if (selectedType === "all") return buildProviderCategories(models);
-    return buildProviderCategories(models.filter((m) => getModelTypeValues(m).includes(selectedType)));
+  // Family categories built from models filtered ONLY by type (so family-counts update when type changes)
+  const familyCategories = useMemo(() => {
+    if (selectedType === "all") return buildFamilyCategories(models);
+    return buildFamilyCategories(models.filter((m) => getModelTypeValues(m).includes(selectedType)));
   }, [models, selectedType]);
 
   // ── Filter interconnection guards: auto-reset invalid selections ──
@@ -156,14 +164,14 @@ export default function PlaygroundPage() {
   }, [typeCategories, selectedType]);
 
   useEffect(() => {
-    if (selectedProvider !== "all" && providerCategories.length > 0) {
-      const stillValid = providerCategories.some((c) => c.id === selectedProvider);
-      if (!stillValid) setSelectedProvider("all");
+    if (selectedFamily !== "all" && familyCategories.length > 0) {
+      const stillValid = familyCategories.some((c) => c.id === selectedFamily);
+      if (!stillValid) setSelectedFamily("all");
     }
-  }, [providerCategories, selectedProvider]);
+  }, [familyCategories, selectedFamily]);
 
   // ============ Model Selection ============
-  const [selectedModel, setSelectedModel] = useState<string>("");
+  const [selectedModel, setSelectedModel] = useState<string>("gpt-4o");
   const [commandBarOpen, setCommandBarOpen] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState("");
   const [showSessionDialog, setShowSessionDialog] = useState(false);
@@ -432,17 +440,13 @@ export default function PlaygroundPage() {
           <span className="cm-playground__title-text">Playground</span>
         </div>
 
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "model" | "plugins")}>
-          <TabsList className="cm-shell-tab-strip">
-            <TabsTrigger value="model" className="cm-shell-tab">
-              <Bot className="h-4 w-4" />
-              Models
-            </TabsTrigger>
-            <TabsTrigger value="plugins" className="cm-shell-tab">
-              <Plug className="h-4 w-4" />
-              Plugins
-            </TabsTrigger>
-          </TabsList>
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as PlaygroundTab)}>
+          <Switcher
+            value={activeTab}
+            options={tabs}
+            label="Playground section"
+            onChange={setActiveTab}
+          />
         </Tabs>
 
         <div className="cm-playground__toolbar-right">
@@ -462,23 +466,27 @@ export default function PlaygroundPage() {
 
       {/* ── Chat + MirrorPane — equi-heighted sibling grid ─────── */}
       {activeTab === "model" && (
-        <div className={`cm-playground__grid${paneCollapsed ? " cm-playground__grid--collapsed" : ""}`}>
+        <div className={`cm-split${paneCollapsed ? " cm-split--collapsed" : ""}`}>
           {/* Chat cell — contains its own filter toolbar + caps + canvas */}
-          <div className="cm-playground__chat-cell">
+          <div className="cm-split__main cm-playground__chat-cell">
             {/* ── Chat-internal toolbar: badge, filters, count ── */}
             <div className="cm-playground__chat-toolbar">
-              <ModelBadge
-                model={selectedModelInfo}
-                onClick={() => setCommandBarOpen(true)}
+              <ModelSelector
+                value={selectedModel}
+                onChange={setSelectedModel}
+                open={commandBarOpen}
+                onOpenChange={setCommandBarOpen}
+                type={selectedType === "all" ? undefined : selectedType}
+                family={selectedFamily === "all" ? undefined : selectedFamily}
               />
 
               <CapabilityChips
                 selectedType={selectedType}
                 onTypeChange={setSelectedType}
                 typeCategories={typeCategories}
-                selectedProvider={selectedProvider}
-                onProviderChange={setSelectedProvider}
-                providerCategories={providerCategories}
+                selectedFamily={selectedFamily}
+                onFamilyChange={setSelectedFamily}
+                familyCategories={familyCategories}
               />
 
               <span className="cm-playground__model-count">
@@ -496,17 +504,18 @@ export default function PlaygroundPage() {
               </Button>
             </div>
 
-            {/* ── Chat-internal capabilities row ── */}
+            {/* ── Chat-internal input row ── */}
             {selectedModelInfo && (() => {
-              const caps = getModelTypeValues(selectedModelInfo);
-              const uniqueCaps = [...new Set(caps)];
-              return uniqueCaps.length > 0 ? (
+              const inputs = getModelValueList(selectedModelInfo.input);
+              const uniqueInputs = [...new Set(inputs)];
+              return uniqueInputs.length > 0 ? (
                 <div className="cm-playground__caps-row">
-                  <span className="cm-playground__caps-label">Capabilities</span>
-                  {uniqueCaps.map((cap) => {
+                  <span className="cm-playground__caps-label">Input</span>
+                  {uniqueInputs.map((input) => {
+                    const formatted = input.charAt(0).toUpperCase() + input.slice(1);
                     return (
-                      <span key={cap} className="cm-playground__cap-tag">
-                        {formatModelTypeLabel(cap)}
+                      <span key={input} className="cm-playground__cap-tag">
+                        {formatted}
                       </span>
                     );
                   })}
@@ -541,7 +550,7 @@ export default function PlaygroundPage() {
               height="h-full"
               placeholder={
                 !sessionActive
-                  ? "Start a session first"
+                  ? "Start session"
                   : attachedFiles.length > 0
                     ? "Describe the uploaded file..."
                     : "Send a request..."
@@ -562,7 +571,7 @@ export default function PlaygroundPage() {
 
           {/* MirrorPane — independent equi-heighted sibling cell */}
           {!paneCollapsed && (
-            <div className="cm-playground__pane-cell">
+            <div className="cm-split__side cm-playground__pane-cell">
               <button
                 onClick={() => setPaneCollapsed(true)}
                 className="cm-playground__pane-toggle"
@@ -595,36 +604,25 @@ export default function PlaygroundPage() {
         </button>
       )}
 
-      {/* ── Plugins Tab ──────────────────────────────────────────── */}
-      {activeTab === "plugins" && (
+      {/* ── Connectors Tab ──────────────────────────────────────────── */}
+      {activeTab === "connectors" && (
         <div className="flex-1 min-h-0">
           <Suspense
             fallback={
               <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                Loading plugin tester...
+                Loading connector tester...
               </div>
             }
           >
-            <LazyPluginTester
-              sessionActive={sessionActive}
-              budgetRemaining={budgetRemaining}
-              formatBudget={formatBudget}
-              initialSource={initialPluginSource}
-              initialPlugin={initialPlugin}
+            <LazyConnectorTester
+              initialSource={initialConnectorSource}
+              initialConnector={initialConnector}
             />
           </Suspense>
         </div>
       )}
 
       {/* ── Command Bar (⌘K) ─────────────────────────────────────── */}
-      <CommandBar
-        open={commandBarOpen}
-        onOpenChange={setCommandBarOpen}
-        value={selectedModel}
-        onSelect={setSelectedModel}
-        type={selectedType === "all" ? undefined : selectedType}
-        provider={selectedProvider === "all" ? undefined : selectedProvider}
-      />
 
       {/* ── Session Dialog ────────────────────────────────────────── */}
       <SessionBudgetDialog
@@ -635,14 +633,14 @@ export default function PlaygroundPage() {
 
       {/* ── Mobile MirrorPane Sheet ───────────────────────────────── */}
       <Sheet open={mobilePaneOpen} onOpenChange={setMobilePaneOpen}>
-        <SheetContent side="right" className="cm-shell-panel cm-sheet-panel p-0 w-[min(28rem,calc(100vw-1rem))]">
+        <SheetContent side="right" className="cm-shell-panel cm-sheet-panel cm-sheet-panel--inspect p-0">
           <SheetHeader className="border-b border-primary/15 p-4">
             <SheetTitle className="font-display text-cyan-300 flex items-center gap-2 text-base">
               <Settings2 className="h-5 w-5" />
               Model Settings
             </SheetTitle>
           </SheetHeader>
-          <div className="cm-sheet-body p-3 sm:p-4">
+          <div className="cm-sheet-body cm-sheet-body--inspect">
             <MirrorPane
               selectedModel={selectedModel}
               modelInfo={selectedModelInfo || null}

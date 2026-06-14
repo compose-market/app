@@ -197,7 +197,7 @@ function ModelCard({ model, onSelect }: { model: CatalogModel; onSelect: (model:
             <div className="flex items-center gap-1.5 mt-1">
               <Globe className="w-3 h-3 text-muted-foreground" />
               <p className="text-xs font-mono text-muted-foreground truncate">
-                {model.provider} / {org || model.modelId}
+                {model.family || model.provider} / {org || model.modelId}
               </p>
             </div>
           </div>

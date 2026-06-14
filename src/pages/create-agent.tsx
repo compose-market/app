@@ -47,7 +47,8 @@ import {
   loadSelectedCatalogModel,
   type SelectedCatalogModel,
 } from "@/lib/models";
-import { useRegistrySearch, useRegistryServers, type RegistryServer, type ServerOrigin } from "@/hooks/use-registry";
+import { type RegistryServer, type ServerOrigin } from "@/hooks/use-registry";
+import { ConnectorCommandBar } from "@/components/connector-command-bar";
 import {
   uploadAgentAvatar,
   uploadAgentCard,
@@ -68,7 +69,7 @@ import { useActiveAccount, useSendTransaction } from "thirdweb/react";
 import { getAgentFactoryContractForChain, prepareMintAgentCall } from "@/lib/contracts";
 import { saveMintSuccessForShare } from "@/lib/share";
 
-interface SelectedPlugin {
+interface SelectedConnector {
   id: string;
   name: string;
   description: string;
@@ -111,9 +112,8 @@ export default function CreateAgent() {
   const [warpAgent, setWarpAgent] = useState<WarpAgentData | null>(null);
 
   const [selectedCatalogModel, setSelectedCatalogModel] = useState<SelectedCatalogModel | null>(null);
-  const [selectedPlugins, setSelectedPlugins] = useState<SelectedPlugin[]>([]);
-  const [pluginSearch, setPluginSearch] = useState("");
-  const [showPluginPicker, setShowPluginPicker] = useState(false);
+  const [selectedConnectors, setSelectedConnectors] = useState<SelectedConnector[]>([]);
+  const [showConnectorPicker, setShowConnectorPicker] = useState(false);
 
   // Avatar upload state
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
@@ -162,42 +162,23 @@ export default function CreateAgent() {
     }
   }, []);
 
-  // Fetch connectors
-  const pluginSearchReady = pluginSearch.trim().length >= 2;
-  const { data: searchData, isLoading: isSearching } = useRegistrySearch(pluginSearch, 50, {
-    origin: "onchain,mcp",
-  });
+  // Precompute selected connector IDs for O(1) lookups (Fix 7)
+  const selectedIds = useMemo(() => new Set(selectedConnectors.map(p => p.id)), [selectedConnectors]);
 
-  const { data: defaultPlugins, isLoading: isLoadingDefault } = useRegistryServers({
-    origin: "onchain,mcp",
-  });
-
-  const defaultPluginServers = defaultPlugins?.servers ?? [];
-  const availablePlugins: RegistryServer[] = useMemo(() => (
-    pluginSearchReady
-      ? searchData?.servers ?? []
-      : defaultPluginServers
-  ), [defaultPluginServers, pluginSearchReady, searchData?.servers]);
-  const isLoadingPlugins = pluginSearchReady ? isSearching && availablePlugins.length === 0 : isLoadingDefault;
-
-  // Precompute selected plugin IDs for O(1) lookups (Fix 7)
-  const selectedIds = useMemo(() => new Set(selectedPlugins.map(p => p.id)), [selectedPlugins]);
-
-  const addPlugin = (server: RegistryServer) => {
+  const addConnector = (server: RegistryServer) => {
     // registryId is already normalized by backend (use-registry.ts -> connector)
     if (selectedIds.has(server.registryId)) return;
-    setSelectedPlugins(prev => [...prev, {
+    setSelectedConnectors(prev => [...prev, {
       id: server.registryId,
       name: server.name,
       description: server.description,
       origin: server.origin,
     }]);
-    setPluginSearch("");
-    setShowPluginPicker(false);
+    setShowConnectorPicker(false);
   };
 
-  const removePlugin = (id: string) => {
-    setSelectedPlugins(prev => prev.filter(p => p.id !== id));
+  const removeConnector = (id: string) => {
+    setSelectedConnectors(prev => prev.filter(p => p.id !== id));
   };
 
   const getOriginColor = (origin: ServerOrigin) => {
@@ -211,7 +192,7 @@ export default function CreateAgent() {
   const getOriginLabel = (origin: ServerOrigin) => {
     switch (origin) {
       case "onchain": return "Onchain";
-      case "mcp": return "Tools";
+      case "mcp": return "MCP";
       default: return origin;
     }
   };
@@ -432,7 +413,7 @@ export default function CreateAgent() {
       // 2. Compute DNA hash (skills, chainId, model) - matches contract expectation
       const chainId = selectedChainId; // Use selected chain from context
       const modelId = selectedCatalogModel?.modelId || values.model;
-      const skills = selectedPlugins.map(p => p.id);
+      const skills = selectedConnectors.map(p => p.id);
       const timestamp = Date.now();
 
       // dnaHash = hash(skills, chainId, model) - NO timestamp (contract expects this)
@@ -468,7 +449,7 @@ export default function CreateAgent() {
         cloneable: values.isCloneable,
         ...(identityUploads.length > 0 ? { knowledge: identityUploads.map((item) => item.uri) } : {}),
         protocols: [{ name: "Manowar", version: "1.0" }],
-        plugins: selectedPlugins.map(p => ({
+        connectors: selectedConnectors.map(p => ({
           registryId: p.id,
           name: p.name,
           origin: p.origin,
@@ -664,7 +645,7 @@ export default function CreateAgent() {
                     CREATE FROM SCRATCH
                   </span>
                   <span className="cm-choice-card__copy mt-2 block">
-                    Build a new agent with custom plugins, models, and pricing.
+                    Build a new agent with custom connectors, models, and pricing.
                   </span>
                 </span>
                 <span className="flex flex-wrap gap-1.5 sm:gap-2">
@@ -672,7 +653,7 @@ export default function CreateAgent() {
                     Custom Model
                   </Badge>
                   <Badge variant="outline" className="text-[9px] sm:text-[10px] border-cyan-500/30 text-cyan-400">
-                    200+ Plugins
+                    200+ Connectors
                   </Badge>
                   <Badge variant="outline" className="text-[9px] sm:text-[10px] border-cyan-500/30 text-cyan-400">
                     ERC8004
@@ -730,7 +711,7 @@ export default function CreateAgent() {
                     <p className="font-mono text-cyan-400 mb-1">Create from Scratch:</p>
                     <ul className="list-disc list-inside space-y-0.5 sm:space-y-1">
                       <li>You are the original creator</li>
-                      <li>Full control over plugins & model</li>
+                      <li>Full control over connectors & model</li>
                       <li>100% of earnings minus protocol fee</li>
                     </ul>
                   </div>
@@ -836,23 +817,10 @@ export default function CreateAgent() {
                       render={({ field }: { field: ControllerRenderProps<FormValues, "model"> }) => (
                         <FormItem className="cm-field">
                           <FormLabel className="font-mono text-foreground text-sm">LLM Model</FormLabel>
-                          {selectedCatalogModel ? (
-                            <ShellModelBadge
-                              className="w-full max-w-full"
-                              label={selectedCatalogModel.name || selectedCatalogModel.modelId}
-                              price={`via ${selectedCatalogModel.provider} · x402`}
-                              shortcut="Change"
-                              onClick={() => setSelectedCatalogModel(null)}
-                              title="Change selected model"
-                            />
-                          ) : (
-                            <ModelSelector
-                              value={field.value}
-                              onChange={field.onChange}
-                              placeholder="Search 1300+ models..."
-                              showTypeFilter
-                            />
-                          )}
+                          <ModelSelector
+                            value={field.value}
+                            onChange={field.onChange}
+                          />
                           <FormMessage />
                         </FormItem>
                       )}
@@ -877,233 +845,298 @@ export default function CreateAgent() {
                     )}
                   />
                 </div>
-              {/* Plugins + Financial side by side */}
-              <div className="cm-create-builder__lower">
-                {/* Plugins */}
-                <div className="cm-builder-panel relative z-10" data-tone="green">
-                  <div className="cm-builder-panel__title">
-                    <Plug className="w-4 h-4" />
-                    Plugins
-                  </div>
-                  {selectedPlugins.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5">
-                      {selectedPlugins.map(plugin => (
-                        <Badge
-                          key={plugin.id}
-                          variant="outline"
-                          className={`${getOriginColor(plugin.origin)} pl-2 pr-1 py-0.5 text-[10px] font-mono`}
-                        >
-                          {plugin.name}
-                          <button
-                            type="button"
-                            onClick={() => removePlugin(plugin.id)}
-                            className="ml-1 p-0.5 rounded hover:bg-white/10"
+                {/* Connectors + Financial side by side */}
+                <div className="cm-create-builder__lower">
+                  {/* Connectors */}
+                  <div className="cm-builder-panel relative z-10" data-tone="green">
+                    <div className="cm-builder-panel__title">
+                      <Plug className="w-4 h-4" />
+                      Connectors
+                    </div>
+                    {selectedConnectors.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {selectedConnectors.map(connector => (
+                          <Badge
+                            key={connector.id}
+                            variant="outline"
+                            className={`${getOriginColor(connector.origin)} pl-2 pr-1 py-0.5 text-[10px] font-mono`}
                           >
-                            <X className="w-2.5 h-2.5" />
-                          </button>
-                        </Badge>
-                      ))}
-                    </div>
-                  )}
-                  <div className="relative">
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                      <Input
-                        placeholder="Search connectors..."
-                        value={pluginSearch}
-                        onChange={(e) => {
-                          setPluginSearch(e.target.value);
-                          setShowPluginPicker(true);
-                        }}
-                        onFocus={() => setShowPluginPicker(true)}
-                        className="pl-10 bg-background/50 font-mono border-primary/20 focus:border-green-500"
-                      />
-                    </div>
-                    {showPluginPicker && (
-                      <div className="cm-popover-panel absolute z-50 w-full mt-1">
-                        <div className="cm-popover-panel__header">
-                          <span className="cm-popover-panel__label">
-                            {pluginSearch ? "Search Results" : "Popular Connectors"}
-                          </span>
-                          <Link href="/registry">
-                            <Button type="button" variant="ghost" size="sm" className="text-[10px] text-green-400 hover:text-green-300 h-auto py-0.5 px-1">
-                              See all <ChevronRight className="w-3 h-3 ml-0.5" />
-                            </Button>
-                          </Link>
-                        </div>
-                        <ScrollArea className="h-40">
-                          {isLoadingPlugins ? (
-                            <div className="flex items-center justify-center py-6">
-                              <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
-                            </div>
-                          ) : availablePlugins.length === 0 ? (
-                            <div className="py-6 text-center text-xs text-muted-foreground">No connectors found</div>
-                          ) : (
-                            <div className="p-1">
-                              {availablePlugins.map(server => {
-                                const isSelected = selectedPlugins.some(p => p.id === server.registryId);
-                                const isTestable = server.origin === "onchain";
-                                return (
-                                  <button
-                                    key={server.registryId}
-                                    type="button"
-                                    onClick={() => addPlugin(server)}
-                                    disabled={isSelected}
-                                    className={`w-full text-left p-1.5 rounded-sm text-xs transition-all ${isSelected ? "opacity-50 cursor-not-allowed" : "hover:bg-green-500/10"}`}
-                                  >
-                                    <div className="flex items-center gap-2">
-                                      <Badge variant="outline" className={`${getOriginColor(server.origin)} text-[9px] px-1 py-0`}>
-                                        {getOriginLabel(server.origin)}
-                                      </Badge>
-                                      <span className="font-mono text-foreground truncate flex-1">{server.name}</span>
-                                      {isTestable && (
-                                        <Badge variant="outline" className="text-[8px] px-1 py-0 border-cyan-500/30 text-cyan-400">
-                                          <Play className="w-2 h-2 mr-0.5" />Testable
-                                        </Badge>
-                                      )}
-                                      {isSelected && <span className="text-green-400 text-[10px]">Added</span>}
-                                    </div>
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </ScrollArea>
-                        <div className="cm-popover-panel__footer">
-                          <button type="button" onClick={() => setShowPluginPicker(false)} className="text-[10px] text-muted-foreground hover:text-foreground">Close</button>
-                        </div>
+                            {connector.name}
+                            <button
+                              type="button"
+                              onClick={() => removeConnector(connector.id)}
+                              className="ml-1 p-0.5 rounded hover:bg-white/10"
+                            >
+                              <X className="w-2.5 h-2.5" />
+                            </button>
+                          </Badge>
+                        ))}
                       </div>
                     )}
-                  </div>
-                  <div className="cm-setting-row cm-knowledge-row">
-                    <div className="cm-setting-row__icon">
-                      <BookOpen className="w-4 h-4" />
+                    <div className="mt-3">
+                      <ShellModelBadge
+                        placeholder
+                        label="Add connector..."
+                        shortcut="Search"
+                        onClick={() => setShowConnectorPicker(true)}
+                      />
+                      <ConnectorCommandBar
+                        open={showConnectorPicker}
+                        onOpenChange={setShowConnectorPicker}
+                        onSelect={addConnector}
+                        selectedIds={selectedIds}
+                      />
                     </div>
-                    <div className="cm-setting-row__copy">
-                      <div className="cm-setting-row__label">Knowledge</div>
-                      <div className="cm-setting-row__description">
-                        Optional Filecoin-backed <code className="text-cyan-500/70">ipfs://</code> files attached to the minted agent card.
+                    <div className="cm-setting-row cm-knowledge-row">
+                      <div className="cm-setting-row__icon">
+                        <BookOpen className="w-4 h-4" />
                       </div>
-                      {identityFiles.length > 0 ? (
-                        <div className="cm-knowledge-row__files">
-                          {identityFiles.map((file) => (
-                            <span
-                              key={`${file.name}:${file.size}:${file.lastModified}`}
-                              className="cm-knowledge-row__file"
-                            >
-                              <span className="truncate">{file.name}</span>
-                              <button
-                                type="button"
-                                onClick={() => removeIdentityFile(file)}
-                                className="rounded-full px-1 text-muted-foreground hover:text-foreground"
-                                aria-label={`Remove ${file.name}`}
-                              >
-                                <X className="w-2.5 h-2.5" />
-                              </button>
-                            </span>
-                          ))}
+                      <div className="cm-setting-row__copy">
+                        <div className="cm-setting-row__label">Knowledge</div>
+                        <div className="cm-setting-row__description">
+                          Optional Filecoin-backed <code className="text-cyan-500/70">ipfs://</code> files attached to the minted agent card.
                         </div>
-                      ) : null}
+                        {identityFiles.length > 0 ? (
+                          <div className="cm-knowledge-row__files">
+                            {identityFiles.map((file) => (
+                              <span
+                                key={`${file.name}:${file.size}:${file.lastModified}`}
+                                className="cm-knowledge-row__file"
+                              >
+                                <span className="truncate">{file.name}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => removeIdentityFile(file)}
+                                  className="rounded-full px-1 text-muted-foreground hover:text-foreground"
+                                  aria-label={`Remove ${file.name}`}
+                                >
+                                  <X className="w-2.5 h-2.5" />
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                      <div className="cm-setting-row__control">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => identityInputRef.current?.click()}
+                          className="border-cyan-500/40 text-cyan-300 hover:text-cyan-200 shrink-0 h-8 text-xs"
+                        >
+                          <Upload className="w-3 h-3 mr-1.5" />
+                          Attach
+                        </Button>
+                      </div>
                     </div>
-                    <div className="cm-setting-row__control">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => identityInputRef.current?.click()}
-                        className="border-cyan-500/40 text-cyan-300 hover:text-cyan-200 shrink-0 h-8 text-xs"
-                      >
-                        <Upload className="w-3 h-3 mr-1.5" />
-                        Attach
-                      </Button>
+                  </div>
+
+                  {/* Financial */}
+                  <div className="cm-builder-panel" data-tone="fuchsia">
+                    <div className="cm-builder-panel__title">
+                      <DollarSign className="w-4 h-4" />
+                      Financial (x402)
                     </div>
+                    <div className="cm-financial-grid">
+                      <FormField
+                        control={form.control}
+                        name="licensePrice"
+                        render={({ field }: { field: ControllerRenderProps<FormValues, "licensePrice"> }) => (
+                          <FormItem className="cm-field">
+                            <FormLabel className="font-mono text-foreground text-sm">Price</FormLabel>
+                            <FormControl>
+                              <Input type="number" step="0.001" {...field} className="bg-background/50 font-mono border-primary/20 focus:border-fuchsia-500" />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name="creatorFee"
+                        render={({ field }: { field: ControllerRenderProps<FormValues, "creatorFee"> }) => (
+                          <FormItem className="cm-field">
+                            <FormLabel className="font-mono text-foreground text-sm">Fee</FormLabel>
+                            <FormControl>
+                              <Input type="number" min="0" step="1" {...field} className="bg-background/50 font-mono border-primary/20 focus:border-fuchsia-500" />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name="licenses"
+                        render={({ field }: { field: ControllerRenderProps<FormValues, "licenses"> }) => (
+                          <FormItem className="cm-field">
+                            <FormLabel className="font-mono text-foreground text-sm">Supply</FormLabel>
+                            <FormControl>
+                              <Input type="number" placeholder="∞" {...field} className="bg-background/50 font-mono border-primary/20 focus:border-fuchsia-500" />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                    <FormField
+                      control={form.control}
+                      name="isCloneable"
+                      render={({ field }: { field: ControllerRenderProps<FormValues, "isCloneable"> }) => (
+                        <FormItem className="cm-setting-row">
+                          <div className="cm-setting-row__copy">
+                            <FormLabel className="text-sm font-mono text-foreground cursor-pointer">Allow Cloning</FormLabel>
+                            <FormDescription>Let other builders mint derivative agents with attribution.</FormDescription>
+                          </div>
+                          <div className="cm-setting-row__control">
+                            <FormControl>
+                              <Switch
+                                checked={field.value}
+                                onCheckedChange={field.onChange}
+                              />
+                            </FormControl>
+                          </div>
+                        </FormItem>
+                      )}
+                    />
                   </div>
                 </div>
 
-                {/* Financial */}
-                <div className="cm-builder-panel" data-tone="fuchsia">
-                  <div className="cm-builder-panel__title">
-                    <DollarSign className="w-4 h-4" />
-                    Financial (x402)
+                {/* Mint Progress */}
+                {mintStep === "uploading" && (
+                  <div className="flex items-center gap-2 p-2 rounded-sm bg-cyan-500/10 border border-cyan-500/30">
+                    <Loader2 className="w-4 h-4 text-cyan-400 animate-spin" />
+                    <p className="font-mono text-xs text-foreground">Uploading to IPFS...</p>
                   </div>
-                  <div className="cm-financial-grid">
-                    <FormField
-                      control={form.control}
-                      name="licensePrice"
-                      render={({ field }: { field: ControllerRenderProps<FormValues, "licensePrice"> }) => (
-                        <FormItem className="cm-field">
-                          <FormLabel className="font-mono text-foreground text-sm">Price</FormLabel>
-                          <FormControl>
-                            <Input type="number" step="0.001" {...field} className="bg-background/50 font-mono border-primary/20 focus:border-fuchsia-500" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="creatorFee"
-                      render={({ field }: { field: ControllerRenderProps<FormValues, "creatorFee"> }) => (
-                        <FormItem className="cm-field">
-                          <FormLabel className="font-mono text-foreground text-sm">Fee</FormLabel>
-                          <FormControl>
-                            <Input type="number" min="0" step="1" {...field} className="bg-background/50 font-mono border-primary/20 focus:border-fuchsia-500" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="licenses"
-                      render={({ field }: { field: ControllerRenderProps<FormValues, "licenses"> }) => (
-                        <FormItem className="cm-field">
-                          <FormLabel className="font-mono text-foreground text-sm">Supply</FormLabel>
-                          <FormControl>
-                            <Input type="number" placeholder="∞" {...field} className="bg-background/50 font-mono border-primary/20 focus:border-fuchsia-500" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  </div>
-                  <FormField
-                    control={form.control}
-                    name="isCloneable"
-                    render={({ field }: { field: ControllerRenderProps<FormValues, "isCloneable"> }) => (
-                      <FormItem className="cm-setting-row">
-                        <div className="cm-setting-row__copy">
-                        <FormLabel className="text-sm font-mono text-foreground cursor-pointer">Allow Cloning</FormLabel>
-                          <FormDescription>Let other builders mint derivative agents with attribution.</FormDescription>
-                        </div>
-                        <div className="cm-setting-row__control">
-                        <FormControl>
-                          <Switch
-                            checked={field.value}
-                            onCheckedChange={field.onChange}
-                          />
-                        </FormControl>
-                        </div>
-                      </FormItem>
+                )}
+
+                {/* Mobile Mint Button */}
+                <Button
+                  type="submit"
+                  size="lg"
+                  disabled={!account || isProcessing}
+                  className="w-full lg:hidden bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white font-bold font-mono hover:from-cyan-400 hover:to-fuchsia-400 h-11 text-sm shadow-[0_0_20px_-5px_hsl(var(--primary))] tracking-wider disabled:opacity-50"
+                >
+                  {mintStep === "uploading" ? (
+                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" />UPLOADING...</>
+                  ) : mintStep === "minting" ? (
+                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" />MINTING...</>
+                  ) : !account ? (
+                    "SIGN IN TO MINT"
+                  ) : (
+                    "MINT AGENT"
+                  )}
+                </Button>
+              </form>
+            </Form>
+
+            {/* Right Sidebar: Avatar + Mint */}
+            <div className="cm-create-builder__sidebar">
+              {/* Avatar */}
+              <div className="cm-builder-panel" data-tone="fuchsia">
+                <input ref={fileInputRef} type="file" accept="image/*" onChange={handleAvatarSelect} className="hidden" />
+                <div className="relative w-full aspect-square max-w-[180px] mx-auto">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full h-full rounded-sm bg-background/50 border border-primary/25 border-dashed flex flex-col items-center justify-center text-muted-foreground cursor-pointer hover:border-cyan-500 hover:text-cyan-400 transition-colors overflow-hidden"
+                  >
+                    {isGeneratingAvatar ? (
+                      <div className="flex flex-col items-center gap-1">
+                        <Loader2 className="w-6 h-6 animate-spin text-cyan-400" />
+                        <span className="text-[10px] font-mono text-cyan-400">GENERATING...</span>
+                      </div>
+                    ) : avatarPreview ? (
+                      <img src={avatarPreview} alt="Avatar" className="w-full h-full object-cover" />
+                    ) : (
+                      <>
+                        <Upload className="w-5 h-5 mb-1" />
+                        <span className="text-xs font-mono">UPLOAD AVATAR</span>
+                      </>
                     )}
-                  />
+                  </button>
+                  {!isGeneratingAvatar && (
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); handleGenerateAvatar(); }}
+                            disabled={generationCount >= MAX_GENERATIONS}
+                            className={`absolute bottom-1.5 right-1.5 w-8 h-8 rounded-full flex items-center justify-center transition-all ${generationCount >= MAX_GENERATIONS
+                              ? "bg-muted/50 text-muted-foreground cursor-not-allowed"
+                              : "bg-fuchsia-500/80 hover:bg-fuchsia-500 text-white shadow-lg"
+                              }`}
+                          >
+                            <Sparkles className="w-4 h-4" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          {generationCount >= MAX_GENERATIONS
+                            ? `Limit (${MAX_GENERATIONS}/${MAX_GENERATIONS})`
+                            : `Generate (${generationCount}/${MAX_GENERATIONS})`}
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  )}
+                </div>
+                {generatedAvatarUrl && !isGeneratingAvatar && (
+                  <div className="flex gap-2 justify-center">
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button type="button" variant="outline" size="sm" onClick={handleAcceptAvatar} className="border-green-500/50 text-green-400 hover:bg-green-500/10 h-7 w-7 p-0">
+                            <Check className="w-3.5 h-3.5" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Accept</TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button type="button" variant="outline" size="sm" onClick={handleRegenerateAvatar} disabled={generationCount >= MAX_GENERATIONS}
+                            className={`h-7 w-7 p-0 ${generationCount >= MAX_GENERATIONS ? "border-muted text-muted-foreground" : "border-cyan-500/50 text-cyan-400 hover:bg-cyan-500/10"}`}
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{generationCount >= MAX_GENERATIONS ? "Limit" : "Regenerate"}</TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
+                )}
+                {avatarPreview && !generatedAvatarUrl && (
+                  <Button type="button" variant="ghost" size="sm" onClick={() => { setAvatarFile(null); setAvatarPreview(null); setGeneratedAvatarUrl(null); }} className="w-full text-[10px] text-muted-foreground h-6">
+                    Remove
+                  </Button>
+                )}
+              </div>
+
+              {/* Mint Info */}
+              <div className="cm-builder-panel text-sm">
+                <div className="flex justify-between gap-3">
+                  <span className="text-muted-foreground font-mono">Network</span>
+                  <span className="font-mono text-cyan-400 truncate">
+                    {CHAIN_CONFIG[selectedChainId]?.name || "Unknown"}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground font-mono">Contract</span>
+                  <span className="font-mono text-cyan-400">ERC8004</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground font-mono">Gas</span>
+                  <span className="font-mono text-green-400">Sponsored</span>
                 </div>
               </div>
 
-              {/* Mint Progress */}
-              {mintStep === "uploading" && (
-                <div className="flex items-center gap-2 p-2 rounded-sm bg-cyan-500/10 border border-cyan-500/30">
-                  <Loader2 className="w-4 h-4 text-cyan-400 animate-spin" />
-                  <p className="font-mono text-xs text-foreground">Uploading to IPFS...</p>
-                </div>
-              )}
-
-              {/* Mobile Mint Button */}
+              {/* Mint Button */}
               <Button
-                type="submit"
-                size="lg"
+                type="button"
+                onClick={form.handleSubmit(onSubmit)}
                 disabled={!account || isProcessing}
-                className="w-full lg:hidden bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white font-bold font-mono hover:from-cyan-400 hover:to-fuchsia-400 h-11 text-sm shadow-[0_0_20px_-5px_hsl(var(--primary))] tracking-wider disabled:opacity-50"
+                className="w-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white font-bold font-mono hover:from-cyan-400 hover:to-fuchsia-400 h-12 text-base shadow-[0_0_20px_-5px_hsl(var(--primary))] tracking-wider disabled:opacity-50"
               >
                 {mintStep === "uploading" ? (
                   <><Loader2 className="w-4 h-4 mr-2 animate-spin" />UPLOADING...</>
@@ -1115,198 +1148,77 @@ export default function CreateAgent() {
                   "MINT AGENT"
                 )}
               </Button>
-            </form>
-          </Form>
+            </div>
+          </div>
 
-        {/* Right Sidebar: Avatar + Mint */}
-        <div className="cm-create-builder__sidebar">
-          {/* Avatar */}
-          <div className="cm-builder-panel" data-tone="fuchsia">
-            <input ref={fileInputRef} type="file" accept="image/*" onChange={handleAvatarSelect} className="hidden" />
-            <div className="relative w-full aspect-square max-w-[180px] mx-auto">
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="w-full h-full rounded-sm bg-background/50 border border-primary/25 border-dashed flex flex-col items-center justify-center text-muted-foreground cursor-pointer hover:border-cyan-500 hover:text-cyan-400 transition-colors overflow-hidden"
-              >
-                {isGeneratingAvatar ? (
-                  <div className="flex flex-col items-center gap-1">
-                    <Loader2 className="w-6 h-6 animate-spin text-cyan-400" />
-                    <span className="text-[10px] font-mono text-cyan-400">GENERATING...</span>
+
+          {/* Confirmation Dialog */}
+          <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
+            <AlertDialogContent className="cm-surface-card max-w-md">
+              <AlertDialogHeader>
+                <AlertDialogTitle className="font-display text-xl">
+                  <Sparkles className="w-5 h-5 inline mr-2 text-cyan-400" />
+                  Confirm Agent Minting
+                </AlertDialogTitle>
+                <AlertDialogDescription className="text-muted-foreground">
+                  Review your agent details before minting to the blockchain.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+
+              {pendingValues && (
+                <div className="space-y-3 py-4 border-y border-primary/15">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Name</span>
+                    <span className="font-mono text-foreground">{pendingValues.name}</span>
                   </div>
-                ) : avatarPreview ? (
-                  <img src={avatarPreview} alt="Avatar" className="w-full h-full object-cover" />
-                ) : (
-                  <>
-                    <Upload className="w-5 h-5 mb-1" />
-                    <span className="text-xs font-mono">UPLOAD AVATAR</span>
-                  </>
-                )}
-              </button>
-              {!isGeneratingAvatar && (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); handleGenerateAvatar(); }}
-                        disabled={generationCount >= MAX_GENERATIONS}
-                        className={`absolute bottom-1.5 right-1.5 w-8 h-8 rounded-full flex items-center justify-center transition-all ${generationCount >= MAX_GENERATIONS
-                          ? "bg-muted/50 text-muted-foreground cursor-not-allowed"
-                          : "bg-fuchsia-500/80 hover:bg-fuchsia-500 text-white shadow-lg"
-                          }`}
-                      >
-                        <Sparkles className="w-4 h-4" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {generationCount >= MAX_GENERATIONS
-                        ? `Limit (${MAX_GENERATIONS}/${MAX_GENERATIONS})`
-                        : `Generate (${generationCount}/${MAX_GENERATIONS})`}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              )}
-            </div>
-            {generatedAvatarUrl && !isGeneratingAvatar && (
-              <div className="flex gap-2 justify-center">
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button type="button" variant="outline" size="sm" onClick={handleAcceptAvatar} className="border-green-500/50 text-green-400 hover:bg-green-500/10 h-7 w-7 p-0">
-                        <Check className="w-3.5 h-3.5" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Accept</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button type="button" variant="outline" size="sm" onClick={handleRegenerateAvatar} disabled={generationCount >= MAX_GENERATIONS}
-                        className={`h-7 w-7 p-0 ${generationCount >= MAX_GENERATIONS ? "border-muted text-muted-foreground" : "border-cyan-500/50 text-cyan-400 hover:bg-cyan-500/10"}`}
-                      >
-                        <RefreshCw className="w-3.5 h-3.5" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>{generationCount >= MAX_GENERATIONS ? "Limit" : "Regenerate"}</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </div>
-            )}
-            {avatarPreview && !generatedAvatarUrl && (
-              <Button type="button" variant="ghost" size="sm" onClick={() => { setAvatarFile(null); setAvatarPreview(null); setGeneratedAvatarUrl(null); }} className="w-full text-[10px] text-muted-foreground h-6">
-                Remove
-              </Button>
-            )}
-          </div>
-
-          {/* Mint Info */}
-          <div className="cm-builder-panel text-sm">
-            <div className="flex justify-between gap-3">
-              <span className="text-muted-foreground font-mono">Network</span>
-              <span className="font-mono text-cyan-400 truncate">
-                {CHAIN_CONFIG[selectedChainId]?.name || "Unknown"}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground font-mono">Contract</span>
-              <span className="font-mono text-cyan-400">ERC8004</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground font-mono">Gas</span>
-              <span className="font-mono text-green-400">Sponsored</span>
-            </div>
-          </div>
-
-          {/* Mint Button */}
-          <Button
-            type="button"
-            onClick={form.handleSubmit(onSubmit)}
-            disabled={!account || isProcessing}
-            className="w-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white font-bold font-mono hover:from-cyan-400 hover:to-fuchsia-400 h-12 text-base shadow-[0_0_20px_-5px_hsl(var(--primary))] tracking-wider disabled:opacity-50"
-          >
-            {mintStep === "uploading" ? (
-              <><Loader2 className="w-4 h-4 mr-2 animate-spin" />UPLOADING...</>
-            ) : mintStep === "minting" ? (
-              <><Loader2 className="w-4 h-4 mr-2 animate-spin" />MINTING...</>
-            ) : !account ? (
-              "SIGN IN TO MINT"
-            ) : (
-              "MINT AGENT"
-            )}
-          </Button>
-        </div>
-      </div>
-
-
-      {/* Confirmation Dialog */}
-      <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
-        <AlertDialogContent className="cm-surface-card max-w-md">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="font-display text-xl">
-              <Sparkles className="w-5 h-5 inline mr-2 text-cyan-400" />
-              Confirm Agent Minting
-            </AlertDialogTitle>
-            <AlertDialogDescription className="text-muted-foreground">
-              Review your agent details before minting to the blockchain.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-
-          {pendingValues && (
-            <div className="space-y-3 py-4 border-y border-primary/15">
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Name</span>
-                <span className="font-mono text-foreground">{pendingValues.name}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Framework</span>
-                <span className="font-mono text-orange-400">Manowar</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Model</span>
-                <span className="font-mono text-cyan-400">{selectedCatalogModel?.name || pendingValues.model}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">License Price</span>
-                <span className="font-mono text-green-400">${pendingValues.licensePrice} USDC</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">License Supply</span>
-                <span className="font-mono">{pendingValues.licenses || "∞ Unlimited"}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Cloneable</span>
-                <span className="font-mono">{pendingValues.isCloneable ? "Yes" : "No"}</span>
-              </div>
-              {selectedPlugins.length > 0 && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Plugins</span>
-                  <span className="font-mono text-fuchsia-400">{selectedPlugins.length} selected</span>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Framework</span>
+                    <span className="font-mono text-orange-400">Manowar</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Model</span>
+                    <span className="font-mono text-cyan-400">{selectedCatalogModel?.name || pendingValues.model}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">License Price</span>
+                    <span className="font-mono text-green-400">${pendingValues.licensePrice} USDC</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">License Supply</span>
+                    <span className="font-mono">{pendingValues.licenses || "∞ Unlimited"}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Cloneable</span>
+                    <span className="font-mono">{pendingValues.isCloneable ? "Yes" : "No"}</span>
+                  </div>
+                  {selectedConnectors.length > 0 && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Connectors</span>
+                      <span className="font-mono text-fuchsia-400">{selectedConnectors.length} selected</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Network</span>
+                    <span className="font-mono text-cyan-400">{CHAIN_CONFIG[selectedChainId]?.name || "Unknown"}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Gas</span>
+                    <span className="font-mono text-green-400">Sponsored (Free)</span>
+                  </div>
                 </div>
               )}
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Network</span>
-                <span className="font-mono text-cyan-400">{CHAIN_CONFIG[selectedChainId]?.name || "Unknown"}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Gas</span>
-                <span className="font-mono text-green-400">Sponsored (Free)</span>
-              </div>
-            </div>
-          )}
 
-          <AlertDialogFooter>
-            <AlertDialogCancel className="border-primary/20">Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleConfirmedMint}
-              className="bg-cyan-500 text-black hover:bg-cyan-400 font-bold"
-            >
-              <CheckCircle2 className="w-4 h-4 mr-2" />
-              Confirm & Mint
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
+              <AlertDialogFooter>
+                <AlertDialogCancel className="border-primary/20">Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={handleConfirmedMint}
+                  className="bg-cyan-500 text-black hover:bg-cyan-400 font-bold"
+                >
+                  <CheckCircle2 className="w-4 h-4 mr-2" />
+                  Confirm & Mint
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
           </AlertDialog>
         </div>
       </div>

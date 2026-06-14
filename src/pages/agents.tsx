@@ -18,8 +18,6 @@ import {
   Globe,
 } from "lucide-react";
 import { useAgents } from "@/hooks/use-agents";
-import { useOnchainAgents } from "@/hooks/use-onchain";
-import { getIpfsUrl } from "@/lib/pinata";
 import { DiscoveryAgentCard, type DiscoveryAgent } from "@/components/agent-card";
 import {
   type Agent,
@@ -54,64 +52,20 @@ export default function AgentsPage() {
     direction: "desc",
   });
 
-  // Fetch on-chain Manowar agents
-  const { data: onchainAgents, isLoading: isLoadingOnchain } = useOnchainAgents();
+  const { data: native, isLoading: isLoadingNative } = useAgents({
+    search: debouncedSearch || undefined,
+    tags: selectedTag !== "all" ? [selectedTag] : undefined,
+    registries: ["manowar"],
+    status: "active",
+    limit: 60,
+    sort: "interactions",
+    direction: "desc",
+  });
 
-  // Convert on-chain agents to unified Agent format
   const manowarAgents = useMemo((): DiscoveryAgent[] => {
-    if (!onchainAgents || !selectedRegistries.includes("manowar")) return [];
-
-    return onchainAgents
-      .filter(a => {
-        // Filter by search
-        if (debouncedSearch) {
-          const searchLower = debouncedSearch.toLowerCase();
-          const name = a.metadata?.name || `Agent #${a.id}`;
-          const desc = a.metadata?.description || "";
-          if (!name.toLowerCase().includes(searchLower) &&
-            !desc.toLowerCase().includes(searchLower)) {
-            return false;
-          }
-        }
-        return true;
-      })
-      .map((a): DiscoveryAgent => {
-        const avatarUri = a.metadata?.image;
-        let avatarUrl: string | null = null;
-        if (avatarUri && avatarUri !== "none" && avatarUri.startsWith("ipfs://")) {
-          avatarUrl = getIpfsUrl(avatarUri.replace("ipfs://", ""));
-          }
-
-        return {
-          id: `manowar-${a.walletAddress || a.id}`,
-          address: a.walletAddress || a.creator,
-          name: a.metadata?.name || (a.walletAddress ? `${a.walletAddress.slice(0, 6)}...${a.walletAddress.slice(-4)}` : `Agent #${a.id}`),
-          description: a.metadata?.description || "",
-          registry: "manowar" as AgentRegistryId,
-          protocols: a.metadata?.protocols || [{ name: "Manowar", version: "1.0" }],
-          avatarUrl,
-          totalInteractions: 0, // On-chain agents don't track this yet
-          recentInteractions: 0,
-          rating: 5.0, // Default rating for new agents
-          status: "active" as const,
-          type: "hosted" as const,
-          featured: false,
-          verified: true, // On-chain = verified
-          category: "ai-agent",
-          tags: a.metadata?.skills || [],
-          owner: a.creator,
-          createdAt: a.metadata?.createdAt || new Date().toISOString(),
-          updatedAt: a.metadata?.createdAt || new Date().toISOString(),
-          // Manowar-specific fields
-          price: a.licensePriceFormatted,
-          units: a.licenses === 0 ? "∞" : `${a.licensesAvailable}/${a.licenses}`,
-          cloneable: a.cloneable,
-          isClone: a.isClone,
-          isWarped: a.isWarped,
-          walletAddress: a.walletAddress, // Derived wallet address
-        };
-      });
-  }, [onchainAgents, selectedRegistries, debouncedSearch]);
+    if (!selectedRegistries.includes("manowar")) return [];
+    return (native?.agents || []) as DiscoveryAgent[];
+  }, [native?.agents, selectedRegistries]);
 
   // Merge agents from all sources
   const allAgents = useMemo(() => {
@@ -119,7 +73,7 @@ export default function AgentsPage() {
     return [...manowarAgents, ...external];
   }, [data?.agents, manowarAgents]);
 
-  const isLoading = isLoadingExternal || isLoadingOnchain;
+  const isLoading = isLoadingExternal || isLoadingNative;
 
   const handleSelectAgent = (agent: Agent) => {
     posthog?.capture("agent_selected", {

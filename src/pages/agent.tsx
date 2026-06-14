@@ -420,11 +420,11 @@ export default function AgentDetailPage() {
           <Skeleton className="h-6 w-20" />
         </div>
         {/* Main Grid */}
-        <div className="cm-agent-detail-layout">
-          <div className="cm-agent-detail-chat">
+        <div className="cm-split">
+          <div className="cm-split__main">
             <Skeleton className="h-full w-full rounded-lg" />
           </div>
-          <div className="cm-agent-detail-rail hidden lg:grid">
+          <div className="cm-split__side">
             <AgentCardSkeleton />
           </div>
         </div>
@@ -457,47 +457,55 @@ export default function AgentDetailPage() {
   return (
     <div className="cm-chat-workspace">
       {/* Compact Header */}
-      <div className="shrink-0 mb-3 flex items-center justify-between">
-        <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-fuchsia-400 -ml-2 h-7 px-2" onClick={() => history.back()}>
+      <div className="cm-control-rail cm-control-rail--compact cm-control-rail--inline">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="cm-shell-button cm-shell-button--ghost cm-shell-button--sm"
+          onClick={() => history.back()}
+        >
           <ArrowLeft className="w-3.5 h-3.5 mr-1" />
           <span className="hidden sm:inline">Back</span>
         </Button>
 
-        <div className="flex items-center gap-2">
+        <div className="cm-control-rail__main">
+          <Badge className="cm-badge cm-badge--primary">
+            <Sparkles className="w-3 h-3 mr-1" />
+            <span className="truncate">{agentLabel}</span>
+          </Badge>
+        </div>
+
+        <div className="cm-control-rail__actions">
           <CostReceiptIndicator />
           <Button
             asChild
             size="sm"
             variant="outline"
-            className="h-7 px-2 text-xs border-cyan-500/40 text-cyan-300 hover:text-cyan-200"
+            className="cm-shell-button cm-shell-button--secondary cm-shell-button--sm"
           >
             <Link href={`/connect-local?agent_wallet=${encodeURIComponent(agentWallet || "")}`}>
               <Download className="w-3 h-3 mr-1" />
               Install locally
             </Link>
           </Button>
-          <Badge className="bg-cyan-500/20 text-cyan-400 border-cyan-500/30 text-xs">
-            <Sparkles className="w-3 h-3 mr-1" />
-            {agentLabel}
-          </Badge>
+          {/* Mobile Card Button - only visible on mobile */}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="cm-shell-button cm-shell-button--ghost cm-shell-button--sm cm-agent-detail-card-button"
+            onClick={() => setMobileCardOpen(true)}
+            aria-label="View agent details"
+          >
+            <IdCard className="w-4 h-4" />
+          </Button>
         </div>
-
-        {/* Mobile Card Button - only visible on mobile */}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="lg:hidden text-muted-foreground hover:text-cyan-400 h-7 w-7 p-0 ml-2"
-          onClick={() => setMobileCardOpen(true)}
-          aria-label="View agent details"
-        >
-          <IdCard className="w-4 h-4" />
-        </Button>
       </div>
 
+
       {/* Main Layout: Chat on Left, Card on Right - fills remaining space */}
-      <div className="cm-agent-detail-layout">
+      <div className="cm-split">
         {/* Chat Section (2/3 width on desktop, full on mobile) */}
-        <div className="cm-agent-detail-chat">
+        <div className="cm-split__main">
           <MultimodalCanvas
             variant="agent"
             title={`Chat with ${agentLabel}`}
@@ -542,11 +550,10 @@ export default function AgentDetailPage() {
         </div>
 
         {/* Agent Card (1/3 width on desktop, hidden on mobile by default) */}
-        <div className="cm-agent-detail-rail hidden lg:grid">
+        <div className="cm-split__side">
           <AgentCard
             agent={agent}
             onCopyEndpoint={copyEndpoint}
-            className="cm-agent-card--match-chat"
           />
         </div>
       </div>
@@ -615,14 +622,14 @@ export default function AgentDetailPage() {
 
       {/* Mobile Card Sheet */}
       <Sheet open={mobileCardOpen} onOpenChange={setMobileCardOpen}>
-        <SheetContent side="right" className="cm-sheet-panel w-[340px] sm:w-[400px] p-0">
+        <SheetContent side="right" className="cm-sheet-panel cm-sheet-panel--inspect p-0">
           <SheetHeader className="p-4 border-b border-sidebar-border shrink-0">
             <SheetTitle className="font-display text-cyan-400 flex items-center gap-2">
               <IdCard className="w-4 h-4" />
               Agent Details
             </SheetTitle>
           </SheetHeader>
-          <div className="cm-sheet-body p-4">
+          <div className="cm-sheet-body cm-sheet-body--inspect">
             <AgentCard
               agent={agent}
               onCopyEndpoint={copyEndpoint}
