@@ -51,7 +51,7 @@ export function ModelBadge({ model, onClick }: ModelBadgeProps) {
       price={price}
       shortcut="⌘K"
       onClick={onClick}
-      title={`${model.modelId} · ${model.provider}`}
+      title={`${model.modelId} · ${model.family || model.provider}`}
     />
   );
 }
