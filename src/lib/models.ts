@@ -16,7 +16,42 @@ import type { Model } from "@compose-market/sdk";
 
 export type CatalogModel = Model & {
   operations?: unknown[];
+  family?: string;
 };
+
+export const FAMILY_LOGOS: Record<string, string> = {
+  alibaba: "alibabacloud-color.svg",
+  asicloud: "asicloud.webp",
+  baai: "baai.svg",
+  blackforestlabs: "black-forest-labs.svg",
+  cartesia: "cartesia.avif",
+  cohere: "cohere-color.svg",
+  daily: "daily.svg",
+  deepgram: "deepgram.png",
+  deepseek: "deepseek-color.svg",
+  elevenlabs: "elevenlabs.svg",
+  google: "gemini-color.svg",
+  huggingface: "huggingface-color.png",
+  ibm: "ibm.svg",
+  leonardo: "leonardo.png",
+  lykon: "lykon.jpg",
+  meta: "meta-color.svg",
+  microsoft: "microsoft.webp",
+  minimax: "minimax-color.svg",
+  mistral: "mistral-color.svg",
+  moonshot: "moonshot-color.svg",
+  nvidia: "nvidia-color.svg",
+  openai: "openai.png",
+  roboflow: "roboflow.png",
+  stabilityai: "stability-color.svg",
+  xai: "xai-grok.svg",
+  zai: "zai.svg",
+};
+
+export function getFamilyLogoUrl(family: string): string | null {
+  const file = FAMILY_LOGOS[family.toLowerCase()];
+  return file ? `/families/${file}` : null;
+}
 
 export type ModelJsonValue =
   | string
@@ -48,6 +83,7 @@ export interface SelectedCatalogModel {
   modelId: string;
   name: string | null;
   provider: string;
+  family: string;
   pricing: ModelJsonValue;
   contextWindow: ModelJsonValue;
 }
@@ -93,15 +129,16 @@ export function buildTypeCategories(models: CatalogModel[]): ModelCategory[] {
   ];
 }
 
-export function buildProviderCategories(models: CatalogModel[]): ModelCategory[] {
+export function buildFamilyCategories(models: CatalogModel[]): ModelCategory[] {
   const counts = new Map<string, number>();
 
   for (const model of models) {
-    counts.set(model.provider, (counts.get(model.provider) || 0) + 1);
+    const family = model.family || model.provider;
+    counts.set(family, (counts.get(family) || 0) + 1);
   }
 
   return [
-    { id: "all", label: "All Providers", count: models.length },
+    { id: "all", label: "All Families", count: models.length },
     ...Array.from(counts.entries())
       .sort((a, b) => b[1] - a[1])
       .map(([id, count]) => ({ id, label: id, count })),
@@ -113,6 +150,7 @@ export function toSelectedCatalogModel(model: CatalogModel): SelectedCatalogMode
     modelId: model.modelId,
     name: model.name,
     provider: model.provider,
+    family: model.family || model.provider,
     pricing: model.pricing as ModelJsonValue,
     contextWindow: model.contextWindow as ModelJsonValue,
   };
@@ -200,10 +238,24 @@ export function formatModelValue(value: ModelJsonValue): string {
   return values.join(" • ");
 }
 
+export function shorten(val: number): string {
+  if (val >= 1_000_000) {
+    const value = val / 1_000_000;
+    const formatted = parseFloat((Math.floor(value * 1000) / 1000).toFixed(3));
+    return `${formatted}M`;
+  }
+  if (val >= 1_000) {
+    const value = val / 1_000;
+    const formatted = parseFloat((Math.floor(value * 1000) / 1000).toFixed(3));
+    return `${formatted}k`;
+  }
+  return String(val);
+}
+
 export function getModelContextWindowEntries(model: CatalogModel): ModelDisplayField[] {
   const contextWindow = model.contextWindow;
   if (typeof contextWindow === "number") {
-    return [{ label: "Input tokens", value: contextWindow.toLocaleString() }];
+    return [{ label: "Input tokens", value: shorten(contextWindow) }];
   }
   if (contextWindow === null || contextWindow === undefined) {
     return [];
@@ -216,7 +268,7 @@ export function getModelContextWindowEntries(model: CatalogModel): ModelDisplayF
 
   return Object.entries(asObject).map(([key, value]) => ({
     label: humanizeModelKey(key),
-    value: formatPrimitiveValue(value),
+    value: typeof value === "number" ? shorten(value) : formatPrimitiveValue(value),
   }));
 }
 

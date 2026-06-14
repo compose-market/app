@@ -158,9 +158,9 @@ export async function callConnectorTool(
 // Connector execution API
 // =============================================================================
 
-export interface PluginExecutionResult {
+export interface ConnectorExecutionResult {
   success: boolean;
-  pluginId: string;
+  connectorId: string;
   tool: string;
   result?: unknown;
   txHash?: string;
@@ -168,13 +168,13 @@ export interface PluginExecutionResult {
   content?: unknown;
 }
 
-export async function executeOnchainConnector(
-  pluginId: string,
+export async function executeGoatPlugin(
+  connectorId: string,
   tool: string,
   args: Record<string, unknown>
-): Promise<PluginExecutionResult> {
+): Promise<ConnectorExecutionResult> {
   const res = await sdk.fetch(
-    `/api/onchain/${encodeURIComponent(pluginId)}/execute/${encodeURIComponent(tool)}`,
+    `/api/onchain/${encodeURIComponent(connectorId)}/execute/${encodeURIComponent(tool)}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -188,7 +188,7 @@ export async function executeSpawnedServer(
   slug: string,
   tool: string,
   args: Record<string, unknown>
-): Promise<PluginExecutionResult> {
+): Promise<ConnectorExecutionResult> {
   const res = await sdk.fetch(
     `/api/mcps/${encodeURIComponent(slug)}/execute/${encodeURIComponent(tool)}`,
     {
@@ -201,7 +201,7 @@ export async function executeSpawnedServer(
   const data = await res.json() as { ok?: boolean; result?: unknown; kind?: string; message?: string };
   return {
     success: Boolean(data.ok),
-    pluginId: slug,
+    connectorId: slug,
     tool,
     content: data.result,
     error: data.ok ? undefined : (data.message || data.kind),
@@ -245,11 +245,11 @@ export async function executeRegistryTool(
   tool: string,
   args: Record<string, unknown>,
   _connectorId?: string
-): Promise<PluginExecutionResult> {
+): Promise<ConnectorExecutionResult> {
   const binding = normalizeConnectorBinding({ registryId, origin, slug }, { defaultOrigin: "mcp" });
   if (binding.origin === "onchain") {
-    const pluginId = binding.slug;
-    return executeOnchainConnector(pluginId, tool, args);
+    const connectorId = binding.slug;
+    return executeGoatPlugin(connectorId, tool, args);
   }
   return executeSpawnedServer(binding.slug, tool, args);
 }

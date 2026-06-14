@@ -197,7 +197,7 @@ export interface AgentCard {
   cloneable: boolean;
   knowledge?: string[]; // Filecoin-backed ipfs:// URIs for creator knowledge docs
   protocols: Array<{ name: string; version: string }>;
-  plugins?: Array<{
+  connectors?: Array<{
     registryId: string;
     name: string;
     origin: string;

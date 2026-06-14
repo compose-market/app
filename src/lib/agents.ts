@@ -4,10 +4,12 @@
  *
  * Registries:
  * - Agentverse: Fetch.ai autonomous agent marketplace
- * - GOAT: DeFi tool plugins
+ * - GOAT: DeFi tool connectors
  */
 
 import { sdk } from "./sdk";
+
+const AGENTS_URL = (import.meta.env.VITE_AGENTS_URL || "https://agents.compose.market").replace(/\/+$/, "");
 
 // =============================================================================
 // Registry System
@@ -17,7 +19,6 @@ import { sdk } from "./sdk";
  * Agent registries/ecosystems that can be queried
  *
  * Note: Only registries with type="agent" are shown in the Agents tab.
- * GOAT plugins are PLUGINS, not agents - they appear in the Connectors tab.
  */
 export const AGENT_REGISTRIES = {
   agentverse: {
@@ -32,10 +33,10 @@ export const AGENT_REGISTRIES = {
   goat: {
     id: "goat",
     name: "GOAT SDK",
-    description: "DeFi & Web3 tool plugins",
+    description: "DeFi & Web3 tool connectors",
     url: "https://ohmygoat.dev",
     color: "green",
-    type: "plugin" as const, // Plugins, not agents - shown in Connectors tab
+    type: "connector" as const,
     enabled: false, // Disabled for agent search - use registry API instead
   },
   manowar: {
@@ -201,13 +202,14 @@ type ManowarAgentCard = {
   cloneable?: boolean;
   endpoint?: string;
   protocols?: Array<{ name: string; version: string }>;
-  plugins?: Array<{ name?: string; registryId?: string; origin?: string }>;
+  connectors?: Array<{ name?: string; registryId?: string; origin?: string }>;
   createdAt?: string;
   creator?: string;
 };
 
 type ManowarAgentPage = {
   agents?: ManowarAgentCard[];
+  total?: number;
 };
 
 // =============================================================================
@@ -352,11 +354,11 @@ function registryServerToAgent(server: RegistryServer, registry: AgentRegistryId
     avatarUrl: null,
     totalInteractions: 0,
     recentInteractions: 0,
-    rating: 4.5, // Default rating for plugins
+    rating: 4.5, // Default rating for connectors
     status: "active",
     type: "hosted",
     featured: false,
-    verified: true, // GOAT plugins are verified
+    verified: true, // GOAT connectors are verified
     category: server.category || deriveCategory(allTags),
     tags: allTags,
     owner: server.namespace,
@@ -372,7 +374,7 @@ function manowarToAgent(card: ManowarAgentCard): Agent {
     : [{ name: "x402", version: "1.0" }];
   const tags = Array.from(new Set([
     ...(card.skills || []),
-    ...(card.plugins || []).map((plugin) => plugin.origin || "").filter(Boolean),
+    ...(card.connectors || []).map((connector) => connector.origin || "").filter(Boolean),
     "onchain",
     "manowar",
   ].map((tag) => tag.toLowerCase())));
@@ -464,7 +466,7 @@ function getConnectorBaseUrl(): string {
 }
 
 /**
- * Search GOAT plugins from the connectors broker /onchain endpoint
+ * Search GOAT connectors from the connectors broker /onchain endpoint
  */
 async function searchGoat(
   options: SearchAgentsOptions
@@ -473,12 +475,12 @@ async function searchGoat(
     const response = await fetch(`${getConnectorBaseUrl()}/onchain`);
 
     if (!response.ok) {
-      console.warn("Failed to fetch GOAT plugins:", response.status);
+      console.warn("Failed to fetch GOAT connectors:", response.status);
       return { agents: [], total: 0, tags: [], categories: [] };
     }
 
     const data = await response.json() as {
-      plugins?: Array<{
+      connectors?: Array<{
         id: string;
         name: string;
         description: string;
@@ -488,12 +490,12 @@ async function searchGoat(
       }>;
     };
 
-    const plugins = data.plugins || [];
+    const connectors = data.connectors || [];
 
-    const servers: RegistryServer[] = plugins.map((p) => ({
+    const servers: RegistryServer[] = connectors.map((p) => ({
       registryId: `onchain:${p.id}`,
       origin: "onchain",
-      type: "plugin",
+      type: "connector",
       namespace: "goat",
       name: p.name,
       slug: p.id,
@@ -540,7 +542,7 @@ async function searchGoat(
       categories: Array.from(allCategories).sort(),
     };
   } catch (err) {
-    console.warn("Error fetching GOAT plugins:", err);
+    console.warn("Error fetching GOAT connectors:", err);
     return { agents: [], total: 0, tags: [], categories: [] };
   }
 }
@@ -552,11 +554,13 @@ async function searchManowar(
   options: SearchAgentsOptions
 ): Promise<{ agents: Agent[]; total: number; tags: string[]; categories: string[] }> {
   try {
+    const offset = Math.max(0, options.offset || 0);
+    const limit = Math.max(1, options.limit || 30);
     const params = new URLSearchParams({
-      limit: String(Math.max(1, Math.min(60, options.limit || 30))),
+      limit: String(Math.max(1, Math.min(72, offset + limit))),
     });
     if (options.search) params.set("q", options.search);
-    const response = await sdk.fetch(`/agents?${params.toString()}`, {
+    const response = await fetch(`${AGENTS_URL}/agents?${params.toString()}`, {
       headers: { Accept: "application/json" },
     });
     if (!response.ok) {
@@ -594,8 +598,6 @@ async function searchManowar(
       });
     }
 
-    const offset = Math.max(0, options.offset || 0);
-    const limit = Math.max(1, options.limit || 30);
     const paged = filtered.slice(offset, offset + limit);
 
     const agents: Agent[] = paged.map(manowarToAgent);
@@ -727,13 +729,20 @@ function getRelevancyScore(agent: Agent, query: string): number {
  * Get a single agent by address
  */
 export async function getAgent(address: string): Promise<Agent> {
-  try {
-    const data = await sdk.directory.agents.get(address) as ManowarAgentCard;
-    if (data?.walletAddress) {
-      return manowarToAgent(data);
+  if (/^0x[a-fA-F0-9]{40}$/.test(address)) {
+    try {
+      const response = await fetch(`${AGENTS_URL}/agent/${encodeURIComponent(address.toLowerCase())}`, {
+        headers: { Accept: "application/json" },
+      });
+      if (response.ok) {
+        return manowarToAgent(await response.json() as ManowarAgentCard);
+      }
+      if (response.status !== 404) {
+        throw new Error(`Agent lookup failed with status ${response.status}`);
+      }
+    } catch {
+      // Fall through to Agentverse search below; not every address is a native agent.
     }
-  } catch {
-    // Fall through to Agentverse search below; not every address is a native agent.
   }
 
   const data = await sdk.directory.agents.agentverse({ search: address, limit: 25 }) as unknown as AgentverseSearchResponse;
