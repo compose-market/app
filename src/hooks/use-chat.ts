@@ -106,6 +106,65 @@ export interface AttachedFile {
     type: "image" | "audio" | "video" | "pdf" | "file";
 }
 
+export interface RealtimeSession {
+    append: (input: unknown, params?: Record<string, unknown>) => Promise<void>;
+    close: () => Promise<void>;
+}
+
+interface MicStream {
+    context: AudioContext;
+    stream: MediaStream;
+    source: MediaStreamAudioSourceNode;
+    processor: ScriptProcessorNode;
+    gain: GainNode;
+    queue: Promise<void>;
+    stopped: boolean;
+}
+
+function b64(bytes: Uint8Array): string {
+    let text = "";
+    const size = 0x8000;
+    for (let offset = 0; offset < bytes.length; offset += size) {
+        text += String.fromCharCode(...bytes.subarray(offset, offset + size));
+    }
+    return btoa(text);
+}
+
+function wav(samples: Float32Array, sampleRate: number): string {
+    const channels = 1;
+    const width = 2;
+    const buffer = new ArrayBuffer(44 + samples.length * width);
+    const view = new DataView(buffer);
+    const write = (offset: number, value: string) => {
+        for (let index = 0; index < value.length; index += 1) {
+            view.setUint8(offset + index, value.charCodeAt(index));
+        }
+    };
+
+    write(0, "RIFF");
+    view.setUint32(4, 36 + samples.length * width, true);
+    write(8, "WAVE");
+    write(12, "fmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, channels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * channels * width, true);
+    view.setUint16(32, channels * width, true);
+    view.setUint16(34, 16, true);
+    write(36, "data");
+    view.setUint32(40, samples.length * width, true);
+
+    let offset = 44;
+    for (let index = 0; index < samples.length; index += 1) {
+        const sample = Math.max(-1, Math.min(1, samples[index] || 0));
+        view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+        offset += width;
+    }
+
+    return `data:audio/wav;base64,${b64(new Uint8Array(buffer))}`;
+}
+
 export function toAttachment(attached: Pick<AttachedFile, "type" | "url" | "file"> | undefined): AttachmentInput | undefined {
     if (!attached?.url) {
         return undefined;
@@ -243,6 +302,11 @@ export interface UseChatReturn {
     /** List of uploaded CIDs for cleanup */
     uploadedCids: string[];
 
+    // === Realtime ===
+    realtimeActive: boolean;
+    setRealtimeSession: (session: RealtimeSession | null) => void;
+    closeRealtime: () => Promise<void>;
+
     // === Audio Recording ===
     isRecording: boolean;
     recordingSupported: boolean;
@@ -285,9 +349,12 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     // === Recording State ===
     const [isRecording, setIsRecording] = useState(false);
     const [recordingSupported, setRecordingSupported] = useState(true);
+    const [realtimeActive, setRealtimeActive] = useState(false);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const audioChunksRef = useRef<Blob[]>([]);
     const mediaStreamRef = useRef<MediaStream | null>(null);
+    const realtimeRef = useRef<RealtimeSession | null>(null);
+    const micRef = useRef<MicStream | null>(null);
 
     // === Streaming refs (synchronous flush, no rAF batching) ===
     const streamedTextRef = useRef<string>("");
@@ -535,7 +602,39 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         return true;
     }
 
+    const stopMic = useCallback(() => {
+        const mic = micRef.current;
+        if (!mic) return;
+        mic.stopped = true;
+        mic.processor.onaudioprocess = null;
+        try { mic.processor.disconnect(); } catch { }
+        try { mic.source.disconnect(); } catch { }
+        try { mic.gain.disconnect(); } catch { }
+        mic.stream.getTracks().forEach((track) => track.stop());
+        void mic.queue.catch(() => undefined);
+        void mic.context.close().catch(() => undefined);
+        micRef.current = null;
+        mediaStreamRef.current = null;
+        setIsRecording(false);
+    }, []);
+
+    const setRealtimeSession = useCallback((session: RealtimeSession | null) => {
+        if (!session) stopMic();
+        realtimeRef.current = session;
+        setRealtimeActive(Boolean(session));
+    }, [stopMic]);
+
+    const closeRealtime = useCallback(async () => {
+        const session = realtimeRef.current;
+        stopMic();
+        setRealtimeSession(null);
+        if (session) {
+            await session.close();
+        }
+    }, [setRealtimeSession, stopMic]);
+
     const clearMessages = useCallback(() => {
+        void closeRealtime().catch(() => undefined);
         setMessages([]);
         streamedTextRef.current = "";
         currentAssistantIdRef.current = null;
@@ -545,7 +644,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
             tools: [],
             updatedAt: Date.now(),
         });
-    }, []);
+    }, [closeRealtime]);
 
     const clearActivityState = useCallback(() => {
         setActivityState({
@@ -782,6 +881,75 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     // Audio Recording Functions
     // ==========================================================================
 
+    const startMic = useCallback(async (): Promise<boolean> => {
+        const session = realtimeRef.current;
+        if (!session) return false;
+        if (micRef.current) return true;
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+            },
+        });
+        const Ctor = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (!Ctor) {
+            stream.getTracks().forEach((track) => track.stop());
+            onErrorRef.current?.("Live microphone input is not supported in this browser");
+            return true;
+        }
+
+        const context = new Ctor({ latencyHint: "interactive" });
+        const source = context.createMediaStreamSource(stream);
+        const processor = context.createScriptProcessor(1024, 1, 1);
+        const gain = context.createGain();
+        gain.gain.value = 0;
+
+        const mic: MicStream = {
+            context,
+            stream,
+            source,
+            processor,
+            gain,
+            queue: Promise.resolve(),
+            stopped: false,
+        };
+        micRef.current = mic;
+        mediaStreamRef.current = stream;
+
+        processor.onaudioprocess = (event) => {
+            if (mic.stopped) return;
+            const input = event.inputBuffer.getChannelData(0);
+            const packet = wav(input, context.sampleRate);
+            mic.queue = mic.queue
+                .then(() => session.append([
+                    {
+                        role: "user",
+                        content: [
+                            {
+                                type: "input_audio",
+                                input_audio: { url: packet },
+                            },
+                        ],
+                    },
+                ]))
+                .catch((error) => {
+                    console.error("[chat] realtime microphone failed:", error);
+                    onErrorRef.current?.("Realtime microphone stream failed");
+                    stopMic();
+                });
+        };
+
+        source.connect(processor);
+        processor.connect(gain);
+        gain.connect(context.destination);
+        await context.resume().catch(() => undefined);
+        setIsRecording(true);
+        setActivityPhase("streaming", "Live microphone");
+        return true;
+    }, [setActivityPhase, stopMic]);
+
     const startRecording = useCallback(async () => {
         if (!recordingSupported) {
             onErrorRef.current?.("Audio recording not supported in this browser");
@@ -789,6 +957,8 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         }
 
         try {
+            if (await startMic()) return;
+
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             mediaStreamRef.current = stream;
 
@@ -869,14 +1039,20 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
             console.error("Failed to start recording:", err);
             onErrorRef.current?.("Failed to access microphone. Please check permissions.");
         }
-    }, [recordingSupported, maxFiles]);
+    }, [recordingSupported, maxFiles, startMic]);
 
     const stopRecording = useCallback(() => {
+        if (micRef.current || realtimeRef.current) {
+            void closeRealtime().catch((error) => {
+                console.error("[chat] realtime close failed:", error);
+            });
+            return;
+        }
         if (mediaRecorderRef.current && isRecording) {
             mediaRecorderRef.current.stop();
             setIsRecording(false);
         }
-    }, [isRecording]);
+    }, [closeRealtime, isRecording]);
 
     // ==========================================================================
     // Cleanup
@@ -884,13 +1060,14 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
 
     useEffect(() => {
         return () => {
+            stopMic();
             if (mediaStreamRef.current) {
                 mediaStreamRef.current.getTracks().forEach((track) => track.stop());
             }
             revokeObjectUrlSet(previewUrlsRef.current);
             previewUrlsRef.current.clear();
         };
-    }, []);
+    }, [stopMic]);
 
     return useMemo(() => ({
         // Messages
@@ -929,19 +1106,23 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         cleanupFiles,
         isUploading,
         uploadedCids,
+        // Realtime
+        realtimeActive,
+        setRealtimeSession,
+        closeRealtime,
         // Recording
         isRecording,
         recordingSupported,
         startRecording,
         stopRecording,
     }), [
-        messages, activityState, attachedFiles, isUploading, uploadedCids,
+        messages, activityState, attachedFiles, isUploading, uploadedCids, realtimeActive,
         isRecording, recordingSupported,
         addUserMessage, createAssistantPlaceholder, updateAssistantMessage,
         applyAssistantActivityEvent, applyAssistantModelEvent, upsertAssistantBlock, appendAssistantBlockText, failAssistant, upsertAssistantArtifact,
         clearMessages, scheduleStreamUpdate, flushStreamContent,
         clearActivityState, setActivityPhase, startToolActivity, finishToolActivity,
         isNearBottom, handleFileSelect, handleRemoveFile, clearFiles, cleanupFiles,
-        startRecording, stopRecording,
+        setRealtimeSession, closeRealtime, startRecording, stopRecording,
     ]);
 }

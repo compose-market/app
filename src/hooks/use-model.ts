@@ -21,7 +21,7 @@ import { sdk } from "@/lib/sdk";
 
 export interface UseModelsOptions {
     type?: string;
-    provider?: string;
+    family?: string;
     search?: string;
     enabled?: boolean;
 }
@@ -58,7 +58,7 @@ async function fetchCatalog(): Promise<CatalogModel[]> {
 }
 
 export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
-    const { type, provider, search, enabled = true } = options;
+    const { type, family, search, enabled = true } = options;
     const queryClient = useQueryClient();
 
     const {
@@ -83,8 +83,8 @@ export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
             result = result.filter((model) => getModelTypeValues(model).includes(type));
         }
 
-        if (provider && provider !== "all") {
-            result = result.filter((model) => model.provider === provider);
+        if (family && family !== "all") {
+            result = result.filter((model) => (model.family || model.provider) === family);
         }
 
         if (search?.trim()) {
@@ -93,12 +93,12 @@ export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
                 (model) =>
                     model.modelId.toLowerCase().includes(query) ||
                     (model.name || "").toLowerCase().includes(query) ||
-                    model.provider.toLowerCase().includes(query)
+                    (model.family || model.provider).toLowerCase().includes(query)
             );
         }
 
         return result;
-    }, [models, type, provider, search]);
+    }, [models, type, family, search]);
 
     const typeCategories = useMemo(() => buildTypeCategories(models), [models]);
 
@@ -138,7 +138,7 @@ export function useModelsByType(type: string): CatalogModel[] {
     return filteredModels;
 }
 
-export function useModelsByProvider(provider: string): CatalogModel[] {
-    const { filteredModels } = useModels({ provider });
+export function useModelsByFamily(family: string): CatalogModel[] {
+    const { filteredModels } = useModels({ family });
     return filteredModels;
 }

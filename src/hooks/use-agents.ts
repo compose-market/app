@@ -31,7 +31,8 @@ export function useAgents(options: SearchAgentsOptions = {}) {
       options.direction,
     ],
     queryFn: () => searchAgents(options),
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: 0,
+    gcTime: 0,
     retry: 2,
   });
 }
@@ -44,7 +45,8 @@ export function useAgent(address: string | null) {
     queryKey: ["agent", address],
     queryFn: () => getAgent(address!),
     enabled: !!address,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 0,
+    gcTime: 0,
     retry: 1,
   });
 }
@@ -72,8 +74,8 @@ export function useAgentsPaginated(
       rest.direction,
     ],
     queryFn: () => searchAgents({ ...rest, limit, offset }),
-    staleTime: 5 * 60 * 1000,
+    staleTime: 0,
+    gcTime: 0,
     retry: 2,
   });
 }
-

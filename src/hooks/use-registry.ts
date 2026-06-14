@@ -541,7 +541,7 @@ export function getOriginBadgeVariant(origin: ServerOrigin): "default" | "second
 export function getOriginLabel(origin: ServerOrigin): string {
     switch (origin) {
         case "mcp":
-            return "Tools";
+            return "MCP";
         case "onchain":
             return "Onchain";
         case "eliza":

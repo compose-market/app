@@ -5,7 +5,6 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { readContract } from "thirdweb";
-import { sdk } from "@/lib/sdk";
 import {
   getAgentFactoryContract,
   getWorkflowContract,
@@ -22,6 +21,8 @@ import {
 import { SUPPORTED_CHAINS } from "@/lib/chains";
 import { getIpfsUrl } from "@/lib/pinata";
 import type { AgentCard, WorkflowMetadata } from "@/lib/pinata";
+
+const AGENTS_URL = (import.meta.env.VITE_AGENTS_URL || "https://agents.compose.market").replace(/\/+$/, "");
 
 // =============================================================================
 // Types
@@ -194,13 +195,14 @@ function fromCard(card: DirectoryAgentCard): OnchainAgent {
   };
 }
 
-async function fetchApiAgents(): Promise<OnchainAgent[]> {
+async function fetchCatalogAgents(input: { creator?: string } = {}): Promise<OnchainAgent[]> {
   const cards: AgentCard[] = [];
   let cursor: string | undefined;
   for (let page = 0; page < 100; page += 1) {
     const params = new URLSearchParams({ limit: "60" });
+    if (input.creator) params.set("creator", input.creator);
     if (cursor) params.set("cursor", cursor);
-    const response = await sdk.fetch(`/agents?${params.toString()}`, {
+    const response = await fetch(`${AGENTS_URL}/agents?${params.toString()}`, {
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(10_000),
     });
@@ -223,7 +225,7 @@ async function fetchCatalogAgentByWallet(walletAddress: string): Promise<Onchain
   const controller = new AbortController();
   const timeout = globalThis.setTimeout(() => controller.abort(), 5_000);
   try {
-    const response = await sdk.fetch(`/agent/${encodeURIComponent(walletAddress)}`, {
+    const response = await fetch(`${AGENTS_URL}/agent/${encodeURIComponent(walletAddress.toLowerCase())}`, {
       headers: { Accept: "application/json" },
       signal: controller.signal,
     });
@@ -474,36 +476,21 @@ export function useOnchainAgents(options?: { includeMetadata?: boolean }) {
   const { includeMetadata = true } = options || {};
 
   const api = useQuery({
-    queryKey: ["agents-api", includeMetadata],
-    queryFn: fetchApiAgents,
-    staleTime: 30 * 1000,
-    gcTime: 5 * 60 * 1000,
+    queryKey: ["agents-catalog", includeMetadata],
+    queryFn: () => fetchCatalogAgents(),
+    staleTime: 0,
+    gcTime: 0,
     retry: 2,
   });
-  const apiSettled = api.isSuccess || api.isError;
-  const chain = useQuery({
-    queryKey: ["onchain-agents", "all-chains", includeMetadata],
-    queryFn: () => fetchChainAgents(includeMetadata),
-    enabled: apiSettled,
-    staleTime: 30 * 1000,
-    gcTime: 5 * 60 * 1000,
-    retry: 1,
-  });
   const apiAgents = api.data || [];
-  const chainAgents = chain.data || [];
-  const data = apiAgents.length > 0 ? mergeAgents(apiAgents, chainAgents) : chainAgents;
 
   return {
     ...api,
-    data,
-    isLoading: api.isLoading && data.length === 0,
-    error: api.error && data.length === 0 ? api.error : chain.error && data.length === 0 ? chain.error : null,
+    data: apiAgents,
+    isLoading: api.isLoading && apiAgents.length === 0,
+    error: api.error,
     refetch: async () => {
-      const apiResult = await api.refetch();
-      if (apiResult.isError || (apiResult.data?.length ?? 0) === 0) {
-        await chain.refetch();
-      }
-      return apiResult;
+      return await api.refetch();
     },
   };
 }
@@ -538,8 +525,8 @@ export function useOnchainAgentByWallet(walletAddress: string | null) {
       return fetchCatalogAgentByWallet(walletAddress);
     },
     enabled: !!walletAddress,
-    staleTime: 30 * 1000,
-    gcTime: 5 * 60 * 1000, // Keep in cache 5 minutes
+    staleTime: 0,
+    gcTime: 0,
   });
 }
 
@@ -559,14 +546,14 @@ export function useOnchainAgentByIdentifier(identifier: string | null) {
  * Fetch agents owned by a specific address
  */
 export function useAgentsByCreator(creator: string | undefined) {
-  const { data: allAgents, ...rest } = useOnchainAgents();
-
-  return {
-    ...rest,
-    data: allAgents?.filter(a =>
-      a.creator.toLowerCase() === creator?.toLowerCase()
-    ),
-  };
+  return useQuery({
+    queryKey: ["agents-creator", creator?.toLowerCase()],
+    queryFn: async () => creator ? await fetchCatalogAgents({ creator }) : [],
+    enabled: Boolean(creator),
+    staleTime: 0,
+    gcTime: 0,
+    retry: 2,
+  });
 }
 
 /**

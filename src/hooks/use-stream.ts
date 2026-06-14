@@ -14,8 +14,10 @@ import type {
 
 import { sdk } from "@/lib/sdk";
 import { noticeId, type Artifact, type Plan, type UseChatReturn } from "@/hooks/use-chat";
+import { getModelTypeValues, type CatalogModel } from "@/lib/models";
 
 export interface StreamCallbacks {
+    onResponseId?: (responseId: string) => void;
     onReceipt?: (receipt: Receipt) => void;
     onBudget?: (snapshot: SessionBudgetSnapshot) => void;
     onSessionInvalid?: (reason: SessionInvalidReason) => void;
@@ -71,11 +73,106 @@ export interface ResponsesStreamArgs {
     options?: StreamCallOptions;
 }
 
+export interface ResponsesAppendArgs {
+    responseId: string;
+    input: unknown;
+    params?: Record<string, unknown>;
+    signal?: AbortSignal;
+    options?: StreamCallOptions;
+}
+
 export interface UseStream {
     runAgent: (args: AgentStreamArgs) => Promise<void>;
     runWorkflow: (args: WorkflowStreamArgs) => Promise<void>;
     runChat: (args: ChatStreamArgs) => Promise<void>;
     runResponses: (args: ResponsesStreamArgs) => Promise<void>;
+    appendResponses: (args: ResponsesAppendArgs) => Promise<void>;
+}
+
+interface LiveResponse {
+    model: string;
+    responseId: string;
+    assistantId: string;
+    options?: StreamCallOptions;
+    controller: AbortController;
+    cleanup: () => void;
+}
+
+interface OpeningResponse {
+    promise: Promise<LiveResponse>;
+    controller: AbortController;
+    cleanup: () => void;
+}
+
+const realtime = new Map<string, boolean>();
+
+function modelId(params: ResponsesCreateParams): string | null {
+    const value = (params as { model?: unknown }).model;
+    return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+async function isRealtimeModel(model: string): Promise<boolean> {
+    const cached = realtime.get(model);
+    if (cached !== undefined) return cached;
+    try {
+        const card = await sdk.models.get(model) as CatalogModel;
+        const active = getModelTypeValues(card).includes("realtime");
+        realtime.set(model, active);
+        return active;
+    } catch {
+        realtime.set(model, false);
+        return false;
+    }
+}
+
+function paramsWithoutInput(params: ResponsesCreateParams): Record<string, unknown> {
+    const body = { ...(params as Record<string, unknown>) };
+    delete body.model;
+    delete body.input;
+    delete body.stream;
+    delete body.attachments;
+    return body;
+}
+
+function latestInput(input: unknown): unknown {
+    if (!Array.isArray(input)) return input;
+    for (let index = input.length - 1; index >= 0; index -= 1) {
+        const item = input[index];
+        if (item && typeof item === "object" && !Array.isArray(item) && (item as { role?: unknown }).role === "user") {
+            return [item];
+        }
+    }
+    return input.slice(-1);
+}
+
+function abort(controller: AbortController): void {
+    if (!controller.signal.aborted) controller.abort();
+}
+
+function linked(signal: AbortSignal | undefined, controller: AbortController): () => void {
+    if (!signal) return () => undefined;
+    if (signal.aborted) {
+        abort(controller);
+        return () => undefined;
+    }
+    const onabort = () => abort(controller);
+    signal.addEventListener("abort", onabort, { once: true });
+    return () => signal.removeEventListener("abort", onabort);
+}
+
+function removePlaceholder(chat: UseChatReturn, assistantId: string): void {
+    chat.setMessages((prev) => prev.filter((message) => {
+        if (message.id !== assistantId) return true;
+        return Boolean(
+            message.content
+            || message.blocks?.length
+            || message.artifacts?.length
+            || message.activity
+            || message.imageUrl
+            || message.audioUrl
+            || message.videoUrl
+        );
+    }));
 }
 
 export function useStream(
@@ -88,6 +185,32 @@ export function useStream(
     callbacksRef.current = callbacks;
     const textBlockRef = useRef<string | null>(null);
     const blockSeqRef = useRef(0);
+    const liveRef = useRef<Map<string, LiveResponse>>(new Map());
+    const openingRef = useRef<Map<string, OpeningResponse>>(new Map());
+
+    const closeRealtime = useCallback((cancel: boolean): void => {
+        const live = Array.from(liveRef.current.values());
+        const opening = Array.from(openingRef.current.values());
+        liveRef.current.clear();
+        openingRef.current.clear();
+
+        for (const item of opening) {
+            item.cleanup();
+            abort(item.controller);
+        }
+
+        for (const item of live) {
+            item.cleanup();
+            abort(item.controller);
+            if (cancel) {
+                void sdk.inference.responses.cancel(item.responseId, item.options).catch(() => undefined);
+            }
+        }
+
+        if (live.length > 0 || opening.length > 0) {
+            chatRef.current.setRealtimeSession(null);
+        }
+    }, []);
 
     useEffect(() => {
         const unsubs: Array<() => void> = [
@@ -99,6 +222,15 @@ export function useStream(
             for (const unsub of unsubs) unsub();
         };
     }, []);
+
+    useEffect(() => {
+        const unload = () => closeRealtime(true);
+        window.addEventListener("beforeunload", unload);
+        return () => {
+            window.removeEventListener("beforeunload", unload);
+            closeRealtime(true);
+        };
+    }, [closeRealtime]);
 
     const runAgent = useCallback(async (args: AgentStreamArgs): Promise<void> => {
         const c = chatRef.current;
@@ -192,7 +324,169 @@ export function useStream(
         }
     }, []);
 
+    const append = useCallback(async (args: ResponsesStreamArgs, active: LiveResponse): Promise<void> => {
+        const responses = sdk.inference.responses as unknown as {
+            append(
+                responseId: string,
+                params: { input: unknown; params?: Record<string, unknown> },
+                options?: StreamCallOptions & { signal?: AbortSignal },
+            ): Promise<unknown>;
+        };
+        const input = latestInput((args.params as { input?: unknown }).input);
+        await responses.append(active.responseId, {
+            input,
+            params: paramsWithoutInput(args.params),
+        }, {
+            signal: args.signal,
+            ...(args.options ?? active.options ?? {}),
+        });
+    }, []);
+
+    const runRealtimeResponses = useCallback(async (args: ResponsesStreamArgs, model: string): Promise<void> => {
+        let responseId: string | null = null;
+        let ready = false;
+        const controller = new AbortController();
+        const cleanup = linked(args.signal, controller);
+        const settle: {
+            resolve?: (response: LiveResponse) => void;
+            reject?: (reason: unknown) => void;
+        } = {};
+        const started = new Promise<LiveResponse>((resolve, reject) => {
+            settle.resolve = resolve;
+            settle.reject = reject;
+        });
+        const opening: OpeningResponse = { promise: started, controller, cleanup };
+        openingRef.current.set(model, opening);
+
+        const stream = sdk.inference.responses.stream(args.params, {
+            signal: controller.signal,
+            ...(args.options ?? {}),
+        });
+
+        void (async () => {
+            try {
+                for await (const event of stream) {
+                    if (event.responseId && !responseId) {
+                        const id = event.responseId;
+                        responseId = id;
+                        const active: LiveResponse = {
+                            model,
+                            responseId: id,
+                            assistantId: args.assistantId,
+                            options: args.options,
+                            controller,
+                            cleanup,
+                        };
+                        liveRef.current.set(model, active);
+                        if (openingRef.current.get(model) === opening) {
+                            openingRef.current.delete(model);
+                        }
+                        chatRef.current.setRealtimeSession({
+                            append: async (input, params) => {
+                                const responses = sdk.inference.responses as unknown as {
+                                    append(
+                                        responseId: string,
+                                        params: { input: unknown; params?: Record<string, unknown> },
+                                        options?: StreamCallOptions,
+                                    ): Promise<unknown>;
+                                };
+                                await responses.append(id, { input, ...(params ? { params } : {}) }, args.options);
+                            },
+                            close: async () => {
+                                liveRef.current.delete(model);
+                                cleanup();
+                                abort(controller);
+                                chatRef.current.setRealtimeSession(null);
+                                await sdk.inference.responses.cancel(id, args.options);
+                            },
+                        });
+                        if (!ready) {
+                            ready = true;
+                            settle.resolve?.(active);
+                        }
+                    }
+                    dispatchModel(event, chatRef.current, callbacksRef, textBlockRef, blockSeqRef);
+                }
+                const final = await stream.final();
+                if (!ready) {
+                    ready = true;
+                    if (openingRef.current.get(model) === opening) {
+                        openingRef.current.delete(model);
+                    }
+                    cleanup();
+                    settle.reject?.(new Error("Realtime stream did not return a response id"));
+                    return;
+                }
+                liveRef.current.delete(model);
+                cleanup();
+                chatRef.current.setRealtimeSession(null);
+                finish(chatRef.current, args.assistantId, chatRef.current.streamedTextRef.current, final.requestId, callbacksRef);
+            } catch (err) {
+                if (openingRef.current.get(model) === opening) {
+                    openingRef.current.delete(model);
+                }
+                liveRef.current.delete(model);
+                cleanup();
+                chatRef.current.setRealtimeSession(null);
+                if (!ready) {
+                    ready = true;
+                    settle.reject?.(err);
+                    return;
+                }
+                fail(err, chatRef.current, args.assistantId, callbacksRef);
+            }
+        })();
+
+        await started;
+    }, []);
+
     const runResponses = useCallback(async (args: ResponsesStreamArgs): Promise<void> => {
+        const model = modelId(args.params);
+        const active = model ? liveRef.current.get(model) : undefined;
+        if (model && active) {
+            const c = chatRef.current;
+            removePlaceholder(c, args.assistantId);
+            c.currentAssistantIdRef.current = active.assistantId;
+            await append(args, active);
+            return;
+        }
+        const opening = model ? openingRef.current.get(model) : undefined;
+        if (model && opening) {
+            const opened = await opening.promise;
+            const c = chatRef.current;
+            removePlaceholder(c, args.assistantId);
+            c.currentAssistantIdRef.current = opened.assistantId;
+            await append(args, opened);
+            return;
+        }
+
+        if (model && await isRealtimeModel(model)) {
+            const opened = liveRef.current.get(model);
+            if (opened) {
+                const c = chatRef.current;
+                removePlaceholder(c, args.assistantId);
+                c.currentAssistantIdRef.current = opened.assistantId;
+                await append(args, opened);
+                return;
+            }
+            const pending = openingRef.current.get(model);
+            if (pending) {
+                const ready = await pending.promise;
+                const c = chatRef.current;
+                removePlaceholder(c, args.assistantId);
+                c.currentAssistantIdRef.current = ready.assistantId;
+                await append(args, ready);
+                return;
+            }
+
+            const c = chatRef.current;
+            c.currentAssistantIdRef.current = args.assistantId;
+            c.streamedTextRef.current = "";
+            textBlockRef.current = null;
+            await runRealtimeResponses(args, model);
+            return;
+        }
+
         const c = chatRef.current;
         c.currentAssistantIdRef.current = args.assistantId;
         c.streamedTextRef.current = "";
@@ -205,6 +499,9 @@ export function useStream(
 
         try {
             for await (const event of stream) {
+                if (event.responseId) {
+                    callbacksRef.current.onResponseId?.(event.responseId);
+                }
                 dispatchModel(event, chatRef.current, callbacksRef, textBlockRef, blockSeqRef);
             }
             const final = await stream.final();
@@ -212,9 +509,26 @@ export function useStream(
         } catch (err) {
             fail(err, chatRef.current, args.assistantId, callbacksRef);
         }
+    }, [append, runRealtimeResponses]);
+
+    const appendResponses = useCallback(async (args: ResponsesAppendArgs): Promise<void> => {
+        const responses = sdk.inference.responses as unknown as {
+            append(
+                responseId: string,
+                params: { input: unknown; params?: Record<string, unknown> },
+                options?: StreamCallOptions & { signal?: AbortSignal },
+            ): Promise<unknown>;
+        };
+        await responses.append(args.responseId, {
+            input: args.input,
+            ...(args.params ? { params: args.params } : {}),
+        }, {
+            signal: args.signal,
+            ...(args.options ?? {}),
+        });
     }, []);
 
-    return useMemo(() => ({ runAgent, runWorkflow, runChat, runResponses }), [runAgent, runWorkflow, runChat, runResponses]);
+    return useMemo(() => ({ runAgent, runWorkflow, runChat, runResponses, appendResponses }), [runAgent, runWorkflow, runChat, runResponses, appendResponses]);
 }
 
 function route(
@@ -277,7 +591,7 @@ function dispatchModel(
         textBlockRef.current = null;
         const item = artifactFromModelEvent(event);
         chat.upsertAssistantArtifact(assistantId, item);
-        if (!item.url && item.responseId && (item.inline || (item.artifactType === "embedding" && !item.embedding))) {
+        if (item.partial !== true && !item.url && item.responseId && (item.inline || (item.artifactType === "embedding" && !item.embedding))) {
             chat.upsertAssistantArtifact(assistantId, { ...item, hydrating: true });
             void hydrateArtifact(chat, assistantId, item);
         }
@@ -403,6 +717,7 @@ function fail(
     cbRef: React.MutableRefObject<StreamCallbacks>,
 ): void {
     if (err instanceof DOMException && err.name === "AbortError") return;
+    if (err instanceof Error && err.name === "AbortError") return;
     const message = err instanceof Error ? err.message : String(err);
     chat.setActivityPhase("error", message);
     chat.failAssistant(assistantId, message);
@@ -441,8 +756,10 @@ function artifactFromModelEvent(event: ModelEvent): Artifact {
     const kind = artifactKind(asset.kind ?? raw.artifactType ?? raw.type);
     const mimeType = asset.mimeType ?? str(raw.mimeType) ?? str(raw.mime_type);
     const base64 = asset.base64 ?? str(raw.base64) ?? str(raw.data);
-    const url = asset.url ?? str(raw.url)
-        ?? (base64 ? `data:${mimeType || defaultMime(kind)};base64,${base64}` : undefined);
+    const live = kind === "audio" && asset.partial === true && Boolean(base64);
+    const url = live
+        ? undefined
+        : asset.url ?? str(raw.url) ?? (base64 ? `data:${mimeType || defaultMime(kind)};base64,${base64}` : undefined);
     return {
         id: event.id,
         artifactType: kind,
