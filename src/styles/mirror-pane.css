@@ -1,0 +1,17 @@
+/**
+ * Mirror Pane — Product-Specific Layout
+ *
+ * Composes the theme MirrorPane primitives into the playground model details panel.
+ */
+
+.cm-mirror-pane__details {
+  grid-template-rows: auto;
+  grid-auto-rows: auto;
+  gap: var(--cm-mirror-main-gap, 0.75rem);
+  align-self: stretch;
+  height: 100%;
+  max-height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
