@@ -14,46 +14,51 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { ModelCategory } from "@/lib/models";
+import { type ModelCategory, getFamilyLogoUrl } from "@/lib/models";
 import { typeClass, typeIcon, typeLabel } from "@compose-market/theme/icons/react";
 
 interface CapabilityChipsProps {
   selectedType: string;
   onTypeChange: (type: string) => void;
   typeCategories: ModelCategory[];
-  selectedProvider: string;
-  onProviderChange: (provider: string) => void;
-  providerCategories: ModelCategory[];
+  selectedFamily: string;
+  onFamilyChange: (family: string) => void;
+  familyCategories: ModelCategory[];
 }
 
-function compactProviderLabel(label: string): string {
-  if (label === "All Providers") return "All";
+function compactFamilyLabel(label: string): string {
+  if (label === "All Families") return "All";
   // Capitalize first letter
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
-function providerIcon() {
-  return <Cpu className="cm-playground__chip-icon" />;
+function familyIcon(familyId: string) {
+  const logoUrl = getFamilyLogoUrl(familyId);
+  if (logoUrl) {
+    return <img src={logoUrl} alt={familyId} className="cm-family-icon" />;
+  }
+  return <Cpu className="cm-type-icon" />;
 }
 
-function categoryClass(cat: ModelCategory, variant: "type" | "provider", selected: boolean): string {
+function categoryClass(cat: ModelCategory, variant: "type" | "family", selected: boolean): string {
   return [
-    "cm-playground__chip",
-    variant === "type" ? typeClass(cat.id) : "cm-playground__chip--provider",
-    selected ? "cm-playground__chip--active" : "",
+    "cm-chip",
+    "cm-playground__chip-option",
+    variant === "type" ? typeClass(cat.id) : "cm-playground__chip--family",
+    selected ? "cm-chip--active" : "",
   ].filter(Boolean).join(" ");
 }
 
-function triggerClass(variant: "type" | "provider"): string {
+function triggerClass(variant: "type" | "family"): string {
   return [
-    "cm-playground__chip",
+    "cm-chip",
     "cm-playground__chip-trigger",
     `cm-playground__chip-trigger--${variant}`,
   ].join(" ");
 }
 
-function chipLabel(cat: ModelCategory, variant: "type" | "provider"): string {
-  return variant === "type" ? typeLabel(cat.label) : compactProviderLabel(cat.label);
+function chipLabel(cat: ModelCategory, variant: "type" | "family"): string {
+  return variant === "type" ? typeLabel(cat.label) : compactFamilyLabel(cat.label);
 }
 
 function ChipContent({
@@ -62,14 +67,14 @@ function ChipContent({
   label,
 }: {
   cat: ModelCategory;
-  variant: "type" | "provider";
+  variant: "type" | "family";
   label?: string;
 }) {
   return (
     <>
-      {variant === "type" ? typeIcon(cat.id) : providerIcon()}
-      <span className="cm-playground__chip-text">{label ?? chipLabel(cat, variant)}</span>
-      <span className="cm-playground__chip-count">{cat.count}</span>
+      {variant === "type" ? typeIcon(cat.id) : familyIcon(cat.id)}
+      <span className="cm-chip__text">{label ?? chipLabel(cat, variant)}</span>
+      <span className="cm-chip__count">{cat.count}</span>
     </>
   );
 }
@@ -81,15 +86,15 @@ function FilterDropdown({
   variant,
   onChange,
 }: {
-  label: "Type" | "Provider";
+  label: "Type" | "Family";
   selected: string;
   categories: ModelCategory[];
-  variant: "type" | "provider";
+  variant: "type" | "family";
   onChange: (value: string) => void;
 }) {
   const fallback: ModelCategory = {
     id: "all",
-    label: variant === "type" ? "All Models" : "All Providers",
+    label: variant === "type" ? "All Models" : "All Families",
     count: 0,
   };
   const selectedCat = categories.find((cat) => cat.id === selected) ?? categories[0] ?? fallback;
@@ -122,6 +127,7 @@ function FilterDropdown({
                 key={`${variant}-${cat.id}`}
                 aria-selected={isActive}
                 className={categoryClass(cat, variant, isActive)}
+                data-active={isActive ? "true" : undefined}
                 onSelect={() => onChange(cat.id)}
               >
                 <ChipContent cat={cat} variant={variant} />
@@ -138,9 +144,9 @@ export function CapabilityChips({
   selectedType,
   onTypeChange,
   typeCategories,
-  selectedProvider,
-  onProviderChange,
-  providerCategories,
+  selectedFamily,
+  onFamilyChange,
+  familyCategories,
 }: CapabilityChipsProps) {
   return (
     <div className="cm-playground__chips">
@@ -153,11 +159,11 @@ export function CapabilityChips({
       />
       <div className="cm-playground__divider" />
       <FilterDropdown
-        label="Provider"
-        selected={selectedProvider}
-        categories={providerCategories}
-        variant="provider"
-        onChange={onProviderChange}
+        label="Family"
+        selected={selectedFamily}
+        categories={familyCategories}
+        variant="family"
+        onChange={onFamilyChange}
       />
     </div>
   );
