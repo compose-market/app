@@ -42,6 +42,7 @@ import {
     Mic,
     MicOff,
     Music,
+    Square,
     Video,
     X,
     Layers,
@@ -236,7 +237,13 @@ function planSummary(plan: Plan): string {
     return `Plan proposed · v${plan.version}`;
 }
 
-function ArtifactBlock({ artifacts }: { artifacts: Artifact[] }) {
+function ArtifactBlock({
+    artifacts,
+    onStopRealtime,
+}: {
+    artifacts: Artifact[];
+    onStopRealtime?: () => void;
+}) {
     const [expanded, setExpanded] = useState<Artifact | null>(null);
     const rows = artifacts;
     if (rows.length === 0) return null;
@@ -255,6 +262,7 @@ function ArtifactBlock({ artifacts }: { artifacts: Artifact[] }) {
                 const actionLabel = title || artifactTitle(item.artifactType);
 
                 if (mediaKind) {
+                    const live = mediaKind === "audio" && item.partial === true && Boolean(liveAudioBase64(item));
                     return (
                         <div key={item.id} className="cm-chat-media-asset space-y-1.5">
                             {item.url ? (
@@ -288,6 +296,8 @@ function ArtifactBlock({ artifacts }: { artifacts: Artifact[] }) {
                                         </div>
                                     )}
                                 </div>
+                            ) : live ? (
+                                <LiveAudio item={item} onStopRealtime={onStopRealtime} />
                             ) : (
                                 <PendingMedia
                                     type={mediaKind}
@@ -788,6 +798,115 @@ function text(value: unknown): string | undefined {
     return undefined;
 }
 
+function numeric(value: unknown): number | undefined {
+    return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function liveAudioBase64(item: Artifact): string | undefined {
+    const raw = item.raw ?? {};
+    return text(raw.base64) ?? text(raw.data) ?? text(raw.delta) ?? text(raw.audio);
+}
+
+function audioSampleRate(item: Artifact): number {
+    const raw = item.raw ?? {};
+    return numeric(raw.sampleRate) ?? numeric(raw.sample_rate) ?? numeric(raw.sampleRateHz) ?? 48000;
+}
+
+function audioChannels(item: Artifact): number {
+    const raw = item.raw ?? {};
+    return numeric(raw.channels) ?? 2;
+}
+
+function pcm16(bytes: Uint8Array, channels: number, sampleRate: number, context: AudioContext): AudioBuffer | null {
+    const width = 2 * channels;
+    const frames = Math.floor(bytes.byteLength / width);
+    if (frames <= 0) return null;
+    const buffer = context.createBuffer(channels, frames, sampleRate);
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    for (let frame = 0; frame < frames; frame += 1) {
+        for (let channel = 0; channel < channels; channel += 1) {
+            const offset = frame * width + channel * 2;
+            buffer.getChannelData(channel)[frame] = view.getInt16(offset, true) / 32768;
+        }
+    }
+    return buffer;
+}
+
+function b64(value: string): Uint8Array {
+    const binary = atob(value);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+    }
+    return bytes;
+}
+
+function LiveAudio({
+    item,
+    onStopRealtime,
+}: {
+    item: Artifact;
+    onStopRealtime?: () => void;
+}) {
+    const contextRef = useRef<AudioContext | null>(null);
+    const nextRef = useRef(0);
+    const seenRef = useRef<Set<string>>(new Set());
+    const base64 = liveAudioBase64(item);
+    const sequence = numeric(item.raw?.sequenceIndex) ?? numeric(item.raw?.sequence_index) ?? item.outputIndex ?? 0;
+
+    useEffect(() => {
+        if (!base64 || typeof window === "undefined") return;
+        const key = `${sequence}:${base64.length}:${base64.slice(0, 24)}`;
+        if (seenRef.current.has(key)) return;
+        seenRef.current.add(key);
+        if (seenRef.current.size > 256) {
+            const [first] = seenRef.current;
+            if (first) seenRef.current.delete(first);
+        }
+
+        const Ctor = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (!Ctor) return;
+        const context = contextRef.current ?? new Ctor({ latencyHint: "interactive" });
+        contextRef.current = context;
+        const sampleRate = audioSampleRate(item);
+        const channels = audioChannels(item);
+        const buffer = pcm16(b64(base64), channels, sampleRate, context);
+        if (!buffer) return;
+
+        void context.resume().catch(() => undefined);
+        const source = context.createBufferSource();
+        source.buffer = buffer;
+        source.connect(context.destination);
+        const start = Math.max(context.currentTime + 0.01, nextRef.current || context.currentTime + 0.01);
+        source.start(start);
+        nextRef.current = start + buffer.duration;
+    }, [base64, item, sequence]);
+
+    useEffect(() => () => {
+        void contextRef.current?.close().catch(() => undefined);
+        contextRef.current = null;
+    }, []);
+
+    return (
+        <div className="relative">
+            <PendingMedia type="audio" status="Live audio" />
+            {onStopRealtime && (
+                <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="absolute right-2 top-2 h-7 w-7 rounded-full border border-red-500/30 bg-black/50 text-red-200 hover:bg-red-500/20 hover:text-red-100"
+                    onClick={() => onStopRealtime()}
+                    title="Stop realtime stream"
+                    aria-label="Stop realtime stream"
+                >
+                    <Square className="h-3.5 w-3.5 fill-current" />
+                </Button>
+            )}
+        </div>
+    );
+}
+
 function DirectMedia({ message }: { message: Message }) {
     if (!message.imageUrl && !message.audioUrl && !message.videoUrl) return null;
     return (
@@ -809,25 +928,21 @@ function PendingMedia({
     status?: string;
 }) {
     const icon = type === "image"
-        ? <ImageIcon className="w-8 h-8" />
+        ? <ImageIcon />
         : type === "audio"
-            ? <Music className="w-8 h-8" />
-            : <Video className="w-8 h-8" />;
+            ? <Music />
+            : <Video />;
     const label = status || (type === "image" ? "Generating image" : type === "audio" ? "Generating audio" : "Generating video");
     return (
-        <div className={cn(
-            "relative overflow-hidden rounded-lg bg-zinc-900/80",
-            type === "image" ? "aspect-square" : type === "video" ? "aspect-video" : "h-16",
-            type === "audio" ? "w-full" : "w-64",
-        )}>
-            <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/10 via-fuchsia-500/10 to-cyan-500/10 animate-pulse" />
-            <div className="absolute inset-0 -translate-x-full animate-[shimmer_2s_infinite] bg-gradient-to-r from-transparent via-white/5 to-transparent" />
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-zinc-400">
-                <div className="relative">
+        <div className="cm-chat-pending-media" data-kind={type}>
+            <div className="cm-chat-pending-media__wash" />
+            <div className="cm-chat-pending-media__shine" />
+            <div className="cm-chat-pending-media__content">
+                <div className="cm-chat-pending-media__icon">
                     {icon}
-                    <Loader2 className="w-4 h-4 absolute -bottom-1 -right-1 animate-spin text-cyan-400" />
+                    <Loader2 className="cm-chat-pending-media__spinner" />
                 </div>
-                <span className="text-xs font-medium">{label}...</span>
+                <span className="cm-chat-pending-media__label">{label}...</span>
             </div>
         </div>
     );
@@ -874,6 +989,7 @@ export interface MessageItemProps {
     onRetry?: (content: string) => void;
     onDelete?: (id: string) => void;
     onPlanDecision?: (messageId: string, plan: Plan, decision: NonNullable<Plan["decision"]>, feedback?: string) => void;
+    onStopRealtime?: () => void;
     assistantAvatar?: React.ReactNode;
 }
 
@@ -906,6 +1022,7 @@ function MessageItemInner({
     onRetry,
     onDelete,
     onPlanDecision,
+    onStopRealtime,
     assistantAvatar,
 }: MessageItemProps) {
     const styles = messageVariantStyles[variant];
@@ -979,7 +1096,7 @@ function MessageItemInner({
         }
         if (block.type === "asset") {
             const artifact = message.artifacts?.find((item) => item.id === block.artifactId);
-            return artifact ? <ArtifactBlock key={block.id} artifacts={[artifact]} /> : null;
+            return artifact ? <ArtifactBlock key={block.id} artifacts={[artifact]} onStopRealtime={onStopRealtime} /> : null;
         }
         return (
             <SharedStreamNotice
@@ -1060,7 +1177,7 @@ function MessageItemInner({
 
                 {hasDirectMedia && <DirectMedia message={message} />}
 
-                {!hasBlocks && !!message.artifacts?.length && <ArtifactBlock artifacts={message.artifacts} />}
+                {!hasBlocks && !!message.artifacts?.length && <ArtifactBlock artifacts={message.artifacts} onStopRealtime={onStopRealtime} />}
             </div>
 
             {isUser && (
@@ -1090,6 +1207,7 @@ export interface MultimodalCanvasProps {
     onInputChange: (value: string) => void;
     onSend: () => void;
     sending: boolean;
+    continuous?: boolean;
     variant?: "agent" | "workflow" | "playground";
     title?: string;
     icon?: React.ReactNode;
@@ -1112,6 +1230,7 @@ export interface MultimodalCanvasProps {
     recordingSupported?: boolean;
     onStartRecording?: () => void;
     onStopRecording?: () => void;
+    realtimeActive?: boolean;
     showMessageActions?: boolean;
     onCopyMessage?: (content: string) => void;
     onRetryMessage?: (content: string) => void;
@@ -1157,6 +1276,7 @@ export function MultimodalCanvas({
     onInputChange,
     onSend,
     sending,
+    continuous = false,
     variant = "agent",
     title,
     icon,
@@ -1186,7 +1306,7 @@ export function MultimodalCanvas({
     onKnowledgeUpload,
     scrollContainerRef,
     messagesEndRef,
-    height = "h-64",
+    height = "",
 }: MultimodalCanvasProps) {
     const config = canvasVariantConfig[variant];
     const activeTools = activityState?.tools.slice(-3) || [];
@@ -1205,7 +1325,7 @@ export function MultimodalCanvas({
         }
     }, [handleSend]);
 
-    const canSend = !sending && (inputValue.trim() || attachedFiles.length > 0);
+    const canSend = (!sending || continuous) && (inputValue.trim() || attachedFiles.length > 0);
     const isUploading = attachedFiles.some(f => f.uploading);
 
     const isNearBottom = useCallback(() => {
@@ -1283,6 +1403,7 @@ export function MultimodalCanvas({
                                     onRetry={onRetryMessage}
                                     onDelete={onDeleteMessage}
                                     onPlanDecision={onPlanDecision}
+                                    onStopRealtime={onStopRecording}
                                 />
                             </React.Fragment>
                         ))}
@@ -1371,13 +1492,13 @@ export function MultimodalCanvas({
 
                 <div className="cm-chat__composer-row">
                     {onClearChat && (
-                        <Button variant="ghost" size="icon" onClick={onClearChat} disabled={sending} className="cm-chat__icon-action shrink-0" title="Clear chat">
+                        <Button variant="ghost" size="icon" onClick={onClearChat} disabled={sending && !continuous} className="cm-chat__icon-action shrink-0" title="Clear chat">
                             <Trash2 className="w-4 h-4" />
                         </Button>
                     )}
 
                     {onFileSelect && (
-                        <Button variant="ghost" size="icon" onClick={onFileSelect} disabled={sending || isRecording} className="cm-chat__icon-action shrink-0 cursor-pointer" title="Attach file">
+                        <Button variant="ghost" size="icon" onClick={onFileSelect} disabled={(sending && !continuous) || isRecording} className="cm-chat__icon-action shrink-0 cursor-pointer" title="Attach file">
                             <Paperclip className="w-4 h-4" />
                         </Button>
                     )}
@@ -1387,9 +1508,9 @@ export function MultimodalCanvas({
                             variant="ghost"
                             size="icon"
                             onClick={isRecording ? onStopRecording : onStartRecording}
-                            disabled={sending || !recordingSupported}
+                            disabled={(sending && !continuous) || !recordingSupported}
                             className={cn("cm-chat__icon-action shrink-0 cursor-pointer transition-colors", isRecording && "text-red-500 hover:text-red-400 animate-pulse")}
-                            title={isRecording ? "Stop recording" : "Record audio"}
+                            title={isRecording ? "Stop microphone" : "Start microphone"}
                         >
                             {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                         </Button>
@@ -1415,11 +1536,11 @@ export function MultimodalCanvas({
                         onKeyDown={handleKeyDown}
                         rows={1}
                         className={cn("resize-none flex-1", variant === "workflow" && "font-mono text-sm")}
-                        disabled={sending}
+                        disabled={sending && !continuous}
                     />
 
-                    <Button onClick={handleSend} disabled={!canSend || isUploading} className={config.sendButton}>
-                        {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : variant === "workflow" ? <Play className="w-4 h-4" /> : <Send className="w-4 h-4" />}
+                    <Button onClick={handleSend} disabled={!canSend || isUploading} className={cn("cm-chat__send", config.sendButton)}>
+                        {sending && !continuous ? <Loader2 className="w-4 h-4 animate-spin" /> : variant === "workflow" ? <Play className="w-4 h-4" /> : <Send className="w-4 h-4" />}
                     </Button>
                 </div>
 
