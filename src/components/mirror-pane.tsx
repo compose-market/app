@@ -33,6 +33,7 @@ import {
     getModelTypeValues,
     getModelValueList,
     type CatalogModel,
+    getFamilyLogoUrl,
 } from "@/lib/models";
 import { typeIcon, typeLabel } from "@compose-market/theme/icons/react";
 
@@ -73,26 +74,50 @@ function renderParamInput(
             ? definition.default ?? definition.options[0]
             : value;
         return (
-            <div className="cm-mirror-pane__option-grid" role="radiogroup" aria-label={key}>
-                {definition.options.map((option) => {
-                    const active = String(selected) === String(option);
-                    return (
-                        <button
-                            key={`${key}-${option}`}
-                            type="button"
-                            role="radio"
-                            aria-checked={active}
-                            className="cm-mirror-pane__option"
-                            data-active={active ? "true" : "false"}
-                            onClick={() => onChange(option)}
-                        >
-                            <Hint label={String(option)}>
-                                <span>{String(option)}</span>
-                            </Hint>
-                        </button>
-                    );
-                })}
-            </div>
+            <>
+                <div className="cm-mirror-pane__option-grid cm-mirror-pane__option-grid--desktop" role="radiogroup" aria-label={key}>
+                    {definition.options.map((option) => {
+                        const active = String(selected) === String(option);
+                        return (
+                            <button
+                                key={`${key}-${option}`}
+                                type="button"
+                                role="radio"
+                                aria-checked={active}
+                                className="cm-mirror-pane__option"
+                                data-active={active ? "true" : "false"}
+                                onClick={() => onChange(option)}
+                            >
+                                <Hint label={String(option)}>
+                                    <span>{String(option)}</span>
+                                </Hint>
+                            </button>
+                        );
+                    })}
+                </div>
+                <div className="cm-mirror-pane__option-select-container cm-mirror-pane__option-select-container--mobile">
+                    <select
+                        value={String(selected)}
+                        onChange={(e) => {
+                            const val = e.target.value;
+                            if (definition.type === "integer") {
+                                onChange(Number.parseInt(val, 10));
+                            } else if (definition.type === "number") {
+                                onChange(Number.parseFloat(val));
+                            } else {
+                                onChange(val);
+                            }
+                        }}
+                        className="cm-mirror-pane__option-select"
+                    >
+                        {definition.options.map((option) => (
+                            <option key={`${key}-select-${option}`} value={String(option)}>
+                                {String(option)}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+            </>
         );
     }
 
@@ -242,9 +267,18 @@ export function MirrorPane({
                 </Hint>
             ) : undefined}
             subtitle={activeTab === "details" ? (
-                <span className="cm-mirror-pane__model-meta-row">
-                    <Hint label={modelInfo?.provider || "unknown"}>
-                        <span className="cm-mirror-pane__provider">{modelInfo?.provider || "unknown"}</span>
+                <span className="cm-mirror-pane__model-meta-row" style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
+                    <Hint label={modelInfo?.family || modelInfo?.provider || "unknown"}>
+                        <span className="cm-mirror-pane__provider" style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}>
+                            {modelInfo?.family && (() => {
+                                const logoUrl = getFamilyLogoUrl(modelInfo.family);
+                                if (logoUrl) {
+                                    return <img src={logoUrl} alt={modelInfo.family} className="cm-family-icon" style={{ width: "0.85rem", height: "0.85rem", borderRadius: "2px" }} />;
+                                }
+                                return null;
+                            })()}
+                            <span>{modelInfo?.family || modelInfo?.provider || "unknown"}</span>
+                        </span>
                     </Hint>
                     <span className="cm-mirror-pane__type-list">
                         {typeValues.map((value) => (
@@ -258,7 +292,13 @@ export function MirrorPane({
                     </span>
                 </span>
             ) : undefined}
-            icon={activeTab === "details" ? <Cpu /> : undefined}
+            icon={activeTab === "details" ? (() => {
+                const logoUrl = modelInfo?.family ? getFamilyLogoUrl(modelInfo.family) : null;
+                if (logoUrl) {
+                    return <img src={logoUrl} alt={modelInfo?.family} className="cm-family-icon" style={{ width: "1.5rem", height: "1.5rem", borderRadius: "2px", objectFit: "contain", display: "block", margin: "auto" }} />;
+                }
+                return <Cpu />;
+            })() : undefined}
             tabs={[
                 { id: "details", label: "Details", icon: <LayoutGrid />, tone: "cyan" },
                 { id: "custom", label: "Custom", icon: <Settings />, tone: "fuchsia" },
@@ -325,17 +365,19 @@ export function MirrorPane({
 
                             {pricingSections.length > 0 && (
                                 <MirrorSection label={iconLabel("Price", "price", "section")} className="cm-mirror-pane__section--pricing">
-                                    {pricingSections.map((section, index) => (
-                                        <MirrorPricing key={`price-${section.header}-${index}`} unit={section.unit}>
-                                            {section.entries.map((entry) => (
-                                                <MirrorRow
-                                                    key={`${section.header}-${entry.label}`}
-                                                    label={labelIcon(entry.label, "price")}
-                                                    value={<FieldValue value={entry.value} />}
-                                                />
-                                            ))}
-                                        </MirrorPricing>
-                                    ))}
+                                    <div className="cm-mirror-pane__pricing-list" style={{ display: "flex", flexDirection: "column", gap: "0.5rem", width: "100%" }}>
+                                        {pricingSections.map((section, index) => (
+                                            <MirrorPricing key={`price-${section.header}-${index}`} unit={section.unit}>
+                                                {section.entries.map((entry) => (
+                                                    <MirrorRow
+                                                        key={`${section.header}-${entry.label}`}
+                                                        label={labelIcon(entry.label, "price")}
+                                                        value={<FieldValue value={entry.value} />}
+                                                    />
+                                                ))}
+                                            </MirrorPricing>
+                                        ))}
+                                    </div>
                                 </MirrorSection>
                             )}
                         </>
@@ -357,17 +399,19 @@ export function MirrorPane({
                     {/* Optional Pricing */}
                     {optionalPricingSections.length > 0 && (
                         <MirrorSection label={iconLabel("Price", "price", "section")} className="cm-mirror-pane__section--pricing">
-                            {optionalPricingSections.map((section, index) => (
-                                <MirrorPricing key={`optional-price-${section.header}-${index}`} unit={section.unit}>
-                                    {section.entries.map((entry) => (
-                                        <MirrorRow
-                                            key={`${section.header}-${entry.label}`}
-                                            label={labelIcon(entry.label, "price")}
-                                            value={<FieldValue value={entry.value} />}
-                                        />
-                                    ))}
-                                </MirrorPricing>
-                            ))}
+                            <div className="cm-mirror-pane__pricing-list" style={{ display: "flex", flexDirection: "column", gap: "0.5rem", width: "100%" }}>
+                                {optionalPricingSections.map((section, index) => (
+                                    <MirrorPricing key={`optional-price-${section.header}-${index}`} unit={section.unit}>
+                                        {section.entries.map((entry) => (
+                                            <MirrorRow
+                                                key={`${section.header}-${entry.label}`}
+                                                label={labelIcon(entry.label, "price")}
+                                                value={<FieldValue value={entry.value} />}
+                                            />
+                                        ))}
+                                    </MirrorPricing>
+                                ))}
+                            </div>
                         </MirrorSection>
                     )}
 
