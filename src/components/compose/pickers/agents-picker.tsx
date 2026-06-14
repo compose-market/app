@@ -14,11 +14,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Loader2, Filter, Star, Shield, Sparkles, ExternalLink } from "lucide-react";
 import { useAgents } from "@/hooks/use-agents";
-import { useOnchainAgents } from "@/hooks/use-onchain";
 import { getIpfsUrl } from "@/lib/pinata";
 import {
     type Agent,
-    type AgentRegistryId,
     formatInteractions,
     COMMON_TAGS,
 } from "@/lib/agents";
@@ -31,53 +29,22 @@ export function AgentsPicker({ onSelect }: AgentsPickerProps) {
     const [selectedTag, setSelectedTag] = useState("all");
     const { data, isLoading: isLoadingExternal, error } = useAgents({
         tags: selectedTag !== "all" ? [selectedTag] : undefined,
+        registries: ["agentverse"],
+        status: "active",
+        limit: 20,
+        sort: "interactions",
+        direction: "desc",
+    });
+    const { data: native, isLoading: isLoadingNative } = useAgents({
+        tags: selectedTag !== "all" ? [selectedTag] : undefined,
+        registries: ["manowar"],
         status: "active",
         limit: 20,
         sort: "interactions",
         direction: "desc",
     });
 
-    // Fetch on-chain Manowar agents
-    const { data: onchainAgents, isLoading: isLoadingOnchain } = useOnchainAgents();
-
-    // Convert on-chain agents to unified format
-    const manowarAgents = useMemo((): Agent[] => {
-        if (!onchainAgents) return [];
-        return onchainAgents.map((a): Agent => {
-            const avatarUri = a.metadata?.image;
-            let avatarUrl: string | null = null;
-            if (avatarUri && avatarUri !== "none") {
-                // Handle both IPFS URIs (ipfs://) and gateway URLs (https://)
-                if (avatarUri.startsWith("ipfs://")) {
-                    avatarUrl = getIpfsUrl(avatarUri.replace("ipfs://", ""));
-                } else if (avatarUri.startsWith("https://")) {
-                    avatarUrl = avatarUri;
-                }
-            }
-            return {
-                id: `manowar-${a.walletAddress || a.id}`,
-                address: a.walletAddress || a.creator,
-                name: a.metadata?.name || (a.walletAddress ? `${a.walletAddress.slice(0, 6)}...${a.walletAddress.slice(-4)}` : `Agent #${a.id}`),
-                description: a.metadata?.description || "",
-                registry: "manowar" as AgentRegistryId,
-                protocols: a.metadata?.protocols || [{ name: "Manowar", version: "1.0" }],
-                avatarUrl,
-                totalInteractions: 0,
-                recentInteractions: 0,
-                rating: 5.0,
-                status: "active" as const,
-                type: "hosted" as const,
-                featured: false,
-                verified: true,
-                category: "ai-agent",
-                tags: a.metadata?.skills || [],
-                owner: a.creator,
-                pricePerRequest: a.licensePrice, // Store the license price from onchain data
-                createdAt: a.metadata?.createdAt || new Date().toISOString(),
-                updatedAt: a.metadata?.createdAt || new Date().toISOString(),
-            };
-        });
-    }, [onchainAgents]);
+    const manowarAgents = useMemo((): Agent[] => native?.agents || [], [native?.agents]);
 
     // Merge all agents
     const allAgents = useMemo(() => {
@@ -85,7 +52,7 @@ export function AgentsPicker({ onSelect }: AgentsPickerProps) {
         return [...manowarAgents, ...external];
     }, [data?.agents, manowarAgents]);
 
-    const isLoading = isLoadingExternal || isLoadingOnchain;
+    const isLoading = isLoadingExternal || isLoadingNative;
 
     const availableTags = useMemo(() => {
         const tagSet = new Set<string>(COMMON_TAGS);
