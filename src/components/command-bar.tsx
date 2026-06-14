@@ -10,7 +10,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { ShellCommandItem, ShellCommandOverlay, ShellCommandPanel } from "@compose-market/theme/shell";
 import { useModels } from "@/hooks/use-model";
-import { formatModelTypeLabel, getPrimaryModelType, getDefaultModelPricingSections, getModelTypeValues } from "@/lib/models";
+import { formatModelTypeLabel, getPrimaryModelType, getDefaultModelPricingSections, getModelTypeValues, getFamilyLogoUrl } from "@/lib/models";
 import type { CatalogModel } from "@/lib/models";
 
 interface CommandBarProps {
@@ -19,7 +19,7 @@ interface CommandBarProps {
   value: string;
   onSelect: (modelId: string) => void;
   type?: string;
-  provider?: string;
+  family?: string;
 }
 
 function formatPrice(model: CatalogModel): string {
@@ -43,8 +43,8 @@ function formatPrice(model: CatalogModel): string {
   return "—";
 }
 
-/** Map provider names to unique color pairs (background + text) */
-const PROVIDER_COLORS: Record<string, { bg: string; text: string }> = {
+/** Map family names to unique color pairs (background + text) */
+const FAMILY_COLORS: Record<string, { bg: string; text: string }> = {
   google: { bg: "hsl(205 85% 50% / 0.2)", text: "hsl(205 85% 65%)" },
   openai: { bg: "hsl(160 70% 42% / 0.2)", text: "hsl(160 70% 58%)" },
   anthropic: { bg: "hsl(25 90% 55% / 0.2)", text: "hsl(25 90% 68%)" },
@@ -62,10 +62,10 @@ const PROVIDER_COLORS: Record<string, { bg: string; text: string }> = {
   xai: { bg: "hsl(230 70% 58% / 0.2)", text: "hsl(230 70% 72%)" },
 };
 
-function getProviderColor(provider: string): { bg: string; text: string } {
-  const key = provider.toLowerCase();
-  if (PROVIDER_COLORS[key]) return PROVIDER_COLORS[key];
-  // Deterministic hash for unknown providers
+function getFamilyColor(family: string): { bg: string; text: string } {
+  const key = family.toLowerCase();
+  if (FAMILY_COLORS[key]) return FAMILY_COLORS[key];
+  // Deterministic hash for unknown families
   let hash = 0;
   for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) % 360;
   return {
@@ -74,7 +74,7 @@ function getProviderColor(provider: string): { bg: string; text: string } {
   };
 }
 
-export function CommandBar({ open, onOpenChange, value, onSelect, type, provider }: CommandBarProps) {
+export function CommandBar({ open, onOpenChange, value, onSelect, type, family }: CommandBarProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -89,8 +89,8 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, provider
     if (type && type !== "all") {
       result = result.filter((m: CatalogModel) => getModelTypeValues(m).includes(type));
     }
-    if (provider && provider !== "all") {
-      result = result.filter((m: CatalogModel) => m.provider === provider);
+    if (family && family !== "all") {
+      result = result.filter((m: CatalogModel) => (m.family || m.provider) === family);
     }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
@@ -98,20 +98,21 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, provider
         (m: CatalogModel) =>
           m.modelId.toLowerCase().includes(q) ||
           (m.name || "").toLowerCase().includes(q) ||
-          m.provider.toLowerCase().includes(q) ||
+          (m.family || m.provider).toLowerCase().includes(q) ||
           getPrimaryModelType(m).toLowerCase().includes(q)
       );
     }
     return result;
-  }, [models, type, provider, searchQuery]);
+  }, [models, type, family, searchQuery]);
 
-  // Group by provider
+  // Group by family
   const grouped = useMemo(() => {
     const groups = new Map<string, CatalogModel[]>();
     for (const m of filteredModels) {
-      const g = groups.get(m.provider) || [];
+      const fam = m.family || m.provider;
+      const g = groups.get(fam) || [];
       g.push(m);
-      groups.set(m.provider, g);
+      groups.set(fam, g);
     }
     // Sort groups by size descending
     return Array.from(groups.entries()).sort((a, b) => b[1].length - a[1].length);
@@ -123,7 +124,7 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, provider
   // Reset selection on filter change
   useEffect(() => {
     setSelectedIndex(0);
-  }, [searchQuery, type, provider]);
+  }, [searchQuery, type, family]);
 
   // Auto-focus input when opened
   useEffect(() => {
@@ -175,11 +176,11 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, provider
   return createPortal(
     <ShellCommandOverlay open={open} onClose={() => onOpenChange(false)}>
       <ShellCommandPanel onKeyDown={handleKeyDown}>
-        <div className="cm-command-header cm-playground__cmd-header">
+        <div className="cm-command-header">
           <input
             ref={inputRef}
-            className="cm-command-input cm-playground__cmd-input"
-            placeholder="Search models by name, provider, or type..."
+            className="cm-command-input"
+            placeholder="Search models by name, family, or type..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             autoComplete="off"
@@ -187,18 +188,25 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, provider
           />
         </div>
 
-        <div className="cm-command-list cm-playground__cmd-list" ref={listRef}>
+        <div className="cm-command-list" ref={listRef}>
           {flatList.length === 0 ? (
-            <div className="cm-command-empty cm-playground__cmd-empty">No models match "{searchQuery}"</div>
+            <div className="cm-command-empty">No models match "{searchQuery}"</div>
           ) : (
-            grouped.map(([providerName, providerModels]) => {
-              const pColor = getProviderColor(providerName);
+            grouped.map(([familyName, familyModels]) => {
+              const fColor = getFamilyColor(familyName);
               return (
-              <div key={providerName}>
-                <div className="cm-command-group cm-playground__cmd-group" style={{ color: pColor.text }}>
-                  {providerName} ({providerModels.length})
+              <div key={familyName}>
+                <div className="cm-command-group" style={{ color: fColor.text, display: "flex", alignItems: "center", gap: "0.35rem" }}>
+                  {(() => {
+                    const logoUrl = getFamilyLogoUrl(familyName);
+                    if (logoUrl) {
+                      return <img src={logoUrl} alt={familyName} className="cm-family-icon" style={{ width: "0.85rem", height: "0.85rem", borderRadius: "2px" }} />;
+                    }
+                    return null;
+                  })()}
+                  <span>{familyName} ({familyModels.length})</span>
                 </div>
-                {providerModels.map((model) => {
+                {familyModels.map((model) => {
                   const idx = flatList.indexOf(model);
                   const modelType = getPrimaryModelType(model);
                   const isSelected = idx === selectedIndex;
@@ -216,18 +224,18 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, provider
                       }}
                       onMouseEnter={() => setSelectedIndex(idx)}
                     >
-                      <span className="cm-playground__cmd-item-name">
+                      <span className="cm-command-item__name">
                         {model.name || model.modelId}
                       </span>
-                      <div className="cm-playground__cmd-item-meta">
+                      <div className="cm-command-item__meta">
                         <span
-                          className="cm-playground__cmd-item-provider"
-                          style={{ background: pColor.bg, color: pColor.text }}
+                          className="cm-command-item__family"
+                          style={{ background: fColor.bg, color: fColor.text }}
                         >{model.provider}</span>
-                        <span className="cm-playground__cmd-item-type">
+                        <span className="cm-command-item__type">
                           {formatModelTypeLabel(modelType)}
                         </span>
-                        <span className="cm-playground__cmd-item-price">{formatPrice(model)}</span>
+                        <span className="cm-command-item__price">{formatPrice(model)}</span>
                       </div>
                     </ShellCommandItem>
                   );
@@ -238,18 +246,18 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, provider
           )}
         </div>
 
-        <div className="cm-command-footer cm-playground__cmd-footer">
-          <span className="cm-playground__cmd-footer-count">
+        <div className="cm-command-footer">
+          <span>
             {filteredModels.length} of {models.length} models
           </span>
-          <div className="cm-playground__cmd-footer-hints">
-            <span className="cm-playground__cmd-hint">
+          <div className="cm-command-footer__hints">
+            <span className="cm-command-hint">
               <kbd>↑↓</kbd> navigate
             </span>
-            <span className="cm-playground__cmd-hint">
+            <span className="cm-command-hint">
               <kbd>↵</kbd> select
             </span>
-            <span className="cm-playground__cmd-hint">
+            <span className="cm-command-hint">
               <kbd>esc</kbd> close
             </span>
           </div>
