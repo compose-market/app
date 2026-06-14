@@ -1,4 +1,4 @@
-import { Copy, Cpu, DollarSign, ExternalLink, Globe, Percent, ScrollText, Zap, ArrowRightLeft, Check, CheckCircle2, Eye, Layers, Shield, Star } from "lucide-react";
+import { Copy, Cpu, DollarSign, ExternalLink, Globe, Percent, ScrollText, Wrench, Zap, ArrowRightLeft, Check, CheckCircle2, Eye, Layers, Shield, Star } from "lucide-react";
 import type { KeyboardEvent, MouseEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -122,7 +122,7 @@ function short(value: string | undefined, head = 5, tail = 5): string {
 }
 
 function route(value: string | undefined): string {
-  return value ? `${API_BASE_URL.replace(/^https?:\/\//, "")}/agent/${value.slice(0, 5)}...` : "Unavailable";
+  return value ? `/agent/${value.slice(0, 5)}...` : "Unavailable";
 }
 
 function token(agent: OnchainAgent, chainId: number | undefined): string | null {
@@ -139,11 +139,13 @@ function token(agent: OnchainAgent, chainId: number | undefined): string | null 
 
 function buildMetrics(agent: OnchainAgent): AgentMetric[] {
   const licenses = agent.licenses === 0 ? "∞" : `${agent.licensesAvailable}/${agent.licenses}`;
+  const licensePrice = agent.licensePriceFormatted.replace(/^\s*\$\s*/, "");
+  const creatorFee = String(agent.creatorFee ?? agent.metadata?.creatorFee ?? 1).replace(/\s*%\s*$/, "");
 
   return [
     {
       label: "License Price",
-      value: agent.licensePriceFormatted,
+      value: licensePrice,
       icon: <DollarSign size={16} />,
       tone: "green",
     },
@@ -155,7 +157,7 @@ function buildMetrics(agent: OnchainAgent): AgentMetric[] {
     },
     {
       label: "Creator Fee",
-      value: `${agent.creatorFee ?? agent.metadata?.creatorFee ?? 1}%`,
+      value: creatorFee,
       icon: <Percent size={16} />,
       tone: "green",
     },
@@ -163,17 +165,17 @@ function buildMetrics(agent: OnchainAgent): AgentMetric[] {
 }
 
 function buildTags(agent: OnchainAgent, limit?: number): AgentTag[] {
-  const plugins = agent.metadata?.plugins || [];
-  if (plugins.length === 0) {
+  const connectors = agent.metadata?.connectors || [];
+  if (connectors.length === 0) {
     return [{ label: "No tools", title: "No tools registered" }];
   }
 
-  const visible = typeof limit === "number" ? plugins.slice(0, limit) : plugins;
-  const tags = visible.map((plugin) => ({
-    label: plugin.name || plugin.registryId,
-    title: plugin.origin || plugin.registryId,
+  const visible = typeof limit === "number" ? connectors.slice(0, limit) : connectors;
+  const tags = visible.map((connector) => ({
+    label: connector.name || connector.registryId,
+    title: connector.origin || connector.registryId,
   }));
-  const hidden = plugins.length - visible.length;
+  const hidden = connectors.length - visible.length;
 
   return hidden > 0
     ? [...tags, { label: `+${hidden}`, title: `${hidden} more tools` }]
@@ -182,10 +184,7 @@ function buildTags(agent: OnchainAgent, limit?: number): AgentTag[] {
 
 export function AgentCard({ agent, onCopyEndpoint, onOpen, className, variant = "default" }: AgentCardProps) {
   const isMarketCard = variant === "market";
-  const compact = className?.split(/\s+/).some((name) => (
-    name === "cm-agent-card--match-chat"
-    || name === "cm-agent-card--asset"
-  )) ?? false;
+
   const name = agent.metadata?.name || (agent.walletAddress ? short(agent.walletAddress) : `Agent ${agent.id}`);
   const address = agent.walletAddress ? short(agent.walletAddress) : null;
   const model = agent.metadata?.model || "Unknown";
@@ -262,8 +261,14 @@ export function AgentCard({ agent, onCopyEndpoint, onOpen, className, variant = 
       )}
       badges={buildBadges(agent, isMarketCard)}
       metrics={buildMetrics(agent)}
-      tagsTitle={`Tools (${agent.metadata?.plugins?.length || 0})`}
-      tags={buildTags(agent, isMarketCard ? 4 : compact ? 6 : undefined)}
+      tagsTitle={(
+        <Hint label="Tools">
+          <span className="cm-agent-card__tools-icon" aria-label={`Tools (${agent.metadata?.connectors?.length || 0})`}>
+            <Wrench size={14} />
+          </span>
+        </Hint>
+      )}
+      tags={buildTags(agent, isMarketCard ? 4 : 6)}
       headerAction={tokenUrl ? (
         <ShellButton
           tone="ghost"
@@ -282,7 +287,6 @@ export function AgentCard({ agent, onCopyEndpoint, onOpen, className, variant = 
       footer={!isMarketCard && apiEndpoint ? (
         <div className="cm-agent-card__footer-stack">
           <div className="cm-agent-card__endpoint">
-            <div className="cm-agent-card__endpoint-label">A2A Endpoint</div>
             <div
               role="button"
               tabIndex={0}
@@ -300,6 +304,7 @@ export function AgentCard({ agent, onCopyEndpoint, onOpen, className, variant = 
               }}
               title={apiEndpoint}
             >
+              <span className="cm-agent-card__endpoint-label">A2A</span>
               <code className="cm-agent-card__endpoint-code">{route(agent.walletAddress)}</code>
               <ShellButton
                 tone="ghost"
