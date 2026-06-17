@@ -83,9 +83,9 @@ export default function Market() {
   const [workflowSort, setWorkflowSort] = useState<WorkflowSort>("newest");
   const refreshers = React.useRef<Partial<Record<MarketTab, () => void>>>({});
   const [status, setStatus] = useState<Record<MarketTab, TabStatus>>({
-    agents: { count: "0/0 agents", busy: false },
-    workflows: { count: "0 workflows", busy: false },
-    rfas: { count: "0 active bounties", busy: false },
+    agents: { count: "0", busy: false },
+    workflows: { count: "0", busy: false },
+    rfas: { count: "0", busy: false },
   });
 
   const onStatus = React.useCallback((key: MarketTab, next: TabStatus & { refresh?: () => void }) => {
@@ -101,8 +101,13 @@ export default function Market() {
     refreshers.current[tab]?.();
   }, [tab]);
 
+  const marketTabs = React.useMemo<Option<MarketTab>[]>(() => [
+    { value: "agents", label: "Agents", icon: Bot, count: status.agents.count },
+    { value: "workflows", label: "Workflows", icon: Layers, count: status.workflows.count },
+    { value: "rfas", label: "RFAs", icon: FileQuestion, count: status.rfas.count },
+  ], [status.agents.count, status.workflows.count, status.rfas.count]);
+
   const q = deferredQuery.trim();
-  const currentStatus = status[tab];
 
   return (
     <div className="cm-market-workspace">
@@ -113,13 +118,10 @@ export default function Market() {
               <span className="text-fuchsia-500 mr-2">//</span>
               MARKET
             </h1>
-            <Badge variant="outline" className="cm-page-header__metric cm-market-control-rail__count">
-              {currentStatus.count}
-            </Badge>
           </div>
           <Switcher
             value={tab}
-            options={tabs}
+            options={marketTabs}
             label="Market section"
             onChange={setActiveTab}
             className="cm-market-control-rail__tabs"
@@ -144,14 +146,6 @@ export default function Market() {
             {tab === "workflows" ? (
               <Ordering value={workflowSort} options={orders} onChange={setWorkflowSort} />
             ) : null}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleRefresh}
-              className="border-primary/20 h-9 w-9"
-            >
-              <RefreshCw className={`w-4 h-4 ${currentStatus.busy ? "animate-spin" : ""}`} />
-            </Button>
           </div>
         </div>
 
@@ -244,12 +238,10 @@ function WorkflowsTab({
 
   React.useEffect(() => {
     const count = workflows
-      ? searchQuery.trim()
-        ? `${filteredWorkflows.length} results`
-        : `${filteredWorkflows.length} workflows`
+      ? String(filteredWorkflows.length)
       : isLoading
-        ? "Loading workflows"
-        : "0 workflows";
+        ? "..."
+        : "0";
     onStatus("workflows", {
       count,
       busy: isLoading,
@@ -461,12 +453,10 @@ function RFAsTab({
 
   React.useEffect(() => {
     const count = rfas
-      ? searchQuery.trim()
-        ? `${filteredRFAs.length} results`
-        : `${filteredRFAs.length} active bounties`
+      ? String(filteredRFAs.length)
       : isLoading
-        ? "Loading bounties"
-        : "0 active bounties";
+        ? "..."
+        : "0";
     onStatus("rfas", {
       count,
       busy: isLoading,
@@ -759,11 +749,11 @@ function AgentsTab({
   React.useEffect(() => {
     const count = data
       ? q
-        ? `${agents.length} results`
-        : `${agents.length}/${total} agents`
+        ? String(agents.length)
+        : String(total)
       : isLoading
-        ? "Loading agents"
-        : "0/0 agents";
+        ? "..."
+        : "0";
     onStatus("agents", {
       count,
       busy: isLoading || isFetchingNextPage,

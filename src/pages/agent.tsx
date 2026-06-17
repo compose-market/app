@@ -468,15 +468,9 @@ export default function AgentDetailPage() {
           <span className="hidden sm:inline">Back</span>
         </Button>
 
-        <div className="cm-control-rail__main">
-          <Badge className="cm-badge cm-badge--primary">
-            <Sparkles className="w-3 h-3 mr-1" />
-            <span className="truncate">{agentLabel}</span>
-          </Badge>
-        </div>
+        <div className="cm-control-rail__main" />
 
         <div className="cm-control-rail__actions">
-          <CostReceiptIndicator />
           <Button
             asChild
             size="sm"
@@ -484,8 +478,8 @@ export default function AgentDetailPage() {
             className="cm-shell-button cm-shell-button--secondary cm-shell-button--sm"
           >
             <Link href={`/connect-local?agent_wallet=${encodeURIComponent(agentWallet || "")}`}>
-              <Download className="w-3 h-3 mr-1" />
-              Install locally
+              <Download className="w-3 h-3 sm:mr-1" />
+              <span className="hidden sm:inline">Install locally</span>
             </Link>
           </Button>
           {/* Mobile Card Button - only visible on mobile */}

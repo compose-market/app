@@ -90,6 +90,7 @@ import {
 } from "@/components/compose/nodes";
 import { ConnectorPicker, AgentsPicker } from "@/components/compose/pickers";
 import { FullscreenOverlay } from "@/components/compose/overlay";
+import { FloatingToolbox } from "@/components/compose/toolbox";
 
 // =============================================================================
 // Node Types Registration
@@ -719,6 +720,41 @@ function ComposeFlow() {
 
   const { isRunning } = useWorkflowExecution();
 
+  // Mount effect to auto-import selectedAgent or selectedMcpServer
+  useEffect(() => {
+    // 1. Check for selectedAgent
+    const storedAgent = sessionStorage.getItem("selectedAgent");
+    if (storedAgent) {
+      try {
+        const agent = JSON.parse(storedAgent) as Agent;
+        handleAddAgentStep(agent);
+        sessionStorage.removeItem("selectedAgent");
+      } catch (e) {
+        console.error("Failed to parse selectedAgent from sessionStorage", e);
+      }
+    }
+
+    // 2. Check for selectedMcpServer
+    const storedMcpServer = sessionStorage.getItem("selectedMcpServer");
+    if (storedMcpServer) {
+      try {
+        const server = JSON.parse(storedMcpServer);
+        const defaultToolName = server.tools?.[0]?.name || "default";
+        const defaultToolDescription = server.tools?.[0]?.description || server.description || "";
+        const defaultToolInputSchema = server.tools?.[0]?.inputSchema || { type: "object", properties: {} };
+        const toolToUse = {
+          name: defaultToolName,
+          description: defaultToolDescription,
+          inputSchema: defaultToolInputSchema,
+        };
+        handleAddStep(server.registryId, toolToUse);
+        sessionStorage.removeItem("selectedMcpServer");
+      } catch (e) {
+        console.error("Failed to parse selectedMcpServer from sessionStorage", e);
+      }
+    }
+  }, [handleAddStep, handleAddAgentStep]);
+
   // Handle warp navigation
   const handleWarpAgent = useCallback(() => {
     if (pendingWarpAgent) {
@@ -828,34 +864,20 @@ function ComposeFlow() {
 
   return (
     <div className="cm-compose-workspace">
-      {/* Sidebar - Picker Tabs */}
-      <Card className="cm-sidebar glass-panel border-cyan-500/20">
-        <CardHeader className="pb-2 border-b border-sidebar-border shrink-0">
-          <CardTitle className="text-base lg:text-lg font-display font-bold text-cyan-400">ADD STEPS</CardTitle>
-        </CardHeader>
-        <CardContent className="flex-1 overflow-hidden p-0 min-h-0">
-          <Tabs defaultValue="connectors" className="h-full flex flex-col">
-            <TabsList className="w-full rounded-none border-b border-sidebar-border bg-transparent p-0 h-auto shrink-0">
-              <TabsTrigger value="connectors" className="flex-1 rounded-none border-b-2 border-transparent data-[state=active]:border-cyan-500 data-[state=active]:text-cyan-400 py-2.5 font-mono text-xs">
-                <Plug className="w-3 h-3 mr-1.5" />CONNECTORS
-              </TabsTrigger>
-              <TabsTrigger value="agents" className="flex-1 rounded-none border-b-2 border-transparent data-[state=active]:border-fuchsia-500 data-[state=active]:text-fuchsia-400 py-2.5 font-mono text-xs">
-                <Bot className="w-3 h-3 mr-1.5" />AGENTS
-              </TabsTrigger>
-            </TabsList>
-            <TabsContent value="connectors" className="cm-picker-panel p-3 mt-0">
-              <ConnectorPicker onSelect={handleAddStep} />
-            </TabsContent>
-            <TabsContent value="agents" className="cm-picker-panel p-3 mt-0">
-              <AgentsPicker onSelect={handleAddAgentStep} />
-            </TabsContent>
-          </Tabs>
-        </CardContent>
-      </Card>
-
       {/* Canvas Area */}
       <div className="flex-1 min-h-0 lg:h-full flex flex-col">
         <div className="cm-canvas flex-1 relative rounded-t-sm border border-cyan-500/20 overflow-hidden shadow-2xl bg-black/40">
+          {/* Floating Stepper Toolbox */}
+          <FloatingToolbox
+            onAddStep={handleAddStep}
+            onAddAgentStep={handleAddAgentStep}
+            onRun={() => setShowRunDialog(true)}
+            onRequest={() => setShowRFADialog(true)}
+            onMint={() => setShowMintDialog(true)}
+            onSettings={() => setShowSettingsSheet(true)}
+            isRunning={isRunning}
+            nodeCount={nodes.length}
+          />
           {/* Toolbar */}
           <div className="absolute top-2 right-2 lg:top-4 lg:right-4 z-10 flex flex-wrap gap-1.5 lg:gap-2">
             <Button onClick={() => setShowRunDialog(true)} disabled={isRunning || nodes.length === 0} className="bg-green-500 text-white hover:bg-green-600 font-bold font-mono shadow-lg text-xs lg:text-sm h-8 lg:h-9 px-2.5 lg:px-4">

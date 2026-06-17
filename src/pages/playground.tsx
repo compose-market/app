@@ -36,6 +36,10 @@ import {
   Plug,
   ChevronLeft,
   ChevronRight,
+  FileText,
+  Image as ImageIcon,
+  Mic,
+  Video,
 } from "lucide-react";
 import { MultimodalCanvas } from "@/components/chat";
 import { MirrorPane, type ModelParamsSchema } from "@/components/mirror-pane";
@@ -47,6 +51,7 @@ import { CostReceiptIndicator } from "@/components/receipt-indicator";
 import { Switcher, type Option } from "@/components/control";
 import { useToast } from "@/hooks/use-toast";
 import { useStream } from "@/hooks/use-stream";
+import { useRegistryMeta } from "@/hooks/use-registry";
 import {
   buildFamilyCategories,
   buildTypeCategories,
@@ -83,6 +88,15 @@ function getDefaultParamValues(schema: ModelParamsSchema | null): Record<string,
     }
   }
   return values;
+}
+
+function getInputIcon(input: string) {
+  const norm = input.toLowerCase();
+  if (norm.includes("text") || norm.includes("prompt")) return <FileText className="w-3.5 h-3.5" />;
+  if (norm.includes("image") || norm.includes("vision")) return <ImageIcon className="w-3.5 h-3.5" />;
+  if (norm.includes("audio") || norm.includes("speech") || norm.includes("voice")) return <Mic className="w-3.5 h-3.5" />;
+  if (norm.includes("video")) return <Video className="w-3.5 h-3.5" />;
+  return <FileText className="w-3.5 h-3.5" />;
 }
 
 function modelOutputType(model: CatalogModel): "text" | "image" | "audio" | "video" | "embedding" {
@@ -130,6 +144,7 @@ export default function PlaygroundPage() {
   // ============ Filter State ============
   const [selectedType, setSelectedType] = useState("text-generation");
   const [selectedFamily, setSelectedFamily] = useState("all");
+  const { data: registryMeta } = useRegistryMeta();
 
   // ============ Models (single source — filters cascade to all consumers) ============
   const {
@@ -141,6 +156,11 @@ export default function PlaygroundPage() {
     type: selectedType === "all" ? undefined : selectedType,
     family: selectedFamily === "all" ? undefined : selectedFamily,
   });
+
+  const playgroundTabs = useMemo<Option<"model" | "connectors">[]>(() => [
+    { value: "model", label: "Models", icon: Bot, count: models.length > 0 ? String(models.length) : undefined },
+    { value: "connectors", label: "Connectors", icon: Plug, count: registryMeta?.totalServers ? String(registryMeta.totalServers) : undefined },
+  ], [models.length, registryMeta?.totalServers]);
 
   // ── Interconnected filters: each category list reflects the OTHER filter's selection ──
   // Type categories built from models filtered ONLY by family (so type-counts update when family changes)
@@ -443,14 +463,13 @@ export default function PlaygroundPage() {
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as PlaygroundTab)}>
           <Switcher
             value={activeTab}
-            options={tabs}
+            options={playgroundTabs}
             label="Playground section"
             onChange={setActiveTab}
           />
         </Tabs>
 
         <div className="cm-playground__toolbar-right">
-          <CostReceiptIndicator />
           {activeTab === "model" && (
             <Button
               variant="ghost"
@@ -489,16 +508,12 @@ export default function PlaygroundPage() {
                 familyCategories={familyCategories}
               />
 
-              <span className="cm-playground__model-count">
-                {filteredModels.length}/{models.length}
-              </span>
-
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={() => forceRefreshModels()}
                 disabled={modelsLoading}
-                className="cm-shell-button cm-shell-button--ghost cm-shell-button--icon"
+                className="cm-shell-button cm-shell-button--ghost cm-shell-button--icon ml-auto"
               >
                 <RefreshCw className={`h-4 w-4 ${modelsLoading ? "animate-spin" : ""}`} />
               </Button>
@@ -514,7 +529,8 @@ export default function PlaygroundPage() {
                   {uniqueInputs.map((input) => {
                     const formatted = input.charAt(0).toUpperCase() + input.slice(1);
                     return (
-                      <span key={input} className="cm-playground__cap-tag">
+                      <span key={input} className="cm-playground__cap-tag flex items-center gap-1">
+                        {getInputIcon(input)}
                         {formatted}
                       </span>
                     );

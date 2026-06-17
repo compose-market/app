@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
+import { cn } from "@/lib/utils";
 import { usePostHog } from "@posthog/react";
 import { mpTrack, mpError } from "@/lib/mixpanel";
 import { useForm, type SubmitHandler, type ControllerRenderProps } from "react-hook-form";
@@ -32,7 +33,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
-import { Cpu, DollarSign, ShieldCheck, Upload, Sparkles, Plug, Search, X, ChevronRight, Loader2, Play, AlertCircle, CheckCircle2, Boxes, ArrowRightLeft, Plus, Globe, RefreshCw, Check, BookOpen } from "lucide-react";
+import { Cpu, DollarSign, ShieldCheck, Upload, Sparkles, Plug, Search, X, ChevronRight, ChevronDown, Loader2, Play, AlertCircle, CheckCircle2, Boxes, ArrowRightLeft, Plus, Globe, RefreshCw, Check, BookOpen, Coins } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -128,6 +129,9 @@ export default function CreateAgent() {
   const MAX_GENERATIONS = 3;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const identityInputRef = useRef<HTMLInputElement>(null);
+
+  // Collapsible section state (accordion: only one can be open at a time)
+  const [activeSection, setActiveSection] = useState<"identity" | "connectors" | "financials" | null>("identity");
 
   // Check for warp mode from URL and sessionStorage
   useEffect(() => {
@@ -744,7 +748,7 @@ export default function CreateAgent() {
   // =============================================================================
   return (
     <div className="cm-web-page cm-create-page">
-      <div className="cm-web-page__canvas cm-workspace-canvas--fade">
+      <div className="cm-web-page__canvas cm-workspace-canvas--fade cm-web-page__canvas--scroll">
         <div className="cm-web-page__body cm-web-page__body--wide cm-create-builder">
           {/* Compact Header */}
           <div className="cm-control-rail">
@@ -784,10 +788,16 @@ export default function CreateAgent() {
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="cm-create-builder__form">
                 {/* Identity: Name + Model row */}
-                <div className="cm-builder-panel cm-create-builder__section">
-                  <div className="cm-builder-panel__title">
-                    <Cpu className="w-4 h-4" />
-                    Identity
+                <div className={cn("cm-builder-panel cm-create-builder__section", activeSection === "identity" && "cm-active-panel")}>
+                  <div
+                    onClick={() => setActiveSection(activeSection === "identity" ? null : "identity")}
+                    className="cm-builder-panel__title cursor-pointer flex justify-between items-center select-none"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Cpu className="w-4 h-4" />
+                      Identity
+                    </div>
+                    <ChevronDown className={cn("w-4 h-4 transition-transform", activeSection === "identity" && "rotate-180")} />
                   </div>
                   <input
                     ref={identityInputRef}
@@ -797,210 +807,335 @@ export default function CreateAgent() {
                     onChange={handleIdentitySelect}
                     className="hidden"
                   />
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <FormField
-                      control={form.control}
-                      name="name"
-                      render={({ field }: { field: ControllerRenderProps<FormValues, "name"> }) => (
-                        <FormItem className="cm-field">
-                          <FormLabel className="font-mono text-foreground text-sm">Agent Name</FormLabel>
-                          <FormControl>
-                            <Input placeholder="e.g. Alpha Sniper V1" {...field} className="bg-background/50 font-mono border-primary/20 focus:border-cyan-500" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="model"
-                      render={({ field }: { field: ControllerRenderProps<FormValues, "model"> }) => (
-                        <FormItem className="cm-field">
-                          <FormLabel className="font-mono text-foreground text-sm">LLM Model</FormLabel>
-                          <ModelSelector
-                            value={field.value}
-                            onChange={field.onChange}
+                  {activeSection === "identity" && (
+                    <div className="flex flex-col gap-4 mt-3">
+                      {/* Top: Name/Model on left, Avatar on right */}
+                      <div className="flex gap-4 items-stretch">
+                        {/* Fields stacked on left */}
+                        <div className="flex-1 flex flex-col justify-between gap-3 min-w-0">
+                          <FormField
+                            control={form.control}
+                            name="name"
+                            render={({ field }: { field: ControllerRenderProps<FormValues, "name"> }) => (
+                              <FormItem className="cm-field">
+                                <FormLabel className="font-mono text-foreground text-xs">Agent Name</FormLabel>
+                                <FormControl>
+                                  <Input placeholder="e.g. Alpha Sniper V1" {...field} className="bg-background/50 font-mono border-primary/20 focus:border-cyan-500 h-9" />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
                           />
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  </div>
+                          <FormField
+                            control={form.control}
+                            name="model"
+                            render={({ field }: { field: ControllerRenderProps<FormValues, "model"> }) => (
+                              <FormItem className="cm-field">
+                                <FormLabel className="font-mono text-foreground text-xs">LLM Model</FormLabel>
+                                <ModelSelector
+                                  value={field.value}
+                                  onChange={field.onChange}
+                                />
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
 
-                  <FormField
-                    control={form.control}
-                    name="description"
-                    render={({ field }: { field: ControllerRenderProps<FormValues, "description"> }) => (
-                      <FormItem className="cm-field cm-create-description">
-                        <FormLabel className="font-mono text-foreground text-sm">Purpose & Capabilities</FormLabel>
-                        <FormControl>
-                          <Textarea
-                            placeholder="Describe what this agent does..."
-                            className="resize-none bg-background/50 border-primary/20 focus:border-cyan-500"
-                            {...field}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                        {/* Avatar Upload column on right */}
+                        <div className="w-[120px] sm:w-[140px] shrink-0 flex flex-col items-center justify-center p-2 border border-primary/15 rounded-lg bg-background/20 relative z-20">
+                          <input ref={fileInputRef} type="file" accept="image/*" onChange={handleAvatarSelect} className="hidden" />
+                          <div className="relative w-full aspect-square max-w-[100px] sm:max-w-[110px] mx-auto">
+                            <button
+                              type="button"
+                              onClick={() => fileInputRef.current?.click()}
+                              className="w-full h-full rounded-sm bg-background/50 border border-primary/25 border-dashed flex flex-col items-center justify-center text-muted-foreground cursor-pointer hover:border-cyan-500 hover:text-cyan-400 transition-colors overflow-hidden"
+                            >
+                              {isGeneratingAvatar ? (
+                                <div className="flex flex-col items-center gap-1">
+                                  <Loader2 className="w-5 h-5 animate-spin text-cyan-400" />
+                                  <span className="text-[8px] font-mono text-cyan-400">GENERATING...</span>
+                                </div>
+                              ) : avatarPreview ? (
+                                <img src={avatarPreview} alt="Avatar" className="w-full h-full object-cover" />
+                              ) : (
+                                <>
+                                  <Upload className="w-4 h-4 mb-0.5" />
+                                  <span className="text-[9px] font-mono text-center leading-tight">UPLOAD AVATAR</span>
+                                </>
+                              )}
+                            </button>
+                            {!isGeneratingAvatar && (
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => { e.stopPropagation(); handleGenerateAvatar(); }}
+                                      disabled={generationCount >= MAX_GENERATIONS}
+                                      className={`absolute bottom-0.5 right-0.5 w-6 h-6 rounded-full flex items-center justify-center transition-all ${generationCount >= MAX_GENERATIONS
+                                        ? "bg-muted/50 text-muted-foreground cursor-not-allowed"
+                                        : "bg-fuchsia-500/80 hover:bg-fuchsia-500 text-white shadow-lg"
+                                        }`}
+                                    >
+                                      <Sparkles className="w-3 h-3" />
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    {generationCount >= MAX_GENERATIONS
+                                      ? `Limit (${MAX_GENERATIONS}/${MAX_GENERATIONS})`
+                                      : `Generate (${generationCount}/${MAX_GENERATIONS})`}
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            )}
+                          </div>
+                          {generatedAvatarUrl && !isGeneratingAvatar && (
+                            <div className="flex gap-1.5 justify-center mt-1.5">
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button type="button" variant="outline" size="sm" onClick={handleAcceptAvatar} className="border-green-500/50 text-green-400 hover:bg-green-500/10 h-6 w-6 p-0">
+                                      <Check className="w-3 h-3" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Accept</TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button type="button" variant="outline" size="sm" onClick={handleRegenerateAvatar} disabled={generationCount >= MAX_GENERATIONS}
+                                      className={`h-6 w-6 p-0 ${generationCount >= MAX_GENERATIONS ? "border-muted text-muted-foreground" : "border-cyan-500/50 text-cyan-400 hover:bg-cyan-500/10"}`}
+                                    >
+                                      <RefreshCw className="w-3.5 h-3.5" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>{generationCount >= MAX_GENERATIONS ? "Limit" : "Regenerate"}</TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            </div>
+                          )}
+                          {avatarPreview && !generatedAvatarUrl && (
+                            <Button type="button" variant="ghost" size="sm" onClick={() => { setAvatarFile(null); setAvatarPreview(null); setGeneratedAvatarUrl(null); }} className="w-full text-[9px] text-muted-foreground h-5 mt-1">
+                              Remove
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Description full-width below */}
+                      <FormField
+                        control={form.control}
+                        name="description"
+                        render={({ field }: { field: ControllerRenderProps<FormValues, "description"> }) => (
+                          <FormItem className="cm-field cm-create-description">
+                            <FormLabel className="font-mono text-foreground text-xs">Purpose & Capabilities</FormLabel>
+                            <FormControl>
+                              <Textarea
+                                placeholder="Describe what this agent does..."
+                                className="resize-none bg-background/50 border-primary/20 focus:border-cyan-500 min-h-[80px]"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                  )}
                 </div>
-                {/* Connectors + Financial side by side */}
-                <div className="cm-create-builder__lower">
-                  {/* Connectors */}
-                  <div className="cm-builder-panel relative z-10" data-tone="green">
-                    <div className="cm-builder-panel__title">
+                {/* Connectors */}
+                <div className={cn("cm-builder-panel cm-create-builder__section relative z-10", activeSection === "connectors" && "cm-active-panel")} data-tone="green">
+                  <div
+                    onClick={() => setActiveSection(activeSection === "connectors" ? null : "connectors")}
+                    className="cm-builder-panel__title cursor-pointer flex justify-between items-center select-none"
+                  >
+                    <div className="flex items-center gap-2">
                       <Plug className="w-4 h-4" />
                       Connectors
                     </div>
-                    {selectedConnectors.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5">
-                        {selectedConnectors.map(connector => (
-                          <Badge
-                            key={connector.id}
-                            variant="outline"
-                            className={`${getOriginColor(connector.origin)} pl-2 pr-1 py-0.5 text-[10px] font-mono`}
-                          >
-                            {connector.name}
-                            <button
-                              type="button"
-                              onClick={() => removeConnector(connector.id)}
-                              className="ml-1 p-0.5 rounded hover:bg-white/10"
-                            >
-                              <X className="w-2.5 h-2.5" />
-                            </button>
-                          </Badge>
-                        ))}
-                      </div>
-                    )}
-                    <div className="mt-3">
-                      <ShellModelBadge
-                        placeholder
-                        label="Add connector..."
-                        shortcut="Search"
-                        onClick={() => setShowConnectorPicker(true)}
-                      />
-                      <ConnectorCommandBar
-                        open={showConnectorPicker}
-                        onOpenChange={setShowConnectorPicker}
-                        onSelect={addConnector}
-                        selectedIds={selectedIds}
-                      />
-                    </div>
-                    <div className="cm-setting-row cm-knowledge-row">
-                      <div className="cm-setting-row__icon">
-                        <BookOpen className="w-4 h-4" />
-                      </div>
-                      <div className="cm-setting-row__copy">
-                        <div className="cm-setting-row__label">Knowledge</div>
-                        <div className="cm-setting-row__description">
-                          Optional Filecoin-backed <code className="text-cyan-500/70">ipfs://</code> files attached to the minted agent card.
-                        </div>
-                        {identityFiles.length > 0 ? (
-                          <div className="cm-knowledge-row__files">
-                            {identityFiles.map((file) => (
-                              <span
-                                key={`${file.name}:${file.size}:${file.lastModified}`}
-                                className="cm-knowledge-row__file"
+                    <ChevronDown className={cn("w-4 h-4 transition-transform", activeSection === "connectors" && "rotate-180")} />
+                  </div>
+                  {activeSection === "connectors" && (
+                      <>
+                        {selectedConnectors.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 mt-2">
+                            {selectedConnectors.map(connector => (
+                              <Badge
+                                key={connector.id}
+                                variant="outline"
+                                className={`${getOriginColor(connector.origin)} pl-2 pr-1 py-0.5 text-[10px] font-mono`}
                               >
-                                <span className="truncate">{file.name}</span>
+                                {connector.name}
                                 <button
                                   type="button"
-                                  onClick={() => removeIdentityFile(file)}
-                                  className="rounded-full px-1 text-muted-foreground hover:text-foreground"
-                                  aria-label={`Remove ${file.name}`}
+                                  onClick={() => removeConnector(connector.id)}
+                                  className="ml-1 p-0.5 rounded hover:bg-white/10"
                                 >
                                   <X className="w-2.5 h-2.5" />
                                 </button>
-                              </span>
+                              </Badge>
                             ))}
                           </div>
-                        ) : null}
-                      </div>
-                      <div className="cm-setting-row__control">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => identityInputRef.current?.click()}
-                          className="border-cyan-500/40 text-cyan-300 hover:text-cyan-200 shrink-0 h-8 text-xs"
-                        >
-                          <Upload className="w-3 h-3 mr-1.5" />
-                          Attach
-                        </Button>
-                      </div>
-                    </div>
+                        )}
+                        <div className="mt-3">
+                          <ShellModelBadge
+                            placeholder
+                            label="Add connector..."
+                            shortcut="Search"
+                            onClick={() => setShowConnectorPicker(true)}
+                          />
+                          <ConnectorCommandBar
+                            open={showConnectorPicker}
+                            onOpenChange={setShowConnectorPicker}
+                            onSelect={addConnector}
+                            selectedIds={selectedIds}
+                          />
+                        </div>
+                        <div className="cm-setting-row cm-knowledge-row">
+                          <div className="cm-setting-row__icon">
+                            <BookOpen className="w-4 h-4" />
+                          </div>
+                          <div className="cm-setting-row__copy">
+                            <div className="cm-setting-row__label">Knowledge</div>
+                            <div className="cm-setting-row__description">
+                              Optional Filecoin-backed <code className="text-cyan-500/70">ipfs://</code> files attached to the minted agent card.
+                            </div>
+                            {identityFiles.length > 0 ? (
+                              <div className="cm-knowledge-row__files">
+                                {identityFiles.map((file) => (
+                                  <span
+                                    key={`${file.name}:${file.size}:${file.lastModified}`}
+                                    className="cm-knowledge-row__file"
+                                  >
+                                    <span className="truncate">{file.name}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => removeIdentityFile(file)}
+                                      className="rounded-full px-1 text-muted-foreground hover:text-foreground"
+                                      aria-label={`Remove ${file.name}`}
+                                    >
+                                      <X className="w-2.5 h-2.5" />
+                                    </button>
+                                  </span>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                          <div className="cm-setting-row__control">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => identityInputRef.current?.click()}
+                              className="border-cyan-500/40 text-cyan-300 hover:text-cyan-200 shrink-0 h-8 text-xs"
+                            >
+                              <Upload className="w-3 h-3 mr-1.5" />
+                              Attach
+                            </Button>
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </div>
 
                   {/* Financial */}
-                  <div className="cm-builder-panel" data-tone="fuchsia">
-                    <div className="cm-builder-panel__title">
-                      <DollarSign className="w-4 h-4" />
-                      Financial (x402)
+                  <div className={cn("cm-builder-panel cm-create-builder__section", activeSection === "financials" && "cm-active-panel")} data-tone="fuchsia">
+                    <div
+                      onClick={() => setActiveSection(activeSection === "financials" ? null : "financials")}
+                      className="cm-builder-panel__title cursor-pointer flex justify-between items-center select-none"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Coins className="w-4 h-4" />
+                        Financials
+                      </div>
+                      <ChevronDown className={cn("w-4 h-4 transition-transform", activeSection === "financials" && "rotate-180")} />
                     </div>
-                    <div className="cm-financial-grid">
-                      <FormField
-                        control={form.control}
-                        name="licensePrice"
-                        render={({ field }: { field: ControllerRenderProps<FormValues, "licensePrice"> }) => (
-                          <FormItem className="cm-field">
-                            <FormLabel className="font-mono text-foreground text-sm">Price</FormLabel>
-                            <FormControl>
-                              <Input type="number" step="0.001" {...field} className="bg-background/50 font-mono border-primary/20 focus:border-fuchsia-500" />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
-                        name="creatorFee"
-                        render={({ field }: { field: ControllerRenderProps<FormValues, "creatorFee"> }) => (
-                          <FormItem className="cm-field">
-                            <FormLabel className="font-mono text-foreground text-sm">Fee</FormLabel>
-                            <FormControl>
-                              <Input type="number" min="0" step="1" {...field} className="bg-background/50 font-mono border-primary/20 focus:border-fuchsia-500" />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
-                        name="licenses"
-                        render={({ field }: { field: ControllerRenderProps<FormValues, "licenses"> }) => (
-                          <FormItem className="cm-field">
-                            <FormLabel className="font-mono text-foreground text-sm">Supply</FormLabel>
-                            <FormControl>
-                              <Input type="number" placeholder="∞" {...field} className="bg-background/50 font-mono border-primary/20 focus:border-fuchsia-500" />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                    </div>
-                    <FormField
-                      control={form.control}
-                      name="isCloneable"
-                      render={({ field }: { field: ControllerRenderProps<FormValues, "isCloneable"> }) => (
-                        <FormItem className="cm-setting-row">
-                          <div className="cm-setting-row__copy">
-                            <FormLabel className="text-sm font-mono text-foreground cursor-pointer">Allow Cloning</FormLabel>
-                            <FormDescription>Let other builders mint derivative agents with attribution.</FormDescription>
+                    {activeSection === "financials" && (
+                      <>
+                        <div className="cm-financial-grid">
+                          <FormField
+                            control={form.control}
+                            name="licensePrice"
+                            render={({ field }: { field: ControllerRenderProps<FormValues, "licensePrice"> }) => (
+                              <FormItem className="cm-field">
+                                <FormLabel className="font-mono text-foreground text-sm">Price</FormLabel>
+                                <FormControl>
+                                  <Input type="number" step="0.001" {...field} className="bg-background/50 font-mono border-primary/20 focus:border-fuchsia-500" />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                          <FormField
+                            control={form.control}
+                            name="creatorFee"
+                            render={({ field }: { field: ControllerRenderProps<FormValues, "creatorFee"> }) => (
+                              <FormItem className="cm-field">
+                                <FormLabel className="font-mono text-foreground text-sm">Fee</FormLabel>
+                                <FormControl>
+                                  <Input type="number" min="0" step="1" {...field} className="bg-background/50 font-mono border-primary/20 focus:border-fuchsia-500" />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                          <FormField
+                            control={form.control}
+                            name="licenses"
+                            render={({ field }: { field: ControllerRenderProps<FormValues, "licenses"> }) => (
+                              <FormItem className="cm-field">
+                                <FormLabel className="font-mono text-foreground text-sm">Supply</FormLabel>
+                                <FormControl>
+                                  <Input type="number" placeholder="∞" {...field} className="bg-background/50 font-mono border-primary/20 focus:border-fuchsia-500" />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+                        <FormField
+                          control={form.control}
+                          name="isCloneable"
+                          render={({ field }: { field: ControllerRenderProps<FormValues, "isCloneable"> }) => (
+                            <FormItem className="cm-setting-row">
+                              <div className="cm-setting-row__copy">
+                                <FormLabel className="text-sm font-mono text-foreground cursor-pointer">Allow Cloning</FormLabel>
+                                <FormDescription>Let other builders mint derivative agents with attribution.</FormDescription>
+                              </div>
+                              <div className="cm-setting-row__control">
+                                <FormControl>
+                                  <Switch
+                                    checked={field.value}
+                                    onCheckedChange={field.onChange}
+                                  />
+                                </FormControl>
+                              </div>
+                            </FormItem>
+                          )}
+                        />
+                        {/* Mint Info metadata inside Financial */}
+                        <div className="border-t border-primary/10 pt-3 mt-3 space-y-2 text-xs font-mono">
+                          <div className="flex justify-between gap-3">
+                            <span className="text-muted-foreground">Network</span>
+                            <span className="text-cyan-400 truncate">
+                              {CHAIN_CONFIG[selectedChainId]?.name || "Unknown"}
+                            </span>
                           </div>
-                          <div className="cm-setting-row__control">
-                            <FormControl>
-                              <Switch
-                                checked={field.value}
-                                onCheckedChange={field.onChange}
-                              />
-                            </FormControl>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Contract</span>
+                            <span className="text-cyan-400">ERC8004</span>
                           </div>
-                        </FormItem>
-                      )}
-                    />
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Gas</span>
+                            <span className="text-green-400">Sponsored</span>
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </div>
-                </div>
+
 
                 {/* Mint Progress */}
                 {mintStep === "uploading" && (
@@ -1010,145 +1145,27 @@ export default function CreateAgent() {
                   </div>
                 )}
 
-                {/* Mobile Mint Button */}
-                <Button
-                  type="submit"
-                  size="lg"
-                  disabled={!account || isProcessing}
-                  className="w-full lg:hidden bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white font-bold font-mono hover:from-cyan-400 hover:to-fuchsia-400 h-11 text-sm shadow-[0_0_20px_-5px_hsl(var(--primary))] tracking-wider disabled:opacity-50"
-                >
-                  {mintStep === "uploading" ? (
-                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" />UPLOADING...</>
-                  ) : mintStep === "minting" ? (
-                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" />MINTING...</>
-                  ) : !account ? (
-                    "SIGN IN TO MINT"
-                  ) : (
-                    "MINT AGENT"
-                  )}
-                </Button>
+                {/* Mint Button centered */}
+                <div className="flex justify-center mt-6">
+                  <Button
+                    type="submit"
+                    size="lg"
+                    disabled={!account || isProcessing}
+                    className="w-full max-w-md bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white font-bold font-mono hover:from-cyan-400 hover:to-fuchsia-400 h-12 text-base shadow-[0_0_20px_-5px_hsl(var(--primary))] tracking-wider disabled:opacity-50"
+                  >
+                    {mintStep === "uploading" ? (
+                      <><Loader2 className="w-4 h-4 mr-2 animate-spin" />UPLOADING...</>
+                    ) : mintStep === "minting" ? (
+                      <><Loader2 className="w-4 h-4 mr-2 animate-spin" />MINTING...</>
+                    ) : !account ? (
+                      "SIGN IN TO MINT"
+                    ) : (
+                      "MINT AGENT"
+                    )}
+                  </Button>
+                </div>
               </form>
             </Form>
-
-            {/* Right Sidebar: Avatar + Mint */}
-            <div className="cm-create-builder__sidebar">
-              {/* Avatar */}
-              <div className="cm-builder-panel" data-tone="fuchsia">
-                <input ref={fileInputRef} type="file" accept="image/*" onChange={handleAvatarSelect} className="hidden" />
-                <div className="relative w-full aspect-square max-w-[180px] mx-auto">
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="w-full h-full rounded-sm bg-background/50 border border-primary/25 border-dashed flex flex-col items-center justify-center text-muted-foreground cursor-pointer hover:border-cyan-500 hover:text-cyan-400 transition-colors overflow-hidden"
-                  >
-                    {isGeneratingAvatar ? (
-                      <div className="flex flex-col items-center gap-1">
-                        <Loader2 className="w-6 h-6 animate-spin text-cyan-400" />
-                        <span className="text-[10px] font-mono text-cyan-400">GENERATING...</span>
-                      </div>
-                    ) : avatarPreview ? (
-                      <img src={avatarPreview} alt="Avatar" className="w-full h-full object-cover" />
-                    ) : (
-                      <>
-                        <Upload className="w-5 h-5 mb-1" />
-                        <span className="text-xs font-mono">UPLOAD AVATAR</span>
-                      </>
-                    )}
-                  </button>
-                  {!isGeneratingAvatar && (
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); handleGenerateAvatar(); }}
-                            disabled={generationCount >= MAX_GENERATIONS}
-                            className={`absolute bottom-1.5 right-1.5 w-8 h-8 rounded-full flex items-center justify-center transition-all ${generationCount >= MAX_GENERATIONS
-                              ? "bg-muted/50 text-muted-foreground cursor-not-allowed"
-                              : "bg-fuchsia-500/80 hover:bg-fuchsia-500 text-white shadow-lg"
-                              }`}
-                          >
-                            <Sparkles className="w-4 h-4" />
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          {generationCount >= MAX_GENERATIONS
-                            ? `Limit (${MAX_GENERATIONS}/${MAX_GENERATIONS})`
-                            : `Generate (${generationCount}/${MAX_GENERATIONS})`}
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  )}
-                </div>
-                {generatedAvatarUrl && !isGeneratingAvatar && (
-                  <div className="flex gap-2 justify-center">
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button type="button" variant="outline" size="sm" onClick={handleAcceptAvatar} className="border-green-500/50 text-green-400 hover:bg-green-500/10 h-7 w-7 p-0">
-                            <Check className="w-3.5 h-3.5" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>Accept</TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button type="button" variant="outline" size="sm" onClick={handleRegenerateAvatar} disabled={generationCount >= MAX_GENERATIONS}
-                            className={`h-7 w-7 p-0 ${generationCount >= MAX_GENERATIONS ? "border-muted text-muted-foreground" : "border-cyan-500/50 text-cyan-400 hover:bg-cyan-500/10"}`}
-                          >
-                            <RefreshCw className="w-3.5 h-3.5" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>{generationCount >= MAX_GENERATIONS ? "Limit" : "Regenerate"}</TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  </div>
-                )}
-                {avatarPreview && !generatedAvatarUrl && (
-                  <Button type="button" variant="ghost" size="sm" onClick={() => { setAvatarFile(null); setAvatarPreview(null); setGeneratedAvatarUrl(null); }} className="w-full text-[10px] text-muted-foreground h-6">
-                    Remove
-                  </Button>
-                )}
-              </div>
-
-              {/* Mint Info */}
-              <div className="cm-builder-panel text-sm">
-                <div className="flex justify-between gap-3">
-                  <span className="text-muted-foreground font-mono">Network</span>
-                  <span className="font-mono text-cyan-400 truncate">
-                    {CHAIN_CONFIG[selectedChainId]?.name || "Unknown"}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground font-mono">Contract</span>
-                  <span className="font-mono text-cyan-400">ERC8004</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground font-mono">Gas</span>
-                  <span className="font-mono text-green-400">Sponsored</span>
-                </div>
-              </div>
-
-              {/* Mint Button */}
-              <Button
-                type="button"
-                onClick={form.handleSubmit(onSubmit)}
-                disabled={!account || isProcessing}
-                className="w-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white font-bold font-mono hover:from-cyan-400 hover:to-fuchsia-400 h-12 text-base shadow-[0_0_20px_-5px_hsl(var(--primary))] tracking-wider disabled:opacity-50"
-              >
-                {mintStep === "uploading" ? (
-                  <><Loader2 className="w-4 h-4 mr-2 animate-spin" />UPLOADING...</>
-                ) : mintStep === "minting" ? (
-                  <><Loader2 className="w-4 h-4 mr-2 animate-spin" />MINTING...</>
-                ) : !account ? (
-                  "SIGN IN TO MINT"
-                ) : (
-                  "MINT AGENT"
-                )}
-              </Button>
-            </div>
           </div>
 
 

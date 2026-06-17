@@ -151,9 +151,9 @@ export default function MyAssetsPage() {
   const [workflowSort, setWorkflowSort] = useState<WorkflowSort>("newest");
   const refreshers = useRef<Partial<Record<AssetTab, () => void>>>({});
   const [status, setStatus] = useState<Record<AssetTab, TabStatus>>({
-    agents: { count: "0/0 agents", busy: false },
-    workflows: { count: "0 workflows", busy: false },
-    rfas: { count: "0 RFAs", busy: false },
+    agents: { count: "0", busy: false },
+    workflows: { count: "0", busy: false },
+    rfas: { count: "0", busy: false },
   });
   const owner = account?.address;
   const q = deferredQuery.trim();
@@ -207,7 +207,11 @@ export default function MyAssetsPage() {
   }, [agentData]);
 
   const agentCount = agentData?.pages[0]?.total ?? agents.length;
-  const currentStatus = status[tab];
+  const assetTabs = useMemo<Option<AssetTab>[]>(() => [
+    { value: "agents", label: "Agents", icon: Bot, count: status.agents.count },
+    { value: "workflows", label: "Workflows", icon: Layers, count: status.workflows.count },
+    { value: "rfas", label: "RFAs", icon: Award, count: status.rfas.count },
+  ], [status.agents.count, status.workflows.count, status.rfas.count]);
 
   // RFA detail dialog state
   const [selectedRfaId, setSelectedRfaId] = useState<number | null>(null);
@@ -228,9 +232,9 @@ export default function MyAssetsPage() {
   useEffect(() => {
     refreshers.current = {};
     setStatus({
-      agents: { count: "0/0 agents", busy: false },
-      workflows: { count: "0 workflows", busy: false },
-      rfas: { count: "0 RFAs", busy: false },
+      agents: { count: "0", busy: false },
+      workflows: { count: "0", busy: false },
+      rfas: { count: "0", busy: false },
     });
   }, [owner]);
 
@@ -292,23 +296,11 @@ export default function MyAssetsPage() {
               <span className="text-cyan-500 mr-2">//</span>
               MY ASSETS
             </h1>
-            <Badge variant="outline" className="cm-page-header__metric cm-market-control-rail__count">
-              {currentStatus.count}
-            </Badge>
-            <button
-              type="button"
-              onClick={() => copyAddress(account.address)}
-              className="cm-page-header__account hidden md:inline-flex"
-            >
-              <Activity className="w-3.5 h-3.5 text-cyan-400" />
-              <span>{account.address.slice(0, 6)}...{account.address.slice(-4)}</span>
-              <Copy className="w-3.5 h-3.5 text-muted-foreground" />
-            </button>
           </div>
 
           <Switcher
             value={tab}
-            options={tabs}
+            options={assetTabs}
             label="Asset section"
             onChange={setActiveTab}
             className="cm-market-control-rail__tabs"
@@ -329,14 +321,6 @@ export default function MyAssetsPage() {
             {tab === "workflows" ? (
               <Ordering value={workflowSort} options={orders} onChange={setWorkflowSort} />
             ) : null}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleRefresh}
-              className="border-primary/20 h-9 w-9"
-            >
-              <RefreshCw className={`w-4 h-4 ${currentStatus.busy ? "animate-spin" : ""}`} />
-            </Button>
             <Link href="/create-agent">
               <Button size="sm" className="bg-cyan-500 text-black hover:bg-cyan-400 font-bold font-mono text-xs h-9 px-2 sm:px-3">
                 <Plus className="w-3.5 h-3.5 sm:mr-1" />
@@ -443,7 +427,7 @@ function AssetAgentsTab({
   useEffect(() => {
     const query = searchQuery.trim();
     onStatus("agents", {
-      count: query ? `${agents.length} results` : `${agents.length}/${total} agents`,
+      count: query ? String(agents.length) : String(total),
       busy: isLoading || isFetchingNextPage,
       refresh: refetch,
     });
@@ -577,7 +561,7 @@ function WorkflowsTab({
 
   useEffect(() => {
     onStatus("workflows", {
-      count: searchQuery.trim() ? `${filteredWorkflows.length} results` : `${filteredWorkflows.length} workflows`,
+      count: String(filteredWorkflows.length),
       busy: isLoadingWorkflows,
       refresh: () => void refetch(),
     });
@@ -650,7 +634,7 @@ function RFAsTab({
 
   useEffect(() => {
     onStatus("rfas", {
-      count: searchQuery.trim() ? `${filteredRFAs.length} results` : `${filteredRFAs.length} RFAs`,
+      count: String(filteredRFAs.length),
       busy: isLoadingRFAs,
       refresh: () => void refetchRFAs(),
     });

@@ -59,13 +59,11 @@ function ServerCard({
   onSelect: (s: RegistryServer) => void;
 }) {
   const isOnchain = server.origin === "onchain";
-  const isEliza = server.origin === "eliza";
   const isRemote = isRemoteCapable(server);
   const isExecutable = server.executable === true;
 
   const getOriginStyle = () => {
     if (isOnchain) return { bg: "bg-green-500/10", border: "border-green-500/30", text: "text-green-400" };
-    if (isEliza) return { bg: "bg-fuchsia-500/10", border: "border-fuchsia-500/30", text: "text-fuchsia-400" };
     return { bg: "bg-cyan-500/10", border: "border-cyan-500/30", text: "text-cyan-400" };
   };
 
@@ -83,8 +81,6 @@ function ServerCard({
             <div className={`w-7 h-7 sm:w-8 sm:h-8 rounded-sm flex items-center justify-center border shrink-0 ${style.bg} ${style.border}`}>
               {isOnchain ? (
                 <Zap className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${style.text}`} />
-              ) : isEliza ? (
-                <Sparkles className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${style.text}`} />
               ) : (
                 <Server className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${style.text}`} />
               )}
@@ -206,15 +202,13 @@ function ServerDetailDialog({
     onOpenChange(false);
   };
 
-  const isEliza = server.origin === "eliza";
-
   const handleTestConnector = () => {
     posthog?.capture("registry_server_tested", {
       server_id: server.registryId,
       server_name: server.name,
       server_origin: server.origin,
     });
-    const source = isOnchain ? "onchain" : isEliza ? "eliza" : "mcp";
+    const source = isOnchain ? "onchain" : "mcp";
     const connectorParam = server.slug;
 
     // Navigate to playground with source and connector pre-selected
@@ -337,16 +331,14 @@ function ServerDetailDialog({
 
           {/* Actions */}
           <div className="flex gap-2 pt-4 border-t border-sidebar-border">
-            {(isExecutable || server.origin === "mcp" || isEliza) && (
+            {(isExecutable || server.origin === "mcp") && (
               <Button
                 onClick={handleTestConnector}
                 className={cn(
                   "flex-1 font-bold",
                   isOnchain
                     ? "bg-green-500 hover:bg-green-600 text-black"
-                    : isEliza
-                      ? "bg-fuchsia-500 hover:bg-fuchsia-600 text-white"
-                      : "bg-purple-500 hover:bg-purple-600 text-white"
+                    : "bg-purple-500 hover:bg-purple-600 text-white"
                 )}
               >
                 <Play className="w-4 h-4 mr-2" />
@@ -357,7 +349,7 @@ function ServerDetailDialog({
               onClick={handleAddToWorkflow}
               className={cn(
                 "bg-cyan-500 hover:bg-cyan-600 text-black font-bold",
-                !(isExecutable || server.origin === "mcp" || isEliza) && "flex-1"
+                !(isExecutable || server.origin === "mcp") && "flex-1"
               )}
             >
               <Plus className="w-4 h-4 mr-2" />
@@ -393,7 +385,7 @@ function ServerDetailDialog({
 export default function RegistryPage() {
   const posthog = usePostHog();
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedOrigin, setSelectedOrigin] = useState<"all" | "mcp" | "onchain" | "eliza">("all");
+  const [selectedOrigin, setSelectedOrigin] = useState<"all" | "mcp" | "onchain">("all");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [selectedServer, setSelectedServer] = useState<RegistryServer | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -498,7 +490,6 @@ export default function RegistryPage() {
                     <SelectItem value="all">All Sources</SelectItem>
                     <SelectItem value="mcp">Tools</SelectItem>
                     <SelectItem value="onchain">Onchain</SelectItem>
-                    <SelectItem value="eliza">ElizaOS</SelectItem>
                   </SelectContent>
                 </Select>
 

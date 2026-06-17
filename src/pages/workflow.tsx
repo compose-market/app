@@ -277,7 +277,6 @@ export default function ManowarPage() {
                 </Button>
 
                 <div className="flex items-center gap-3">
-                    <CostReceiptIndicator />
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                         <Checkbox
                             id="continuous-execution"
