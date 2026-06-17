@@ -17,6 +17,7 @@ import { BackpackDialog } from "@/components/backpack";
 import { SessionIndicator } from "@/components/session";
 import { DispenserButton } from "@/components/dispenser";
 import { NetworkSelector } from "@/components/ui/network-selector";
+import { CostReceiptIndicator } from "@/components/receipt-indicator";
 
 interface LayoutProps {
   children: ReactNode;
@@ -81,7 +82,7 @@ export function Layout({ children }: LayoutProps) {
             />
 
             <div className="cm-app-chrome__hud-item" data-priority="low">
-              <DispenserButton />
+              <CostReceiptIndicator />
             </div>
 
             {isConnected ? (
@@ -233,11 +234,15 @@ function OverflowControl({
       {open ? (
         <div className="cm-app-chrome__hud-popover">
           <div className="cm-app-chrome__hud-popover-body">
-            <div className="cm-app-chrome__hud-row">
-              <span className="cm-app-chrome__hud-popover-title">Funds</span>
+            <div className="cm-app-chrome__hud-row flex items-center justify-between gap-4 py-1 border-b border-white/5">
+              <span className="cm-app-chrome__hud-popover-title text-xs text-muted-foreground font-mono">Receipts</span>
+              <CostReceiptIndicator />
+            </div>
+            <div className="cm-app-chrome__hud-row flex items-center justify-between gap-4 py-1.5">
+              <span className="cm-app-chrome__hud-popover-title text-xs text-muted-foreground font-mono">Funds</span>
               <DispenserButton />
             </div>
-            <button type="button" className="cm-hud-button">
+            <button type="button" className="cm-hud-button w-full justify-start mt-1">
               <Bell className="cm-hud-icon" size={16} />
               <span className="cm-hud-label">Alerts</span>
             </button>
