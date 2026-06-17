@@ -234,7 +234,7 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, family }
                           {typeIcon(modelType)}
                         </span>
                       </div>
-                      <div className="cm-command-item__meta hidden sm:flex">
+                      <div className="cm-command-item__meta cm-model-command-meta hidden sm:flex">
                         <span
                           className="cm-command-item__family"
                           style={{ background: fColor.bg, color: fColor.text }}

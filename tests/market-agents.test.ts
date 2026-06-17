@@ -7,8 +7,8 @@ const root = resolve(import.meta.dirname, "..");
 
 test("market agents tab uses the paged Agents API without legacy agent scans", () => {
   const source = readFileSync(resolve(root, "src/pages/market.tsx"), "utf8");
-  const agentsStart = source.indexOf("function AgentsTab");
-  assert.ok(agentsStart > 0, "AgentsTab must exist");
+  const agentsStart = source.indexOf("const AGENTS_LIMIT = 72;");
+  assert.ok(agentsStart > 0, "AgentsTab code must exist");
   const agents = source.slice(agentsStart);
 
   assert.doesNotMatch(source, /@\/hooks\/catalog/);
@@ -16,6 +16,9 @@ test("market agents tab uses the paged Agents API without legacy agent scans", (
   assert.doesNotMatch(agents, /sdk\.directory\.agents\.list/);
   assert.match(agents, /useInfiniteQuery/);
   assert.match(source, /AGENTS_PATH\s*=\s*"\/agents"/);
+  assert.match(source, /AGENTS_URL\s*=\s*\(import\.meta\.env\.VITE_AGENTS_URL \|\| "https:\/\/agents\.compose\.market"\)/);
+  assert.match(agents, /fetch\(`\$\{AGENTS_URL\}\$\{AGENTS_PATH\}/);
+  assert.doesNotMatch(agents, /sdk\.fetch/);
   assert.match(agents, /cursor/);
   assert.match(agents, /q:/);
   assert.match(source, /params\.set\("sort", input\.sort\)/);

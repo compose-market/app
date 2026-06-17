@@ -13,7 +13,8 @@ const chatHookSource = readFileSync(new URL("../src/hooks/use-chat.ts", import.m
 const chatSource = readFileSync(new URL("../src/components/chat.tsx", import.meta.url), "utf8");
 const outputSource = readFileSync(new URL("../src/components/output.tsx", import.meta.url), "utf8");
 const receiptSource = readFileSync(new URL("../src/components/receipt-indicator.tsx", import.meta.url), "utf8");
-const themeWorkflowsSource = readFileSync(new URL("../../packages/theme/src/workflows/index.tsx", import.meta.url), "utf8");
+const themeStreamSource = readFileSync(new URL("../../packages/theme/src/stream/index.tsx", import.meta.url), "utf8");
+const themeStreamStyles = readFileSync(new URL("../../packages/theme/src/stream/stream.css", import.meta.url), "utf8");
 
 function section(source: string, start: string, end: string): string {
   const startIndex = source.indexOf(start);
@@ -85,7 +86,7 @@ test("direct model output stays on text, reasoning, and asset surfaces", () => {
   assert.match(artifactBlock, /partial/);
   assert.match(artifactBlock, /progress/);
   assert.match(artifactBlock, /SharedStreamMedia/);
-  assert.match(themeWorkflowsSource, /cm-stream-media--partial/);
+  assert.match(themeStreamStyles, /cm-stream-media--partial/);
   assert.doesNotMatch(streamSource, /artifactFrames|emitArtifact|function artifactFromEvent/);
   assert.doesNotMatch(chatSource, /DirectModelDetails|Model stream|Model activity/);
 });
@@ -145,11 +146,46 @@ test("receipt and budget stay side channels, not quality stream blocks", () => {
   assert.match(receiptSource, /formatWeiUsd/);
 });
 
+test("realtime responses keep one paid stream while opening and append follow-up input", () => {
+  const realtimeRunner = section(streamSource, "const runRealtimeResponses", "const runResponses");
+  const responsesRunner = section(streamSource, "const runResponses", "const appendResponses");
+  assert.ok(
+    realtimeRunner.indexOf("openingRef.current.set(model, opening)") <
+    realtimeRunner.indexOf("sdk.inference.responses.stream"),
+  );
+  assert.match(realtimeRunner, /settle\.resolve\?\.\(active\)/);
+  assert.match(responsesRunner, /const opening = model \? openingRef\.current\.get\(model\) : undefined/);
+  assert.match(responsesRunner, /const pending = openingRef\.current\.get\(model\)/);
+  assert.match(responsesRunner, /await append\(args, ready\)/);
+});
+
+test("realtime responses abort active and pending streams on page close", () => {
+  const lifecycle = section(streamSource, "const closeRealtime = useCallback", "const runAgent");
+  const realtimeRunner = section(streamSource, "const runRealtimeResponses", "const runResponses");
+  assert.match(realtimeRunner, /const controller = new AbortController\(\)/);
+  assert.match(realtimeRunner, /const opening: OpeningResponse = \{ promise: started, controller, cleanup \}/);
+  assert.match(realtimeRunner, /signal: controller\.signal/);
+  assert.match(lifecycle, /for \(const item of opening\)/);
+  assert.match(lifecycle, /for \(const item of live\)/);
+  assert.match(lifecycle, /abort\(item\.controller\)/);
+  assert.match(lifecycle, /sdk\.inference\.responses\.cancel\(item\.responseId, item\.options\)/);
+  assert.match(lifecycle, /window\.addEventListener\("beforeunload", unload\)/);
+  assert.match(lifecycle, /window\.removeEventListener\("beforeunload", unload\)/);
+  assert.match(lifecycle, /closeRealtime\(true\)/);
+  assert.doesNotMatch(lifecycle, /visibilitychange|pagehide/);
+});
+
+test("partial realtime audio chunks do not hydrate by fetching the response", () => {
+  const dispatchModel = section(streamSource, "function dispatchModel", "function dispatchActivity");
+  assert.match(dispatchModel, /item\.partial !== true && !item\.url && item\.responseId/);
+  assert.doesNotMatch(chatSource, /hiddenArtifact/);
+});
+
 test("theme stream nodes keep raw kind and status out of visible chrome by default", () => {
-  const nodeSource = section(themeWorkflowsSource, "export function StreamNode", "export interface StreamArtifactProps");
+  const nodeSource = section(themeStreamSource, "export function StreamNode", "export interface StreamArtifactProps");
   assert.match(nodeSource, /data-kind=\{kind\}/);
   assert.match(nodeSource, /data-status=\{status\}/);
-  assert.match(themeWorkflowsSource, /badges\?: React\.ReactNode/);
+  assert.match(themeStreamSource, /badges\?: React\.ReactNode/);
   assert.match(nodeSource, /\{badges\}/);
   assert.doesNotMatch(nodeSource, /cm-stream-node__kind/);
   assert.doesNotMatch(nodeSource, /cm-stream-node__status/);
