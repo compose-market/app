@@ -240,14 +240,10 @@ export function formatModelValue(value: ModelJsonValue): string {
 
 export function shorten(val: number): string {
   if (val >= 1_000_000) {
-    const value = val / 1_000_000;
-    const formatted = parseFloat((Math.floor(value * 1000) / 1000).toFixed(3));
-    return `${formatted}M`;
+    return `${Math.round(val / 1_000_000)}M`;
   }
   if (val >= 1_000) {
-    const value = val / 1_000;
-    const formatted = parseFloat((Math.floor(value * 1000) / 1000).toFixed(3));
-    return `${formatted}k`;
+    return `${Math.round(val / 1_000)}k`;
   }
   return String(val);
 }
