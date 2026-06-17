@@ -22,7 +22,7 @@ function getBrokerBaseUrl(): string {
 const BROKER_BASE = getBrokerBaseUrl();
 
 /** Server origin types (user-facing). */
-export type ServerOrigin = CanonicalConnectorOrigin | "eliza";
+export type ServerOrigin = CanonicalConnectorOrigin;
 
 /** Record type: agent (autonomous AI agents) or plugin (tools/connectors). */
 export type RecordType = "agent" | "plugin";
@@ -156,11 +156,12 @@ const MAX_SEARCH_RESULTS = 50;
 
 function summaryToRegistryServer(s: BrokerServerSummary): RegistryServer {
     const binding = normalizeConnectorBinding({ registryId: s.slug, origin: s.origin });
+    const origin: ServerOrigin = binding.origin;
     return {
         registryId: binding.registryId,
-        origin: binding.origin,
+        origin,
         type: "plugin",
-        sources: [binding.origin],
+        sources: [origin],
         canonicalKey: s.slug,
         name: s.name,
         namespace: s.namespace,
@@ -179,11 +180,12 @@ function summaryToRegistryServer(s: BrokerServerSummary): RegistryServer {
 
 function cardToRegistryServer(s: BrokerServerCard): RegistryServer {
     const binding = normalizeConnectorBinding({ registryId: s.slug, origin: s.origin });
+    const origin: ServerOrigin = binding.origin;
     return {
         registryId: binding.registryId,
-        origin: binding.origin,
+        origin,
         type: "plugin",
-        sources: [binding.origin],
+        sources: [origin],
         canonicalKey: s.slug,
         name: s.name,
         namespace: s.namespace,
@@ -236,8 +238,7 @@ function pluginToRegistryServer(p: BrokerOnchainPlugin): RegistryServer {
 
 async function fetchServers(options: ListServersOptions = {}): Promise<RegistryListResponse> {
     const { enabled: _enabled, ...listOptions } = options;
-    const origins = (options.origin ? String(options.origin).split(",") : ["mcp", "onchain"])
-        .map((origin) => normalizeConnectorBinding({ registryId: "placeholder", origin }).origin);
+    const origins = options.origin ? String(options.origin).split(",") : ["mcp", "onchain"];
     const requestedLimit = listOptions.limit;
     const offset = listOptions.offset ?? 0;
     const toolsLimit = Math.min(Math.max(1, requestedLimit ?? DEFAULT_REGISTRY_PAGE_SIZE), MAX_TOOLS_PAGE_SIZE);
@@ -282,6 +283,8 @@ async function fetchServers(options: ListServersOptions = {}): Promise<RegistryL
         total += r.total;
     }
 
+    merged = merged.filter((s) => origins.includes(s.origin));
+
     if (listOptions.category) {
         merged = merged.filter((s) => s.category === listOptions.category);
     }
@@ -301,8 +304,7 @@ async function searchServers(query: string, limit = DEFAULT_REGISTRY_PAGE_SIZE, 
         return { query: normalizedQuery, total: 0, servers: [] };
     }
     const { enabled: _enabled, ...searchOptions } = options;
-    const origins = (searchOptions.origin ? String(searchOptions.origin).split(",") : ["mcp", "onchain"])
-        .map((origin) => normalizeConnectorBinding({ registryId: "placeholder", origin }).origin);
+    const origins = searchOptions.origin ? String(searchOptions.origin).split(",") : ["mcp", "onchain"];
     const boundedLimit = Math.min(Math.max(1, limit), MAX_SEARCH_RESULTS);
     const params = new URLSearchParams({ q: query });
     params.set("limit", String(boundedLimit));
@@ -336,13 +338,16 @@ async function searchServers(query: string, limit = DEFAULT_REGISTRY_PAGE_SIZE, 
         ...toolsData.servers.map(summaryToRegistryServer),
         ...onchainServers,
     ];
+
+    servers = servers.filter((s) => origins.includes(s.origin));
+
     if (searchOptions.category) {
         servers = servers.filter((server) => server.category === searchOptions.category);
     }
     servers = servers.slice(0, boundedLimit);
     return {
         query: toolsData.query || normalizedQuery,
-        total: toolsData.total + onchainServers.length,
+        total: servers.length,
         servers,
     };
 }
@@ -526,7 +531,6 @@ export function mergeRegistrySearchResults(
 export const ORIGIN_COLORS: Record<ServerOrigin, string> = {
     mcp: "purple",
     onchain: "green",
-    eliza: "orange",
 };
 
 export function getOriginBadgeVariant(origin: ServerOrigin): "default" | "secondary" | "outline" {
@@ -544,8 +548,6 @@ export function getOriginLabel(origin: ServerOrigin): string {
             return "MCP";
         case "onchain":
             return "Onchain";
-        case "eliza":
-            return "Eliza";
         default:
             return origin;
     }
@@ -555,8 +557,6 @@ export function getOriginIcon(origin: ServerOrigin): "server" | "coins" {
     switch (origin) {
         case "onchain":
             return "coins";
-        case "eliza":
-            return "server";
         default:
             return "server";
     }
