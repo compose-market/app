@@ -20,7 +20,7 @@ import type { Agent } from "@/lib/agents";
 import type { TriggerDefinition } from "@/lib/triggers";
 
 interface FloatingToolboxProps {
-    onClose: () => void;
+    onClose?: () => void;
     onAddStep: (connectorId: string, tool: ConnectorTool) => void;
     onAddAgentStep: (agent: Agent) => void;
     onAddTrigger?: (trigger: Partial<TriggerDefinition>) => void;
@@ -44,14 +44,13 @@ export function FloatingToolbox({
     isRunning,
     nodeCount,
 }: FloatingToolboxProps) {
-    // Initialize position accounting for sidebar on desktop (sidebar is 256px = 16rem when expanded, 64px when collapsed)
-    // On mobile, start near top-left with padding
+    // Initialize position on left of canvas since static sidebar is removed
     const getInitialPosition = () => {
-        if (typeof window === 'undefined') return { x: 280, y: 80 };
+        if (typeof window === 'undefined') return { x: 20, y: 20 };
         const isMobile = window.innerWidth < 768;
         return isMobile
             ? { x: 16, y: 70 } // Mobile: padding from edges
-            : { x: 280, y: 100 }; // Desktop: past sidebar width + padding
+            : { x: 20, y: 20 }; // Desktop: left side of canvas
     };
 
     const [position, setPosition] = useState(getInitialPosition);
@@ -176,15 +175,17 @@ export function FloatingToolbox({
                     >
                         {isMinimized ? <ChevronRight className="w-3.5 h-3.5 rotate-90" /> : <ChevronRight className="w-3.5 h-3.5 -rotate-90" />}
                     </Button>
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={onClose}
-                        className="h-6 w-6 text-muted-foreground hover:text-cyan-400"
-                        title="Exit fullscreen (ESC)"
-                    >
-                        <Minimize2 className="w-3.5 h-3.5" />
-                    </Button>
+                    {onClose && (
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={onClose}
+                            className="h-6 w-6 text-muted-foreground hover:text-cyan-400"
+                            title="Exit fullscreen (ESC)"
+                        >
+                            <Minimize2 className="w-3.5 h-3.5" />
+                        </Button>
+                    )}
                 </div>
             </div>
 

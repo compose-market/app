@@ -29,10 +29,13 @@ export function ConnectorPicker({ onSelect }: ConnectorPickerProps) {
     const [detailOpen, setDetailOpen] = useState(false);
 
     const searchReady = searchQuery.trim().length >= 2;
-    const { data: searchData, isLoading: isSearching } = useRegistrySearch(searchQuery, 50);
+    const { data: searchData, isLoading: isSearching } = useRegistrySearch(searchQuery, 50, {
+        origin: "onchain,mcp",
+    });
 
     const { data: allData, isLoading: isLoadingAll } = useRegistryServers({
         type: "plugin",
+        origin: "onchain,mcp",
     });
 
     const allServers = allData?.servers || [];
@@ -54,7 +57,6 @@ export function ConnectorPicker({ onSelect }: ConnectorPickerProps) {
         switch (origin) {
             case "mcp": return <Badge variant="secondary" className="text-[8px] h-4 px-1">Tools</Badge>;
             case "onchain": return <Badge variant="outline" className="text-[8px] h-4 px-1 border-green-500/50 text-green-400">Onchain</Badge>;
-            case "eliza": return <Badge variant="outline" className="text-[8px] h-4 px-1 border-fuchsia-500/50 text-fuchsia-400">Eliza</Badge>;
             default: return null;
         }
     };

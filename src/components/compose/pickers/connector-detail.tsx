@@ -81,7 +81,6 @@ export function ConnectorDetailDialog({
     const getOriginStyle = () => {
         switch (server.origin) {
             case "onchain": return { bg: "bg-green-500/10", border: "border-green-500/30", text: "text-green-400" };
-            case "eliza": return { bg: "bg-fuchsia-500/10", border: "border-fuchsia-500/30", text: "text-fuchsia-400" };
             default: return { bg: "bg-purple-500/10", border: "border-purple-500/30", text: "text-purple-400" };
         }
     };
@@ -169,8 +168,6 @@ export function ConnectorDetailDialog({
                         <div className={`w-10 h-10 rounded-sm flex items-center justify-center border ${style.bg} ${style.border}`}>
                             {server.origin === "onchain" ? (
                                 <Zap className={`w-5 h-5 ${style.text}`} />
-                            ) : server.origin === "eliza" ? (
-                                <Plug className={`w-5 h-5 ${style.text}`} />
                             ) : (
                                 <Server className={`w-5 h-5 ${style.text}`} />
                             )}
@@ -191,8 +188,7 @@ export function ConnectorDetailDialog({
                     {/* Badges */}
                     <div className="flex flex-wrap gap-2">
                         <Badge className={`${style.bg} ${style.text}`}>
-                            {server.origin === "onchain" ? "Onchain" :
-                                server.origin === "eliza" ? "ElizaOS" : "Tools"}
+                            {server.origin === "onchain" ? "Onchain" : "Tools"}
                         </Badge>
                         {server.category && (
                             <Badge variant="outline">{server.category}</Badge>
