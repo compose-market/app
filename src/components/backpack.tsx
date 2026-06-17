@@ -907,98 +907,98 @@ export function BackpackDialog({
         return (
             <Fragment key={provider.slug}>
                 <div className={`cm-setting-row ${isDisabled ? "opacity-60" : ""}`}>
-                    <div className="flex items-center gap-3">
-                        <div
-                            className="cm-setting-row__icon overflow-hidden"
-                            style={{ backgroundColor: `${provider.color}15` }}
-                        >
-                            <img
-                                src={provider.logo}
-                                alt={provider.name}
-                                className="w-6 h-6 object-contain"
-                                onError={(e) => {
-                                    (e.target as HTMLImageElement).style.display = 'none';
-                                }}
-                            />
+                    <div
+                        className="cm-setting-row__icon overflow-hidden"
+                        style={{ backgroundColor: `${provider.color}15` }}
+                    >
+                        <img
+                            src={provider.logo}
+                            alt={provider.name}
+                            className="w-6 h-6 object-contain"
+                            onError={(e) => {
+                                (e.target as HTMLImageElement).style.display = 'none';
+                            }}
+                        />
+                    </div>
+                    <div className="cm-setting-row__copy">
+                        <div className="cm-setting-row__label truncate flex items-center gap-1.5">
+                            {provider.name}
+                            {provider.badge && (
+                                <Badge variant="outline" className="text-[10px] px-1 py-0 border-primary/20 text-muted-foreground font-normal">
+                                    {provider.badge}
+                                </Badge>
+                            )}
+                            {isConnected && (
+                                <Check className="w-3.5 h-3.5 text-green-400 sm:hidden shrink-0" />
+                            )}
                         </div>
-                        <div className="cm-setting-row__copy">
-                            <div className="cm-setting-row__label truncate flex items-center gap-1.5">
-                                {provider.name}
-                                {provider.badge && (
-                                    <Badge variant="outline" className="text-[10px] px-1 py-0 border-primary/20 text-muted-foreground font-normal">
-                                        {provider.badge}
-                                    </Badge>
-                                )}
-                            </div>
-                            <div className="cm-setting-row__description truncate">
-                                {isConnected ? (
-                                    <span className="flex items-center gap-1 text-green-400">
-                                        <Check className="w-3 h-3" /> Connected
-                                    </span>
-                                ) : (
-                                    provider.description
-                                )}
-                            </div>
+                        <div className="cm-setting-row__description truncate hidden sm:block">
+                            {isConnected ? (
+                                <span className="flex items-center gap-1 text-green-400">
+                                    <Check className="w-3 h-3" /> Connected
+                                </span>
+                            ) : (
+                                provider.description
+                            )}
                         </div>
                     </div>
 
-                    {isDisabled ? (
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            disabled
-                            className="shrink-0 ml-2 opacity-50"
-                        >
-                            <MessageCircle className="w-3 h-3 mr-1" />
-                            Soon
-                        </Button>
-                    ) : (
-                        <Button
-                            variant={isConnected ? "destructive" : "outline"}
-                            size="sm"
-                            disabled={isLoading}
-                            className="shrink-0 ml-2"
-                            onClick={() => {
-                                if (isConnected) {
-                                    disconnectAccount(provider);
-                                } else if (isChannel && provider.slug === "telegram") {
-                                    connectTelegram();
-                                } else if (isChannel && provider.slug === "whatsapp") {
-                                    connectWhatsApp();
-                                } else {
-                                    connectAccount(provider);
-                                }
-                            }}
-                        >
-                            {isLoading ? (
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : isConnected ? (
-                                <>
-                                    <Unplug className="w-3 h-3 mr-1" />
-                                    Disconnect
-                                </>
-                            ) : isChannel && provider.slug === "whatsapp" ? (
-                                <>
-                                    <QrCode className="w-3 h-3 mr-1" />
-                                    Scan QR
-                                </>
-                            ) : isChannel ? (
-                                <>
-                                    <Send className="w-3 h-3 mr-1" />
-                                    Link Bot
-                                </>
-                            ) : (
-                                <>
-                                    <ExternalLink className="w-3 h-3 mr-1" />
-                                    Connect
-                                </>
-                            )}
-                        </Button>
-                    )}
+                    <div className="cm-setting-row__control">
+                        {isDisabled ? (
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                disabled
+                                className="shrink-0 h-8 w-8 sm:w-auto p-0 sm:px-2.5 flex items-center justify-center"
+                            >
+                                <MessageCircle className="w-4 h-4" />
+                                <span className="hidden sm:inline ml-1 text-xs">Soon</span>
+                            </Button>
+                        ) : (
+                            <Button
+                                variant={isConnected ? "destructive" : "outline"}
+                                size="sm"
+                                disabled={isLoading}
+                                className="shrink-0 h-8 w-8 sm:w-auto p-0 sm:px-2.5 flex items-center justify-center"
+                                onClick={() => {
+                                    if (isConnected) {
+                                        disconnectAccount(provider);
+                                    } else if (isChannel && provider.slug === "telegram") {
+                                        connectTelegram();
+                                    } else if (isChannel && provider.slug === "whatsapp") {
+                                        connectWhatsApp();
+                                    } else {
+                                        connectAccount(provider);
+                                    }
+                                }}
+                            >
+                                {isLoading ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : isConnected ? (
+                                    <>
+                                        <Unplug className="w-4 h-4" />
+                                        <span className="hidden sm:inline ml-1 text-xs">Disconnect</span>
+                                    </>
+                                ) : isChannel && provider.slug === "whatsapp" ? (
+                                    <>
+                                        <QrCode className="w-4 h-4" />
+                                        <span className="hidden sm:inline ml-1 text-xs">Scan QR</span>
+                                    </>
+                                ) : isChannel ? (
+                                    <>
+                                        <Send className="w-4 h-4" />
+                                        <span className="hidden sm:inline ml-1 text-xs">Link Bot</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <ExternalLink className="w-4 h-4" />
+                                        <span className="hidden sm:inline ml-1 text-xs">Connect</span>
+                                    </>
+                                )}
+                            </Button>
+                        )}
+                    </div>
                 </div>
-
-                {/* WhatsApp QR Code inline display */}
-                {/* Removed inline QR display */}
             </Fragment>
         );
     };
@@ -1014,8 +1014,8 @@ export function BackpackDialog({
                 </DialogTrigger>
             )}
 
-            <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-hidden flex flex-col">
-                <DialogHeader>
+            <DialogContent className="sm:max-w-lg max-h-[85dvh] flex flex-col overflow-hidden">
+                <DialogHeader className="flex-shrink-0">
                     <DialogTitle className="flex items-center gap-2">
                         <Backpack className="w-5 h-5 text-fuchsia-400" />
                         Your Backpack
@@ -1027,7 +1027,7 @@ export function BackpackDialog({
 
                 {/* ========== WhatsApp Dedicated Connection Screen ========== */}
                 {whatsappScreen ? (
-                    <div className="flex-1 flex flex-col gap-4 py-2">
+                    <div className="flex-1 flex flex-col gap-4 py-2 min-h-0 overflow-y-auto">
                         <Button
                             variant="ghost"
                             size="sm"
@@ -1160,8 +1160,8 @@ export function BackpackDialog({
                 ) : (
                     <>
 
-                        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
-                            <TabsList className="grid w-full grid-cols-2">
+                        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+                            <TabsList className="grid w-full grid-cols-2 flex-shrink-0">
                                 <TabsTrigger value="permissions" className="gap-2">
                                     <Shield className="w-4 h-4" />
                                     Permissions
@@ -1183,41 +1183,41 @@ export function BackpackDialog({
                             </TabsList>
 
                             {/* Permissions Tab */}
-                            <TabsContent value="permissions" className="flex-1 overflow-y-auto mt-4 space-y-3">
+                            <TabsContent value="permissions" className="mt-4 space-y-3 flex-1 overflow-y-auto pr-1">
                                 {PERMISSION_TYPES.map(perm => (
                                     <div key={perm.type} className="cm-setting-row">
-                                        <div className="flex items-center gap-3">
-                                            <div className="cm-setting-row__icon">
-                                                {perm.icon}
-                                            </div>
-                                            <div className="cm-setting-row__copy">
-                                                <div className="cm-setting-row__label">{perm.label}</div>
-                                                <div className="cm-setting-row__description">{perm.description}</div>
-                                            </div>
+                                        <div className="cm-setting-row__icon">
+                                            {perm.icon}
+                                        </div>
+                                        <div className="cm-setting-row__copy">
+                                            <div className="cm-setting-row__label">{perm.label}</div>
+                                            <div className="cm-setting-row__description hidden sm:block">{perm.description}</div>
                                         </div>
 
-                                        {loadingPermission === perm.type ? (
-                                            <Loader2 className="w-4 h-4 animate-spin text-fuchsia-400" />
-                                        ) : (
-                                            <Switch
-                                                checked={permissions[perm.type]}
-                                                onCheckedChange={(checked) => {
-                                                    if (checked) {
-                                                        requestPermission(perm.type);
-                                                    } else {
-                                                        revokePermission(perm.type);
-                                                    }
-                                                }}
-                                            />
-                                        )}
+                                        <div className="cm-setting-row__control">
+                                            {loadingPermission === perm.type ? (
+                                                <Loader2 className="w-4 h-4 animate-spin text-fuchsia-400" />
+                                            ) : (
+                                                <Switch
+                                                    checked={permissions[perm.type]}
+                                                    onCheckedChange={(checked) => {
+                                                        if (checked) {
+                                                            requestPermission(perm.type);
+                                                        } else {
+                                                            revokePermission(perm.type);
+                                                        }
+                                                    }}
+                                                />
+                                            )}
+                                        </div>
                                     </div>
                                 ))}
                             </TabsContent>
 
                             {/* Connected Accounts Tab */}
-                            <TabsContent value="accounts" className="flex-1 overflow-y-auto mt-4 space-y-3">
+                            <TabsContent value="accounts" className="mt-4 flex flex-col flex-1 min-h-0 overflow-hidden">
                                 {/* Search + Refresh row */}
-                                <div className="flex items-center gap-2 mb-2">
+                                <div className="flex items-center gap-2 mb-2 flex-shrink-0">
                                     <div className="relative flex-1">
                                         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
                                         <input
@@ -1248,44 +1248,47 @@ export function BackpackDialog({
                                     </Button>
                                 </div>
 
-                                {/* Search results */}
-                                {searchQuery.trim() && (
-                                    <div className="space-y-2">
-                                        {searching && (
-                                            <div className="flex items-center justify-center py-4 text-muted-foreground text-sm">
-                                                <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                                                Searching...
-                                            </div>
-                                        )}
-                                        {!searching && filteredSearchResults.length === 0 && searchResults.length === 0 && (
-                                            <div className="text-center py-4 text-muted-foreground text-sm">
-                                                No integrations found for "{searchQuery}"
-                                            </div>
-                                        )}
-                                        {filteredSearchResults.map(tk =>
-                                            renderProviderCard(toolkitToProvider(tk))
-                                        )}
-                                        {filteredSearchResults.length > 0 && (
-                                            <div className="border-t border-primary/15 my-3" />
-                                        )}
-                                    </div>
-                                )}
+                                {/* Scrollable search and popular integrations area */}
+                                <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-3">
+                                    {/* Search results */}
+                                    {searchQuery.trim() && (
+                                        <div className="space-y-2">
+                                            {searching && (
+                                                <div className="flex items-center justify-center py-4 text-muted-foreground text-sm">
+                                                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                                                    Searching...
+                                                </div>
+                                            )}
+                                            {!searching && filteredSearchResults.length === 0 && searchResults.length === 0 && (
+                                                <div className="text-center py-4 text-muted-foreground text-sm">
+                                                    No integrations found for "{searchQuery}"
+                                                </div>
+                                            )}
+                                            {filteredSearchResults.map(tk =>
+                                                renderProviderCard(toolkitToProvider(tk))
+                                            )}
+                                            {filteredSearchResults.length > 0 && (
+                                                <div className="border-t border-primary/15 my-3" />
+                                            )}
+                                        </div>
+                                    )}
 
-                                {/* Featured Providers */}
-                                {(!searchQuery.trim() || filteredSearchResults.length > 0 || searchResults.some(sr => featuredSlugs.has(sr.slug))) && (
-                                    <>
-                                        {searchQuery.trim() && (
-                                            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
-                                                Popular
-                                            </div>
-                                        )}
-                                        {FEATURED_PROVIDERS.map(provider =>
-                                            renderProviderCard(provider)
-                                        )}
-                                    </>
-                                )}
+                                    {/* Featured Providers */}
+                                    {(!searchQuery.trim() || filteredSearchResults.length > 0 || searchResults.some(sr => featuredSlugs.has(sr.slug))) && (
+                                        <>
+                                            {searchQuery.trim() && (
+                                                <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+                                                    Popular
+                                                </div>
+                                            )}
+                                            {FEATURED_PROVIDERS.map(provider =>
+                                                renderProviderCard(provider)
+                                            )}
+                                        </>
+                                    )}
+                                </div>
 
-                                <p className="text-xs text-muted-foreground text-center pt-4">
+                                <p className="text-xs text-muted-foreground text-center pt-4 flex-shrink-0">
                                     Compose Market never sees or stores your tokens.
                                 </p>
                             </TabsContent>

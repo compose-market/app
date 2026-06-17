@@ -7,6 +7,7 @@ import { useForm, type SubmitHandler } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useLocation } from "wouter";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   Form,
@@ -48,6 +49,7 @@ import {
   ArrowLeft,
   RefreshCw,
   Check,
+  ChevronDown,
 } from "lucide-react";
 import {
   Tooltip,
@@ -136,6 +138,9 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
   // Confirmation dialog state
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [pendingValues, setPendingValues] = useState<WarpFormValues | null>(null);
+
+  // Collapsible section state (accordion: only one can be open at a time)
+  const [activeSection, setActiveSection] = useState<"original" | "identity" | "pricing" | null>("identity");
 
   const registryInfo = AGENT_REGISTRIES[agent.registry];
   const initials = agent.name
@@ -452,521 +457,532 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
     <div className="cm-web-page">
       <div className="cm-web-page__canvas cm-workspace-canvas--fade">
         <div className="cm-web-page__body cm-web-page__body--narrow">
-      {/* Page Header */}
-      <div className="mb-8 space-y-2 border-b border-sidebar-border pb-6">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onBack}
-          className="text-muted-foreground hover:text-fuchsia-400 -ml-2 mb-2"
-        >
-          <ArrowLeft className="w-4 h-4 mr-2" />
-          Back to Choice
-        </Button>
-        <div className="flex items-center gap-4">
-          <h1 className="text-2xl font-display font-bold text-white">
-            <span className="text-fuchsia-500 mr-2">//</span>
-            WARP AGENT
-          </h1>
-          <div className="hidden md:flex h-px w-32 bg-gradient-to-r from-fuchsia-500 to-transparent"></div>
-        </div>
-        <p className="text-muted-foreground font-mono text-sm">
-          Port an external agent into the Manowar ecosystem with on-chain identity.
-        </p>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-        <div className="md:col-span-2">
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-              {/* Original Agent Info */}
-              <Card className="glass-panel border-fuchsia-500/20">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg font-bold font-display text-fuchsia-400">
-                    <Globe className="w-5 h-5" />
-                    ORIGINAL AGENT
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-start gap-4 p-4 rounded-sm bg-background/50 border border-sidebar-border">
-                    <Avatar className="w-12 h-12 border-2 border-fuchsia-500/30">
-                      <AvatarImage src={agent.avatarUrl || undefined} alt={agent.name} />
-                      <AvatarFallback className="bg-fuchsia-500/10 text-fuchsia-400 font-mono text-sm">
-                        {initials}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-display font-bold text-foreground">{agent.name}</h3>
-                      <p className="text-xs font-mono text-muted-foreground truncate">
-                        {agent.address}
-                      </p>
-                      <div className="flex items-center gap-2 mt-2">
-                        <Badge
-                          variant="outline"
-                          className="text-[10px] font-mono border-fuchsia-500/30 text-fuchsia-400 bg-fuchsia-500/10"
-                        >
-                          {registryInfo?.name || agent.registry}
-                        </Badge>
-                        {agent.category && (
-                          <Badge
-                            variant="outline"
-                            className="text-[10px] font-mono border-sidebar-border"
-                          >
-                            {agent.category}
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-                    {agent.avatarUrl && (
-                      <a
-                        href={`https://agentverse.ai/agents/details/${agent.address}/profile`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-muted-foreground hover:text-fuchsia-400"
-                      >
-                        <ExternalLink className="w-4 h-4" />
-                      </a>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Warped Identity */}
-              <Card className="glass-panel border-cyan-500/20">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg font-bold font-display text-cyan-400">
-                    <ArrowRightLeft className="w-5 h-5" />
-                    WARPED IDENTITY
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <FormField
-                    control={form.control}
-                    name="name"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel className="font-mono text-foreground">Display Name</FormLabel>
-                        <FormControl>
-                          <Input
-                            placeholder="e.g. Alpha Sniper V1"
-                            {...field}
-                            className="bg-background/50 font-mono border-sidebar-border focus:border-cyan-500"
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={form.control}
-                    name="description"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel className="font-mono text-foreground">Description</FormLabel>
-                        <FormControl>
-                          <Textarea
-                            placeholder="Describe what this agent does..."
-                            className="resize-none bg-background/50 min-h-[100px] border-sidebar-border focus:border-cyan-500"
-                            {...field}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </CardContent>
-              </Card>
-
-              {/* Pricing & Royalties */}
-              <Card className="glass-panel border-green-500/20">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg font-bold font-display text-green-400">
-                    <DollarSign className="w-5 h-5" />
-                    PRICING & ROYALTIES
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <FormField
-                      control={form.control}
-                      name="licensePrice"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel className="font-mono text-foreground">
-                            License Price (USDC)
-                          </FormLabel>
-                          <FormControl>
-                            <Input
-                              type="number"
-                              step="0.001"
-                              {...field}
-                              className="bg-background/50 font-mono border-sidebar-border focus:border-green-500"
-                            />
-                          </FormControl>
-                          <FormDescription className="text-muted-foreground text-xs">
-                            x402 payment per license
-                          </FormDescription>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="licenses"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel className="font-mono text-foreground">License Supply Cap</FormLabel>
-                          <FormControl>
-                            <Input
-                              type="number"
-                              placeholder="∞ (leave empty)"
-                              {...field}
-                              className="bg-background/50 font-mono border-sidebar-border focus:border-green-500"
-                            />
-                          </FormControl>
-                          <FormDescription className="text-muted-foreground text-xs">
-                            Max licenses (empty = infinite)
-                          </FormDescription>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  </div>
-
-                  <FormField
-                    control={form.control}
-                    name="originalCreator"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel className="font-mono text-foreground flex items-center gap-2">
-                          <User className="w-4 h-4" />
-                          Original Creator Address
-                          <span className="text-muted-foreground text-xs">(optional)</span>
-                        </FormLabel>
-                        <FormControl>
-                          <Input
-                            placeholder="0x..."
-                            {...field}
-                            className="bg-background/50 font-mono border-sidebar-border focus:border-green-500"
-                          />
-                        </FormControl>
-                        <FormDescription className="text-muted-foreground text-xs">
-                          If known, original creator receives 10% royalties. Leave empty if unknown
-                          (treasury holds for up to 1 year).
-                        </FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  {/* Royalty Split Info */}
-                  <div className="p-3 rounded-sm bg-green-500/10 border border-green-500/20 text-xs font-mono">
-                    <p className="text-green-400 font-bold mb-2">Royalty Distribution:</p>
-                    <div className="space-y-1 text-muted-foreground">
-                      <p>• Original Creator: 10%</p>
-                      <p>• Treasury: 10%</p>
-                      <p>• You (Warper): 80%</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Mint Progress */}
-              {mintStep === "uploading" && (
-                <Card className="glass-panel border-cyan-500/50">
-                  <CardContent className="py-4">
-                    <div className="flex items-center gap-3">
-                      <Loader2 className="w-5 h-5 text-cyan-400 animate-spin" />
-                      <div>
-                        <p className="font-mono text-sm text-foreground">Uploading to IPFS...</p>
-                        <p className="text-xs text-muted-foreground">
-                          Storing agent card metadata
-                        </p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Submit Button */}
-              <Button
-                type="submit"
-                size="lg"
-                disabled={!account || isProcessing}
-                className="w-full bg-gradient-to-r from-fuchsia-500 to-cyan-500 text-white font-bold font-mono hover:from-fuchsia-400 hover:to-cyan-400 h-14 text-lg shadow-[0_0_20px_-5px_hsl(var(--primary))] tracking-wider disabled:opacity-50"
-              >
-                {mintStep === "uploading" ? (
-                  <>
-                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                    UPLOADING...
-                  </>
-                ) : mintStep === "minting" ? (
-                  <>
-                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                    WARPING...
-                  </>
-                ) : !account ? (
-                  "SIGN IN TO WARP"
-                ) : (
-                  <>
-                    <ArrowRightLeft className="w-5 h-5 mr-2" />
-                    WARP INTO MANOWAR
-                  </>
-                )}
-              </Button>
-            </form>
-          </Form>
-        </div>
-
-        {/* Sidebar Info */}
-        <div className="space-y-6">
-          {/* Avatar Upload */}
-          <div className="glass-panel p-6 rounded-sm space-y-4 border border-cyan-500/20 corner-decoration">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              onChange={handleAvatarSelect}
-              className="hidden"
-            />
-            {/* Avatar canvas with generate button overlay */}
-            <div className="relative w-full aspect-square">
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="w-full h-full rounded-sm bg-background/50 border border-sidebar-border border-dashed flex flex-col items-center justify-center text-muted-foreground cursor-pointer hover:border-cyan-500 hover:text-cyan-400 transition-colors overflow-hidden"
-              >
-                {isGeneratingAvatar ? (
-                  <div className="flex flex-col items-center gap-2">
-                    <Loader2 className="w-8 h-8 animate-spin text-cyan-400" />
-                    <span className="text-xs font-mono text-cyan-400">GENERATING...</span>
-                  </div>
-                ) : avatarPreview ? (
-                  <img
-                    src={avatarPreview}
-                    alt="Avatar preview"
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <>
-                    <Upload className="w-8 h-8 mb-2" />
-                    <span className="text-xs font-mono">UPLOAD AVATAR</span>
-                    <span className="text-[10px] font-mono text-muted-foreground/70 mt-1">
-                      (or use original)
-                    </span>
-                  </>
-                )}
-              </button>
-
-              {/* Generate button overlay (bottom-right corner) */}
-              {!isGeneratingAvatar && (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleGenerateAvatar();
-                        }}
-                        disabled={generationCount >= MAX_GENERATIONS}
-                        className={`absolute bottom-2 right-2 w-10 h-10 rounded-full flex items-center justify-center transition-all ${generationCount >= MAX_GENERATIONS
-                          ? "bg-muted/50 text-muted-foreground cursor-not-allowed"
-                          : "bg-fuchsia-500/80 hover:bg-fuchsia-500 text-white shadow-lg hover:shadow-fuchsia-500/30"
-                          }`}
-                      >
-                        <Sparkles className="w-5 h-5" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {generationCount >= MAX_GENERATIONS
-                        ? `Limit reached (${MAX_GENERATIONS}/${MAX_GENERATIONS})`
-                        : `Generate Avatar (${generationCount}/${MAX_GENERATIONS})`}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              )}
+          {/* Page Header */}
+          <div className="mb-8 space-y-2 border-b border-sidebar-border pb-6">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onBack}
+              className="text-muted-foreground hover:text-fuchsia-400 -ml-2 mb-2"
+            >
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back to Choice
+            </Button>
+            <div className="flex items-center gap-4">
+              <h1 className="text-2xl font-display font-bold text-white">
+                <span className="text-fuchsia-500 mr-2">//</span>
+                WARP AGENT
+              </h1>
+              <div className="hidden md:flex h-px w-32 bg-gradient-to-r from-fuchsia-500 to-transparent"></div>
             </div>
-
-            {/* Accept/Regenerate controls for generated avatars */}
-            {generatedAvatarUrl && !isGeneratingAvatar && (
-              <div className="flex gap-2 justify-center">
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={handleAcceptAvatar}
-                        className="border-green-500/50 text-green-400 hover:bg-green-500/10 hover:text-green-300"
-                      >
-                        <Check className="w-4 h-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Accept Avatar</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={handleRegenerateAvatar}
-                        disabled={generationCount >= MAX_GENERATIONS}
-                        className={`${generationCount >= MAX_GENERATIONS
-                          ? "border-muted text-muted-foreground cursor-not-allowed"
-                          : "border-cyan-500/50 text-cyan-400 hover:bg-cyan-500/10 hover:text-cyan-300"
-                          }`}
-                      >
-                        <RefreshCw className="w-4 h-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {generationCount >= MAX_GENERATIONS
-                        ? `Limit reached (${MAX_GENERATIONS}/${MAX_GENERATIONS})`
-                        : `Regenerate (${generationCount}/${MAX_GENERATIONS})`}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </div>
-            )}
-
-            {/* Remove/Reset avatar button */}
-            {avatarPreview && avatarFile && !generatedAvatarUrl && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setAvatarFile(null);
-                  setAvatarPreview(agent.avatarUrl || null);
-                  setGeneratedAvatarUrl(null);
-                }}
-                className="w-full text-xs text-muted-foreground"
-              >
-                Use original avatar
-              </Button>
-            )}
-            <div className="space-y-2">
-              <h3 className="font-bold font-display text-white">Warp Info</h3>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground font-mono">Network</span>
-                <span className="font-mono text-cyan-400">{CHAIN_CONFIG[paymentChainId]?.name}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground font-mono">Contract</span>
-                <span className="font-mono text-cyan-400">Warp</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground font-mono">Storage</span>
-                <span className="font-mono text-cyan-400">Pinata IPFS</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Account Status */}
-          <div
-            className={`p-4 rounded-sm border text-sm ${account
-              ? "bg-green-500/10 border-green-500/20 text-green-200"
-              : "bg-yellow-500/10 border-yellow-500/20 text-yellow-200"
-              }`}
-          >
-            {account ? (
-              <>
-                <CheckCircle2 className="w-5 h-5 mb-2 text-green-400" />
-                <p>
-                  Signed in:{" "}
-                  <span className="font-mono">
-                    {account.address.slice(0, 6)}...{account.address.slice(-4)}
-                  </span>
-                </p>
-                <p className="text-xs text-green-300/70 mt-1">Gas sponsored • No fees</p>
-              </>
-            ) : (
-              <>
-                <AlertCircle className="w-5 h-5 mb-2 text-yellow-400" />
-                <p>Sign in with email, social, or wallet to warp.</p>
-              </>
-            )}
-          </div>
-
-          <div className="p-4 rounded-sm bg-fuchsia-500/10 border border-fuchsia-500/20 text-sm text-fuchsia-200">
-            <ArrowRightLeft className="w-5 h-5 mb-2 text-fuchsia-400" />
-            <p>
-              Warping brings external agents into the Manowar ecosystem with an on-chain ERC8004
-              identity. You'll earn 80% of all usage royalties, whereas 10% will go to the original creator.
+            <p className="text-muted-foreground font-mono text-sm">
+              Port an external agent into the Manowar ecosystem with on-chain identity.
             </p>
           </div>
-        </div>
-      </div>
 
-      {/* Confirmation Dialog */}
-      <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
-        <AlertDialogContent className="bg-background border-sidebar-border max-w-md">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="font-display text-xl">
-              <ArrowRightLeft className="w-5 h-5 inline mr-2 text-fuchsia-400" />
-              Confirm Warp
-            </AlertDialogTitle>
-            <AlertDialogDescription className="text-muted-foreground">
-              Review the warp details before submitting to the blockchain.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
+          <div className="max-w-3xl mx-auto">
+            <Form {...form}>
+              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+                {/* Original Agent Info */}
+                <Card className="glass-panel border-fuchsia-500/20">
+                  <CardHeader
+                    onClick={() => setActiveSection(activeSection === "original" ? null : "original")}
+                    className="cursor-pointer flex flex-row items-center justify-between select-none space-y-0"
+                  >
+                    <CardTitle className="flex items-center gap-2 text-lg font-bold font-display text-fuchsia-400">
+                      <Globe className="w-5 h-5" />
+                      ORIGINAL AGENT
+                    </CardTitle>
+                    <ChevronDown className={cn("w-4 h-4 text-muted-foreground transition-transform", activeSection === "original" && "rotate-180")} />
+                  </CardHeader>
+                  {activeSection === "original" && (
+                    <CardContent>
+                      <div className="flex items-start gap-4 p-4 rounded-sm bg-background/50 border border-sidebar-border">
+                        <Avatar className="w-12 h-12 border-2 border-fuchsia-500/30">
+                          <AvatarImage src={agent.avatarUrl || undefined} alt={agent.name} />
+                          <AvatarFallback className="bg-fuchsia-500/10 text-fuchsia-400 font-mono text-sm">
+                            {initials}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-display font-bold text-foreground">{agent.name}</h3>
+                          <p className="text-xs font-mono text-muted-foreground truncate">
+                            {agent.address}
+                          </p>
+                          <div className="flex items-center gap-2 mt-2">
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] font-mono border-fuchsia-500/30 text-fuchsia-400 bg-fuchsia-500/10"
+                            >
+                              {registryInfo?.name || agent.registry}
+                            </Badge>
+                            {agent.category && (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] font-mono border-sidebar-border"
+                              >
+                                {agent.category}
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                        {agent.avatarUrl && (
+                          <a
+                            href={`https://agentverse.ai/agents/details/${agent.address}/profile`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-muted-foreground hover:text-fuchsia-400"
+                          >
+                            <ExternalLink className="w-4 h-4" />
+                          </a>
+                        )}
+                      </div>
+                    </CardContent>
+                  )}
+                </Card>
 
-          {pendingValues && (
-            <div className="space-y-3 py-4 border-y border-sidebar-border">
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Original Agent</span>
-                <span className="font-mono text-fuchsia-400">{agent.name}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Registry</span>
-                <span className="font-mono text-foreground">
-                  {registryInfo?.name || agent.registry}
-                </span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Warped Name</span>
-                <span className="font-mono text-cyan-400">{pendingValues.name}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">License Price</span>
-                <span className="font-mono text-green-400">${pendingValues.licensePrice} USDC</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">License Supply</span>
-                <span className="font-mono">{pendingValues.licenses || "∞ Unlimited"}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Your Royalty</span>
-                <span className="font-mono text-fuchsia-400">80%</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Network</span>
-                <span className="font-mono text-cyan-400">{CHAIN_CONFIG[paymentChainId]?.name}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Gas</span>
-                <span className="font-mono text-green-400">Sponsored (Free)</span>
-              </div>
-            </div>
-          )}
+                {/* Warped Identity */}
+                <Card className="glass-panel border-cyan-500/20">
+                  <CardHeader
+                    onClick={() => setActiveSection(activeSection === "identity" ? null : "identity")}
+                    className="cursor-pointer flex flex-row items-center justify-between select-none space-y-0"
+                  >
+                    <CardTitle className="flex items-center gap-2 text-lg font-bold font-display text-cyan-400">
+                      <ArrowRightLeft className="w-5 h-5" />
+                      WARPED IDENTITY
+                    </CardTitle>
+                    <ChevronDown className={cn("w-4 h-4 text-muted-foreground transition-transform", activeSection === "identity" && "rotate-180")} />
+                  </CardHeader>
+                  {activeSection === "identity" && (
+                    <CardContent>
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-start">
+                        {/* Avatar Upload block embedded inside identity card content */}
+                        <div className="md:col-span-1 flex flex-col items-center p-3 border border-primary/15 rounded-lg bg-background/20 relative z-20 space-y-3">
+                          <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept="image/*"
+                            onChange={handleAvatarSelect}
+                            className="hidden"
+                          />
+                          <div className="relative w-full aspect-square max-w-[140px] mx-auto">
+                            <button
+                              type="button"
+                              onClick={() => fileInputRef.current?.click()}
+                              className="w-full h-full rounded-sm bg-background/50 border border-sidebar-border border-dashed flex flex-col items-center justify-center text-muted-foreground cursor-pointer hover:border-cyan-500 hover:text-cyan-400 transition-colors overflow-hidden"
+                            >
+                              {isGeneratingAvatar ? (
+                                <div className="flex flex-col items-center gap-1">
+                                  <Loader2 className="w-6 h-6 animate-spin text-cyan-400" />
+                                  <span className="text-[10px] font-mono text-cyan-400">GENERATING...</span>
+                                </div>
+                              ) : avatarPreview ? (
+                                <img
+                                  src={avatarPreview}
+                                  alt="Avatar preview"
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                <>
+                                  <Upload className="w-5 h-5 mb-1" />
+                                  <span className="text-[10px] font-mono">UPLOAD AVATAR</span>
+                                  <span className="text-[9px] font-mono text-muted-foreground/70 mt-0.5">
+                                    (or use original)
+                                  </span>
+                                </>
+                              )}
+                            </button>
 
-          <AlertDialogFooter>
-            <AlertDialogCancel className="border-sidebar-border">Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleConfirmedWarp}
-              className="bg-gradient-to-r from-fuchsia-500 to-cyan-500 text-white hover:from-fuchsia-400 hover:to-cyan-400 font-bold"
-            >
-              <CheckCircle2 className="w-4 h-4 mr-2" />
-              Confirm & Warp
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+                            {!isGeneratingAvatar && (
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleGenerateAvatar();
+                                      }}
+                                      disabled={generationCount >= MAX_GENERATIONS}
+                                      className={`absolute bottom-1 right-1 w-8 h-8 rounded-full flex items-center justify-center transition-all ${generationCount >= MAX_GENERATIONS
+                                        ? "bg-muted/50 text-muted-foreground cursor-not-allowed"
+                                        : "bg-fuchsia-500/80 hover:bg-fuchsia-500 text-white shadow-lg"
+                                        }`}
+                                    >
+                                      <Sparkles className="w-3.5 h-3.5" />
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    {generationCount >= MAX_GENERATIONS
+                                      ? `Limit reached (${MAX_GENERATIONS}/${MAX_GENERATIONS})`
+                                      : `Generate Avatar (${generationCount}/${MAX_GENERATIONS})`}
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            )}
+                          </div>
+
+                          {generatedAvatarUrl && !isGeneratingAvatar && (
+                            <div className="flex gap-2 justify-center">
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={handleAcceptAvatar}
+                                      className="border-green-500/50 text-green-400 hover:bg-green-500/10 hover:text-green-300 h-7 w-7 p-0"
+                                    >
+                                      <Check className="w-3.5 h-3.5" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Accept Avatar</TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={handleRegenerateAvatar}
+                                      disabled={generationCount >= MAX_GENERATIONS}
+                                      className={`h-7 w-7 p-0 ${generationCount >= MAX_GENERATIONS
+                                        ? "border-muted text-muted-foreground cursor-not-allowed"
+                                        : "border-cyan-500/50 text-cyan-400 hover:bg-cyan-500/10 hover:text-cyan-300"
+                                        }`}
+                                    >
+                                      <RefreshCw className="w-3.5 h-3.5" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    {generationCount >= MAX_GENERATIONS
+                                      ? `Limit reached`
+                                      : `Regenerate`}
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            </div>
+                          )}
+
+                          {avatarPreview && avatarFile && !generatedAvatarUrl && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setAvatarFile(null);
+                                setAvatarPreview(agent.avatarUrl || null);
+                                setGeneratedAvatarUrl(null);
+                              }}
+                              className="w-full text-[10px] text-muted-foreground h-6 mt-1"
+                            >
+                              Use original
+                            </Button>
+                          )}
+                        </div>
+
+                        {/* Fields Column */}
+                        <div className="md:col-span-3 space-y-4">
+                          <FormField
+                            control={form.control}
+                            name="name"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel className="font-mono text-foreground">Display Name</FormLabel>
+                                <FormControl>
+                                  <Input
+                                    placeholder="e.g. Alpha Sniper V1"
+                                    {...field}
+                                    className="bg-background/50 font-mono border-sidebar-border focus:border-cyan-500"
+                                  />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                          <FormField
+                            control={form.control}
+                            name="description"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel className="font-mono text-foreground">Description</FormLabel>
+                                <FormControl>
+                                  <Textarea
+                                    placeholder="Describe what this agent does..."
+                                    className="resize-none bg-background/50 min-h-[100px] border-sidebar-border focus:border-cyan-500"
+                                    {...field}
+                                  />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+                      </div>
+                    </CardContent>
+                  )}
+                </Card>
+
+                {/* Pricing & Royalties */}
+                <Card className="glass-panel border-green-500/20">
+                  <CardHeader
+                    onClick={() => setActiveSection(activeSection === "pricing" ? null : "pricing")}
+                    className="cursor-pointer flex flex-row items-center justify-between select-none space-y-0"
+                  >
+                    <CardTitle className="flex items-center gap-2 text-lg font-bold font-display text-green-400">
+                      <DollarSign className="w-5 h-5" />
+                      PRICING & ROYALTIES
+                    </CardTitle>
+                    <ChevronDown className={cn("w-4 h-4 text-muted-foreground transition-transform", activeSection === "pricing" && "rotate-180")} />
+                  </CardHeader>
+                  {activeSection === "pricing" && (
+                    <CardContent className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <FormField
+                          control={form.control}
+                          name="licensePrice"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel className="font-mono text-foreground">
+                                License Price (USDC)
+                              </FormLabel>
+                              <FormControl>
+                                <Input
+                                  type="number"
+                                  step="0.001"
+                                  {...field}
+                                  className="bg-background/50 font-mono border-sidebar-border focus:border-green-500"
+                                />
+                              </FormControl>
+                              <FormDescription className="text-muted-foreground text-xs">
+                                x402 payment per license
+                              </FormDescription>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name="licenses"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel className="font-mono text-foreground">License Supply Cap</FormLabel>
+                              <FormControl>
+                                <Input
+                                  type="number"
+                                  placeholder="∞ (leave empty)"
+                                  {...field}
+                                  className="bg-background/50 font-mono border-sidebar-border focus:border-green-500"
+                                />
+                              </FormControl>
+                              <FormDescription className="text-muted-foreground text-xs">
+                                Max licenses (empty = infinite)
+                              </FormDescription>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+
+                      <FormField
+                        control={form.control}
+                        name="originalCreator"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel className="font-mono text-foreground flex items-center gap-2">
+                              <User className="w-4 h-4" />
+                              Original Creator Address
+                              <span className="text-muted-foreground text-xs">(optional)</span>
+                            </FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="0x..."
+                                {...field}
+                                className="bg-background/50 font-mono border-sidebar-border focus:border-green-500"
+                              />
+                            </FormControl>
+                            <FormDescription className="text-muted-foreground text-xs">
+                              If known, original creator receives 10% royalties. Leave empty if unknown
+                              (treasury holds for up to 1 year).
+                            </FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      {/* Royalty Split Info */}
+                      <div className="p-3 rounded-sm bg-green-500/10 border border-green-500/20 text-xs font-mono">
+                        <p className="text-green-400 font-bold mb-2">Royalty Distribution:</p>
+                        <div className="space-y-1 text-muted-foreground">
+                          <p>• Original Creator: 10%</p>
+                          <p>• Treasury: 10%</p>
+                          <p>• You (Warper): 80%</p>
+                        </div>
+                      </div>
+
+                      {/* Integrated target network metadata */}
+                      <div className="border-t border-sidebar-border pt-4 mt-4 space-y-2 text-xs font-mono">
+                        <h4 className="text-sm font-bold text-white mb-2">Warp Network Details</h4>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-muted-foreground font-mono">Network</span>
+                          <span className="font-mono text-cyan-400">{CHAIN_CONFIG[paymentChainId]?.name}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-muted-foreground font-mono">Contract</span>
+                          <span className="font-mono text-cyan-400">Warp</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-muted-foreground font-mono">Storage</span>
+                          <span className="font-mono text-cyan-400">Pinata IPFS</span>
+                        </div>
+                      </div>
+
+                      {/* Account Status */}
+                      <div
+                        className={`p-4 rounded-sm border text-sm ${account
+                          ? "bg-green-500/10 border-green-500/20 text-green-200"
+                          : "bg-yellow-500/10 border-yellow-500/20 text-yellow-200"
+                          }`}
+                      >
+                        {account ? (
+                          <div className="flex items-center gap-2">
+                            <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />
+                            <div className="text-xs text-green-200">
+                              Signed in:{" "}
+                              <span className="font-mono text-white">
+                                {account.address.slice(0, 6)}...{account.address.slice(-4)}
+                              </span>
+                              {" • "}
+                              <span className="text-green-300/70">Gas sponsored</span>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <AlertCircle className="w-4 h-4 text-yellow-400 shrink-0" />
+                            <p className="text-xs">Sign in with email, social, or wallet to warp.</p>
+                          </div>
+                        )}
+                      </div>
+                    </CardContent>
+                  )}
+                </Card>
+
+                {/* Mint Progress */}
+                {mintStep === "uploading" && (
+                  <Card className="glass-panel border-cyan-500/50">
+                    <CardContent className="py-4">
+                      <div className="flex items-center gap-3">
+                        <Loader2 className="w-5 h-5 text-cyan-400 animate-spin" />
+                        <div>
+                          <p className="font-mono text-sm text-foreground">Uploading to IPFS...</p>
+                          <p className="text-xs text-muted-foreground">
+                            Storing agent card metadata
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Submit Button Centered */}
+                <div className="flex justify-center pt-4">
+                  <Button
+                    type="submit"
+                    size="lg"
+                    disabled={!account || isProcessing}
+                    className="w-full max-w-md bg-gradient-to-r from-fuchsia-500 to-cyan-500 text-white font-bold font-mono hover:from-fuchsia-400 hover:to-cyan-400 h-12 text-base shadow-[0_0_20px_-5px_hsl(var(--primary))] tracking-wider disabled:opacity-50"
+                  >
+                    {mintStep === "uploading" ? (
+                      <>
+                        <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                        UPLOADING...
+                      </>
+                    ) : mintStep === "minting" ? (
+                      <>
+                        <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                        WARPING...
+                      </>
+                    ) : !account ? (
+                      "SIGN IN TO WARP"
+                    ) : (
+                      <>
+                        <ArrowRightLeft className="w-5 h-5 mr-2" />
+                        WARP INTO MANOWAR
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </form>
+            </Form>
+          </div>
+
+          {/* Confirmation Dialog */}
+          <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
+            <AlertDialogContent className="bg-background border-sidebar-border max-w-md">
+              <AlertDialogHeader>
+                <AlertDialogTitle className="font-display text-xl">
+                  <ArrowRightLeft className="w-5 h-5 inline mr-2 text-fuchsia-400" />
+                  Confirm Warp
+                </AlertDialogTitle>
+                <AlertDialogDescription className="text-muted-foreground">
+                  Review the warp details before submitting to the blockchain.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+
+              {pendingValues && (
+                <div className="space-y-3 py-4 border-y border-sidebar-border">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Original Agent</span>
+                    <span className="font-mono text-fuchsia-400">{agent.name}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Registry</span>
+                    <span className="font-mono text-foreground">
+                      {registryInfo?.name || agent.registry}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Warped Name</span>
+                    <span className="font-mono text-cyan-400">{pendingValues.name}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">License Price</span>
+                    <span className="font-mono text-green-400">${pendingValues.licensePrice} USDC</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">License Supply</span>
+                    <span className="font-mono">{pendingValues.licenses || "∞ Unlimited"}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Your Royalty</span>
+                    <span className="font-mono text-fuchsia-400">80%</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Network</span>
+                    <span className="font-mono text-cyan-400">{CHAIN_CONFIG[paymentChainId]?.name}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Gas</span>
+                    <span className="font-mono text-green-400">Sponsored (Free)</span>
+                  </div>
+                </div>
+              )}
+
+              <AlertDialogFooter>
+                <AlertDialogCancel className="border-sidebar-border">Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={handleConfirmedWarp}
+                  className="bg-gradient-to-r from-fuchsia-500 to-cyan-500 text-white hover:from-fuchsia-400 hover:to-cyan-400 font-bold"
+                >
+                  <CheckCircle2 className="w-4 h-4 mr-2" />
+                  Confirm & Warp
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </div>
     </div>

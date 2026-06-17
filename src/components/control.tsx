@@ -16,6 +16,7 @@ export interface Option<T extends string = string> {
   label: string;
   icon?: Icon;
   disabled?: boolean;
+  count?: string | number;
 }
 
 function IconNode({ icon, className }: { icon?: Icon; className: string }) {
@@ -61,6 +62,11 @@ export function Switcher<T extends string>({
             >
               <IconNode icon={option.icon} className="cm-control-switcher__icon" />
               <span className="truncate">{option.label}</span>
+              {option.count !== undefined && option.count !== null && (
+                <span className="cm-control-switcher__badge ml-1.5 px-1.5 py-0.5 text-[10px] font-bold bg-primary/10 rounded font-mono text-muted-foreground">
+                  {option.count}
+                </span>
+              )}
             </TabsTrigger>
           ))}
         </TabsList>
@@ -75,7 +81,14 @@ export function Switcher<T extends string>({
               aria-label={`${label}: ${current.label}`}
             >
               <IconNode icon={current.icon} className="cm-control-switcher__icon" />
-              <span className="cm-control-switcher__label">{current.label}</span>
+              <span className="cm-control-switcher__label flex items-center">
+                {current.label}
+                {current.count !== undefined && current.count !== null && (
+                  <span className="cm-control-switcher__badge ml-1.5 px-1.5 py-0.5 text-[10px] font-bold bg-primary/10 rounded font-mono text-muted-foreground">
+                    {current.count}
+                  </span>
+                )}
+              </span>
               <ChevronDown className="cm-control-switcher__chevron" />
             </button>
           </DropdownMenuTrigger>
@@ -91,7 +104,14 @@ export function Switcher<T extends string>({
                   onSelect={() => onChange(option.value)}
                 >
                   <IconNode icon={option.icon} className="cm-control-menu__icon" />
-                  <span className="cm-control-menu__label">{option.label}</span>
+                  <span className="cm-control-menu__label flex items-center">
+                    {option.label}
+                    {option.count !== undefined && option.count !== null && (
+                      <span className="cm-control-switcher__badge ml-1.5 px-1.5 py-0.5 text-[10px] font-bold bg-primary/10 rounded font-mono text-muted-foreground">
+                        {option.count}
+                      </span>
+                    )}
+                  </span>
                   {active ? <Check className="cm-control-menu__check" /> : null}
                 </DropdownMenuItem>
               );

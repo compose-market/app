@@ -12,6 +12,7 @@ import { ShellCommandItem, ShellCommandOverlay, ShellCommandPanel } from "@compo
 import { useModels } from "@/hooks/use-model";
 import { formatModelTypeLabel, getPrimaryModelType, getDefaultModelPricingSections, getModelTypeValues, getFamilyLogoUrl } from "@/lib/models";
 import type { CatalogModel } from "@/lib/models";
+import { typeIcon } from "@compose-market/theme/icons/react";
 
 interface CommandBarProps {
   open: boolean;
@@ -223,11 +224,17 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, family }
                         onOpenChange(false);
                       }}
                       onMouseEnter={() => setSelectedIndex(idx)}
+                      className="flex items-center justify-between gap-2"
                     >
-                      <span className="cm-command-item__name">
-                        {model.name || model.modelId}
-                      </span>
-                      <div className="cm-command-item__meta">
+                      <div className="flex-1 min-w-0 flex items-center justify-between">
+                        <span className="cm-command-item__name truncate mr-2">
+                          {model.name || model.modelId}
+                        </span>
+                        <span className="inline-flex sm:hidden text-cyan-400 shrink-0 select-none scale-90">
+                          {typeIcon(modelType)}
+                        </span>
+                      </div>
+                      <div className="cm-command-item__meta hidden sm:flex">
                         <span
                           className="cm-command-item__family"
                           style={{ background: fColor.bg, color: fColor.text }}

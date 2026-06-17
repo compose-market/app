@@ -65,16 +65,18 @@ function ChipContent({
   cat,
   variant,
   label,
+  isTrigger = false,
 }: {
   cat: ModelCategory;
   variant: "type" | "family";
   label?: string;
+  isTrigger?: boolean;
 }) {
   return (
     <>
       {variant === "type" ? typeIcon(cat.id) : familyIcon(cat.id)}
-      <span className="cm-chip__text">{label ?? chipLabel(cat, variant)}</span>
-      <span className="cm-chip__count">{cat.count}</span>
+      <span className={isTrigger ? "cm-chip__text hidden sm:inline" : "cm-chip__text"}>{label ?? chipLabel(cat, variant)}</span>
+      <span className={isTrigger ? "cm-chip__count hidden sm:inline" : "cm-chip__count"}>{cat.count}</span>
     </>
   );
 }
@@ -109,8 +111,8 @@ function FilterDropdown({
             type="button"
             aria-label={`${label}: ${triggerLabel}`}
           >
-            <ChipContent cat={selectedCat} variant={variant} label={triggerLabel} />
-            <ChevronDown className="cm-playground__chip-chevron" />
+            <ChipContent cat={selectedCat} variant={variant} label={triggerLabel} isTrigger />
+            <ChevronDown className="cm-playground__chip-chevron hidden sm:inline" />
           </button>
         </DropdownMenuTrigger>
       </div>

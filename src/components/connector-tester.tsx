@@ -225,10 +225,7 @@ export interface ConnectorTesterProps {
 // Component
 // =============================================================================
 
-const sourceOptions: Option<ConnectorSource>[] = [
-    { value: "mcp", label: "MCPs", icon: Plug },
-    { value: "onchain", label: "Onchain", icon: Play },
-];
+// sourceOptions is defined dynamically inside ConnectorTester to support counts
 
 export function ConnectorTester({
     initialSource = "mcp",
@@ -264,6 +261,11 @@ export function ConnectorTester({
     const [selectedMcpServer, setSelectedMcpServer] = useState<string>(
         initialSource === "mcp" && initialConnector ? normalizeConnectorSlug(initialConnector, "mcp") : ""
     );
+
+    const sourceOptions = useMemo<Option<ConnectorSource>[]>(() => [
+        { value: "mcp", label: "MCPs", icon: Plug, count: mcpCatalogTotal > 0 ? String(mcpCatalogTotal) : undefined },
+        { value: "onchain", label: "Onchain", icon: Play, count: onchainStatus?.totalTools ? String(onchainStatus.totalTools) : undefined },
+    ], [mcpCatalogTotal, onchainStatus?.totalTools]);
 
     // ==========================================================================
     // Onchain Handlers
@@ -638,7 +640,7 @@ export function ConnectorTester({
                         <div className="flex items-center gap-2 text-xs">
                             <div className={cn("w-2 h-2 rounded-full", onchainStatus.initialized ? "bg-emerald-500" : "bg-red-500")} />
                             <span className="text-muted-foreground">
-                                {onchainStatus.initialized ? `${onchainStatus.totalTools} tools • ${onchainStatus.chain}` : "Offline"}
+                                {onchainStatus.initialized ? onchainStatus.chain : "Offline"}
                             </span>
                         </div>
                     )}
@@ -646,9 +648,7 @@ export function ConnectorTester({
                         <div className="flex items-center gap-2 text-[10px] sm:text-xs shrink-0">
                             <div className={cn("w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full", mcpCatalogTotal > 0 ? "bg-fuchsia-400" : "bg-muted-foreground")} />
                             <span className="text-muted-foreground">
-                                {mcpCatalogTotal > 0
-                                    ? `${mcpCatalogTotal.toLocaleString()} servers`
-                                    : "Offline"}
+                                {mcpCatalogTotal > 0 ? "Online" : "Offline"}
                             </span>
                         </div>
                     )}

@@ -207,12 +207,7 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
             className
           )}
         >
-          <Wallet className="cm-hud-icon cm-hud-wallet__icon" size={14} aria-hidden="true" />
-          <span
-            className="cm-hud-status"
-            data-tone={chainConfig?.color === "red" ? "red" : "blue"}
-            aria-hidden="true"
-          />
+          <Wallet className="cm-hud-icon cm-hud-wallet__icon" size={18} aria-hidden="true" />
           <span className="cm-hud-value">
             {balanceLoading ? "..." : `$${totalBalance}`}
           </span>
