@@ -10,13 +10,13 @@
  */
 import React, { Suspense, lazy, useState, memo, useCallback, useEffect, useRef } from "react";
 import {
-    PlanReview as SharedPlanReview,
     StreamMedia as SharedStreamMedia,
     StreamNode as SharedStreamNode,
     StreamNotice as SharedStreamNotice,
     StreamPocket as SharedStreamPocket,
 } from "@compose-market/theme";
 import { cn } from "@/lib/utils";
+import { MissionControl } from "./mission-control";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -57,6 +57,7 @@ import {
     Download,
 } from "lucide-react";
 import type { ActivityNode, ActivityState } from "@compose-market/sdk";
+import { SlashCommandPopover, type SlashCommand } from "@/components/slash-commands";
 import type { Artifact, AttachedFile, ChatActivityState, Message, MessageBlock, Plan } from "@/hooks/use-chat";
 
 // Re-export for convenience
@@ -130,111 +131,22 @@ function formatBytes(value?: number): string | null {
     return `${(value / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function PlanReview({
-    messageId,
-    plan,
-    onPlanDecision,
-}: {
-    messageId: string;
-    plan: Plan;
-    onPlanDecision?: MessageItemProps["onPlanDecision"];
-}) {
-    const [feedbackOpen, setFeedbackOpen] = useState(false);
-    const [feedback, setFeedback] = useState("");
-    const decided = plan.decision || plan.state === "approved" || plan.state === "rejected" || plan.state === "changes_requested";
-    const canAct = Boolean(onPlanDecision) && !plan.pending && !decided;
-    const title = plan.type === "harness_plan_decided" ? "Plan decision" : "Plan review";
-    const subtitle = plan.decision === "changes_requested"
-        ? "Changes were requested. The agent can revise and propose the next version."
-        : plan.decision === "rejected"
-            ? "The plan was rejected."
-            : plan.decision === "approved" || plan.state === "approved"
-                ? "The plan was approved and execution can continue."
-                : "Review the proposed work plan and choose an out-of-band decision.";
-    const metadata = (
-        <>
-            <span>v{plan.version}</span>
-            {plan.proposalId && <span>{shortId(plan.proposalId)}</span>}
-            {plan.composeRunId && <span>{shortId(plan.composeRunId)}</span>}
-        </>
-    );
-    const body = plan.markdown || "Plan proposal received.";
-    const actions = canAct ? (
-        <>
-            {feedbackOpen && (
-                <Textarea
-                    value={feedback}
-                    onChange={(event) => setFeedback(event.target.value)}
-                    placeholder="Feedback for the revised plan"
-                    className="min-h-16 w-full basis-full resize-none border-amber-500/30 bg-background/60 text-xs"
-                />
-            )}
-            <Button
-                type="button"
-                size="sm"
-                className="h-8 bg-emerald-500 text-black hover:bg-emerald-400"
-                disabled={plan.pending}
-                onClick={() => onPlanDecision?.(messageId, plan, "approved")}
-            >
-                Approve
-            </Button>
-            <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="h-8 border-amber-500/40 text-amber-300"
-                disabled={plan.pending || (feedbackOpen && feedback.trim().length === 0)}
-                onClick={() => {
-                    if (!feedbackOpen) {
-                        setFeedbackOpen(true);
-                        return;
-                    }
-                    onPlanDecision?.(messageId, plan, "changes_requested", feedback.trim());
-                }}
-            >
-                Request changes
-            </Button>
-            <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="h-8 border-red-500/40 text-red-300"
-                disabled={plan.pending}
-                onClick={() => onPlanDecision?.(messageId, plan, "rejected", feedback.trim() || undefined)}
-            >
-                Reject
-            </Button>
-        </>
-    ) : null;
+// PlanReview was removed and refactored into the new MissionControl component
 
+function StreamMeta({ values }: { values: Array<string | undefined> }) {
+    const items = values.filter((value): value is string => Boolean(value));
+    if (items.length === 0) return null;
     return (
-        <details className="cm-chat-plan mb-2" open={!decided}>
-            <summary className="cm-stream-node__summary-row">
-                <span className="cm-stream-node__marker" />
-                <span className="cm-stream-node__title">{planSummary(plan)}</span>
-                <span className="cm-stream-node__metadata">{metadata}</span>
-            </summary>
-            <SharedPlanReview
-                title={title}
-                subtitle={plan.error ? plan.error : subtitle}
-                state={plan.decision || plan.state}
-                metadata={metadata}
-                actions={actions}
-            >
-                <Suspense fallback={<p className="whitespace-pre-wrap text-sm">{body}</p>}>
-                    <LazyMarkdownRenderer content={body} />
-                </Suspense>
-            </SharedPlanReview>
-        </details>
+        <>
+            {items.map((item) => <span key={item}>{item}</span>)}
+        </>
     );
 }
 
-function planSummary(plan: Plan): string {
-    const state = plan.decision || plan.state;
-    if (state === "approved") return `Plan approved · v${plan.version}`;
-    if (state === "rejected") return `Plan rejected · v${plan.version}`;
-    if (state === "changes_requested") return `Plan changes requested · v${plan.version}`;
-    return `Plan proposed · v${plan.version}`;
+function text(value: unknown): string | undefined {
+    if (typeof value === "string" && value.length > 0) return value;
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+    return undefined;
 }
 
 function ArtifactBlock({
@@ -628,175 +540,7 @@ function artifactMediaKind(kind: Artifact["artifactType"]): "image" | "audio" | 
     return kind === "image" || kind === "audio" || kind === "video" ? kind : null;
 }
 
-function ActivityView({ activity, nodeId }: { activity?: ActivityState; nodeId?: string }) {
-    const rows = activity ? buildActivityRows(activity, nodeId) : [];
-    if (rows.length === 0) return null;
-    const count = rows.reduce((sum, row) => sum + row.events, 0);
-    return (
-        <SharedStreamPocket
-            title="Activity"
-            metadata={count > 1 ? <span>{count} updates</span> : undefined}
-            className="mb-2"
-        >
-            {rows.map((row) => <ActivityRowNode key={row.id} row={row} />)}
-        </SharedStreamPocket>
-    );
-}
-
-interface ActivityRow {
-    id: string;
-    class: StreamClass;
-    title: string;
-    summary?: string;
-    metadata?: string;
-    children: ActivityRow[];
-    open?: boolean;
-    events: number;
-}
-
-type StreamClass = "agent" | "tool" | "error" | "system";
-
-function ActivityRowNode({ row }: { row: ActivityRow }) {
-    return (
-        <SharedStreamNode
-            title={row.title}
-            kind={row.class}
-            summary={row.summary}
-            metadata={row.metadata ? <span>{row.metadata}</span> : undefined}
-            defaultOpen={row.open ?? false}
-        >
-            {row.children.map((child) => <ActivityRowNode key={child.id} row={child} />)}
-        </SharedStreamNode>
-    );
-}
-
-function buildActivityRows(activity: ActivityState, nodeId?: string): ActivityRow[] {
-    const visited = new Set<string>();
-    const roots = nodeId
-        ? [activity.nodes[nodeId]].filter((node): node is ActivityNode => Boolean(node))
-        : activity.roots.map((id) => activity.nodes[id]).filter((node): node is ActivityNode => Boolean(node));
-    const rows: ActivityRow[] = [];
-    for (const node of roots) {
-        const row = projectActivityRow(node, activity, visited);
-        if (row) rows.push(row);
-    }
-    if (!nodeId) {
-        for (const node of Object.values(activity.nodes)) {
-            if (visited.has(node.id) || !visibleActivityNode(node)) continue;
-            const parent = node.parentId ? activity.nodes[node.parentId] : undefined;
-            if (parent && visibleActivityNode(parent)) continue;
-            const row = projectActivityRow(node, activity, visited);
-            if (row) rows.push(row);
-        }
-    }
-    return rows;
-}
-
-function StreamMeta({ values }: { values: Array<string | undefined> }) {
-    const items = values.filter((value): value is string => Boolean(value));
-    if (items.length === 0) return null;
-    return (
-        <>
-            {items.map((item) => <span key={item}>{item}</span>)}
-        </>
-    );
-}
-
-function projectActivityRow(
-    node: ActivityNode,
-    activity: ActivityState,
-    visited: Set<string>,
-): ActivityRow | null {
-    if (visited.has(node.id) || !visibleActivityNode(node)) return null;
-    visited.add(node.id);
-    const children = node.children
-        .map((id) => activity.nodes[id])
-        .filter((child): child is ActivityNode => Boolean(child))
-        .map((child) => projectActivityRow(child, activity, visited))
-        .filter((row): row is ActivityRow => Boolean(row));
-    return {
-        id: node.id,
-        class: activityClass(node),
-        title: activityTitle(node),
-        summary: activitySummary(node),
-        metadata: activityMeta(node),
-        children,
-        open: node.kind === "error" || node.status === "failed",
-        events: node.events + children.reduce((sum, row) => sum + row.events, 0),
-    };
-}
-
-function cleanLabel(value?: string): string | undefined {
-    const cleaned = value
-        ?.replace(/[_-]+/g, " ")
-        .replace(/\b(runtime|debug|info|source)\b:?/gi, "")
-        .replace(/\s+/g, " ")
-        .trim();
-    return cleaned || undefined;
-}
-
-function activityClass(node: ActivityNode): StreamClass {
-    if (node.kind === "error" || node.status === "failed") return "error";
-    if (node.kind === "tool") return "tool";
-    if (node.kind === "agent" || node.kind === "run" || node.kind === "thinking" || node.kind === "conclave" || node.kind === "route" || node.kind === "message") {
-        return "agent";
-    }
-    return "system";
-}
-
-function activityTitle(node: ActivityNode): string {
-    const name = cleanLabel(node.target?.name || node.name || node.target?.target);
-    if (node.kind === "tool") {
-        if (node.target?.kind === "model") return name ? `Model call: ${name}` : "Model call";
-        return name ? `Tool call: ${name}` : "Tool call";
-    }
-    if (node.kind === "agent") return name ? `Agent: ${name}` : "Agent";
-    if (node.kind === "thinking") return "Thinking";
-    if (node.kind === "conclave") return "Conclave";
-    if (node.kind === "route") return "Route";
-    if (node.kind === "message") return "Message";
-    if (node.kind === "error") return "Action failed";
-    if (node.kind === "run") return node.status === "completed" ? "Run completed" : node.status === "cancelled" ? "Run stopped" : "Run";
-    return "Activity";
-}
-
-function activitySummary(node: ActivityNode): string | undefined {
-    const payload = node.payload ?? {};
-    const summary = node.text
-        || node.target?.summary
-        || text(payload.message)
-        || text(payload.summary)
-        || text(payload.error)
-        || text(payload.reason);
-    return cleanLabel(summary);
-}
-
-function activityMeta(node: ActivityNode): string | undefined {
-    const status = statusLabel(node.status);
-    const updates = node.events > 1 ? `${node.events} updates` : undefined;
-    return [status, updates].filter(Boolean).join(" · ") || undefined;
-}
-
-function statusLabel(status: ActivityNode["status"]): string | undefined {
-    if (status === "pending") return "Pending";
-    if (status === "running") return "Running";
-    if (status === "completed") return "Completed";
-    if (status === "failed") return "Failed";
-    if (status === "cancelled") return "Stopped";
-    return undefined;
-}
-
-function visibleActivityNode(node: ActivityNode): boolean {
-    if (node.kind === "trace" || node.kind === "plan") return false;
-    if (node.kind === "message" && !node.parentId) return false;
-    return true;
-}
-
-function text(value: unknown): string | undefined {
-    if (typeof value === "string" && value.length > 0) return value;
-    if (typeof value === "number" && Number.isFinite(value)) return String(value);
-    return undefined;
-}
+// ActivityView was removed and refactored into the new MissionControl component
 
 function numeric(value: unknown): number | undefined {
     return typeof value === "number" && Number.isFinite(value) ? value : undefined;
@@ -983,6 +727,7 @@ class MessageBoundary extends React.Component<
 
 export interface MessageItemProps {
     message: Message;
+    messages: Message[];
     variant?: "agent" | "workflow" | "playground";
     showActions?: boolean;
     onCopy?: (content: string) => void;
@@ -1016,6 +761,7 @@ const messageVariantStyles = {
 
 function MessageItemInner({
     message,
+    messages,
     variant = "agent",
     showActions = true,
     onCopy,
@@ -1083,16 +829,17 @@ function MessageItemInner({
         if (block.type === "plan") {
             if (!message.proposal || message.proposal.proposalId !== block.planId) return null;
             return (
-                <PlanReview
+                <MissionControl
                     key={block.id}
                     messageId={message.id}
+                    messages={messages}
                     plan={message.proposal}
                     onPlanDecision={onPlanDecision}
                 />
             );
         }
         if (block.type === "activity") {
-            return <ActivityView key={block.id} activity={message.activity} nodeId={block.nodeId} />;
+            return <MissionControl key={block.id} messageId={message.id} messages={messages} activity={message.activity} nodeId={block.nodeId} onStopRealtime={onStopRealtime} />;
         }
         if (block.type === "asset") {
             const artifact = message.artifacts?.find((item) => item.id === block.artifactId);
@@ -1151,8 +898,9 @@ function MessageItemInner({
                 )}
 
                 {!hasBlocks && message.proposal && (
-                    <PlanReview
+                    <MissionControl
                         messageId={message.id}
+                        messages={messages}
                         plan={message.proposal}
                         onPlanDecision={onPlanDecision}
                     />
@@ -1397,6 +1145,7 @@ export function MultimodalCanvas({
                             <React.Fragment key={msg.id}>
                                 <MessageItem
                                     message={msg}
+                                    messages={messages}
                                     variant={variant}
                                     showActions={showMessageActions}
                                     onCopy={onCopyMessage}
@@ -1529,15 +1278,24 @@ export function MultimodalCanvas({
                         </TooltipProvider>
                     )}
 
-                    <Textarea
-                        placeholder={placeholder || (variant === "workflow" ? "Enter workflow parameters or instruction..." : "Type your message...")}
-                        value={inputValue}
-                        onChange={(e) => onInputChange(e.target.value)}
-                        onKeyDown={handleKeyDown}
-                        rows={1}
-                        className={cn("resize-none flex-1", variant === "workflow" && "font-mono text-sm")}
-                        disabled={sending && !continuous}
-                    />
+                    <div className="relative flex-1">
+                        {variant !== "workflow" && (
+                            <SlashCommandPopover
+                                input={inputValue}
+                                onSelect={(cmd) => onInputChange(`/${cmd.name} `)}
+                                onDismiss={() => onInputChange(inputValue.replace(/^\//, ""))}
+                            />
+                        )}
+                        <Textarea
+                            placeholder={placeholder || (variant === "workflow" ? "Enter workflow parameters or instruction..." : "Type your message or use / for commands...")}
+                            value={inputValue}
+                            onChange={(e) => onInputChange(e.target.value)}
+                            onKeyDown={handleKeyDown}
+                            rows={1}
+                            className={cn("resize-none w-full", variant === "workflow" && "font-mono text-sm")}
+                            disabled={sending && !continuous}
+                        />
+                    </div>
 
                     <Button onClick={handleSend} disabled={!canSend || isUploading} className={cn("cm-chat__send", config.sendButton)}>
                         {sending && !continuous ? <Loader2 className="w-4 h-4 animate-spin" /> : variant === "workflow" ? <Play className="w-4 h-4" /> : <Send className="w-4 h-4" />}
