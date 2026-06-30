@@ -168,7 +168,7 @@ export interface ConnectorExecutionResult {
   content?: unknown;
 }
 
-export async function executeGoatPlugin(
+export async function executeGoatConnector(
   connectorId: string,
   tool: string,
   args: Record<string, unknown>
@@ -249,7 +249,7 @@ export async function executeRegistryTool(
   const binding = normalizeConnectorBinding({ registryId, origin, slug }, { defaultOrigin: "mcp" });
   if (binding.origin === "onchain") {
     const connectorId = binding.slug;
-    return executeGoatPlugin(connectorId, tool, args);
+    return executeGoatConnector(connectorId, tool, args);
   }
   return executeSpawnedServer(binding.slug, tool, args);
 }

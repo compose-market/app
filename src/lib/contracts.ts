@@ -15,6 +15,7 @@ import {
   getContractAddressForChain,
 } from "./chains";
 import { keccak256, encodePacked, type Address } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
 import {
   formatUsdcPrice,
   weiToUsdc,
@@ -743,15 +744,10 @@ export function deriveAgentWalletAddress(dnaHash: `0x${string}`, timestamp: numb
  * Uses the standard secp256k1 -> keccak256 -> last 20 bytes flow
  */
 function computeAddressFromPrivateKey(privateKey: `0x${string}`): `0x${string}` {
-  // viem's privateKeyToAccount works in browser via noble-curves
-  // Use dynamic import for code splitting
   try {
-    const { privateKeyToAccount } = require("viem/accounts") as typeof import("viem/accounts");
     const account = privateKeyToAccount(privateKey);
     return account.address;
   } catch {
-    // Fallback: return a deterministic placeholder based on the private key
-    // This shouldn't happen in practice as viem works in browser
     const fallback = keccak256(privateKey);
     return `0x${fallback.slice(26)}` as `0x${string}`;
   }
@@ -892,7 +888,7 @@ export interface MintWorkflowParams {
 // =============================================================================
 
 /**
- * RFA Categories - based on actual MCP/GOAT registry categories
+ * RFA Categories - based on actual MCP/onchain registry categories
  */
 export const RFA_CATEGORIES = [
   { id: 'defi', label: 'DeFi', description: 'Trading, swaps, liquidity' },

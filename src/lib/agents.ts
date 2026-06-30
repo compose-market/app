@@ -4,7 +4,7 @@
  *
  * Registries:
  * - Agentverse: Fetch.ai autonomous agent marketplace
- * - GOAT: DeFi tool connectors
+ * - Onchain: DeFi tool connectors
  */
 
 import { sdk } from "./sdk";
@@ -32,7 +32,7 @@ export const AGENT_REGISTRIES = {
   },
   goat: {
     id: "goat",
-    name: "GOAT SDK",
+    name: "Onchain Connectors",
     description: "DeFi & Web3 tool connectors",
     url: "https://ohmygoat.dev",
     color: "green",
@@ -358,7 +358,7 @@ function registryServerToAgent(server: RegistryServer, registry: AgentRegistryId
     status: "active",
     type: "hosted",
     featured: false,
-    verified: true, // GOAT connectors are verified
+    verified: true, // onchain connectors are verified
     category: server.category || deriveCategory(allTags),
     tags: allTags,
     owner: server.namespace,
@@ -466,7 +466,7 @@ function getConnectorBaseUrl(): string {
 }
 
 /**
- * Search GOAT connectors from the connectors broker /onchain endpoint
+ * Search onchain connectors from the connectors broker /onchain endpoint
  */
 async function searchGoat(
   options: SearchAgentsOptions
@@ -475,7 +475,7 @@ async function searchGoat(
     const response = await fetch(`${getConnectorBaseUrl()}/onchain`);
 
     if (!response.ok) {
-      console.warn("Failed to fetch GOAT connectors:", response.status);
+      console.warn("Failed to fetch onchain connectors:", response.status);
       return { agents: [], total: 0, tags: [], categories: [] };
     }
 
@@ -542,7 +542,7 @@ async function searchGoat(
       categories: Array.from(allCategories).sort(),
     };
   } catch (err) {
-    console.warn("Error fetching GOAT connectors:", err);
+    console.warn("Error fetching onchain connectors:", err);
     return { agents: [], total: 0, tags: [], categories: [] };
   }
 }

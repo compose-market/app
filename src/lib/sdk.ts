@@ -13,9 +13,11 @@ import { ComposeSDK } from "@compose-market/sdk";
 
 const env = import.meta.env ?? {};
 const baseUrl = (env.VITE_API_URL ?? "https://api.compose.market").replace(/\/+$/, "");
+const channelsUrl = (env.VITE_CHANNELS_URL ?? "https://services.compose.market").replace(/\/+$/, "");
 
 export const sdk = new ComposeSDK({
     baseUrl,
+    channelsUrl,
     userAgent: "compose-market-web",
     // The in-app UI does its own retries for non-idempotent mutations, so
     // cap the SDK retries at 2 for safe idempotent paths and 0 for the
