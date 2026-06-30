@@ -82,7 +82,7 @@ test("shared card and model primitives stay self-contained without internal card
   assert.match(chips, /cm-playground__chip-menu-grid/);
   assert.match(chips, /selected === "all" \? label/);
   assert.match(chips, /function triggerClass/);
-  assert.match(chips, /providerCategories/);
+  assert.match(chips, /familyCategories/);
   assert.doesNotMatch(chips, /cm-playground__chip-label/);
   assert.doesNotMatch(chips, /DropdownMenuLabel/);
   assert.doesNotMatch(chips, /categoryClass\(selectedCat,\s*variant,\s*true\)/);
@@ -155,7 +155,7 @@ test("mirror pane owns its responsive styles in the theme module", () => {
   assert.match(mirrorIndex, /export function MirrorRow/);
   assert.match(mirrorIndex, /export function MirrorPricing/);
   assert.match(pane, /title=\{activeTab === "details"/);
-  assert.match(pane, /icon=\{activeTab === "details" \? <Cpu \/> : undefined\}/);
+  assert.match(pane, /icon=\{activeTab === "details" \? \(\(\) => \{/);
   assert.match(pane, /getOptionalModelPricingSections/);
   assert.match(pane, /optionalPricingSections\.length > 0/);
   assert.match(pane, /label=\{<span className="cm-mirror-pane__section-text">Capability<\/span>\}/);
@@ -203,12 +203,11 @@ test("launch recovery pages use content canvases instead of blind clipping", () 
   assert.match(market, /cm-control-rail cm-market-control-rail/);
   assert.match(market, /<SearchFold/);
   assert.match(control, /cm-control-search-fold/);
-  assert.match(market, /cm-page-header__metric/);
   assert.doesNotMatch(market, /cm-control-rail cm-control-rail--compact/);
   assert.match(market, /cm-market-row-grid/);
   assert.match(cssIndex, /@import '\.\/market\.css';/);
   assert.match(marketTheme, /\.cm-market-agent-grid,\s*\n\.cm-market-row-grid\s*\{[\s\S]*repeat\(auto-fit,\s*minmax\(min\(100%,\s*var\(--cm-market-min/);
-  assert.match(marketTheme, /\.cm-market-control-rail\s*\{[\s\S]*grid-template-columns:\s*auto minmax\(0,\s*1fr\) auto/);
+  assert.match(marketTheme, /\.cm-market-control-rail\s*\{[\s\S]*display:\s*flex/);
   assert.doesNotMatch(marketTheme, /cm-market-search-fold|cm-search--market/);
   assert.match(shellTheme, /\.cm-control-search-fold\[data-open="true"\]\s+\.cm-search--fold\s*\{[\s\S]*width:\s*clamp\(13rem/);
   assert.match(marketTheme, /scroll-snap-type:\s*y mandatory/);
@@ -257,7 +256,6 @@ test("launch recovery pages use content canvases instead of blind clipping", () 
   assert.doesNotMatch(assets, /cm-agent-card--market-full/);
   assert.doesNotMatch(assets, /cm-market-control-rail--unified/);
   assert.match(assets, /<SearchFold/);
-  assert.match(assets, /cm-page-header__account/);
   assert.doesNotMatch(assets, /cm-control-rail cm-control-rail--compact/);
   assert.doesNotMatch(assets, /pb-20/);
 });

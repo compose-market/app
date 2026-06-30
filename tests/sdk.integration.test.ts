@@ -5,13 +5,36 @@ import { ComposeSDK } from "@compose-market/sdk";
 import type { CatalogModel } from "../src/lib/models";
 
 test("web consumes @compose-market/sdk as a third-party integrator", async () => {
-  const calls: Array<{ method: string; path: string }> = [];
+  const calls: Array<{ host: string; method: string; path: string; headers: Headers }> = [];
   const sdk = new ComposeSDK({
     baseUrl: "https://api.example.test",
+    channelsUrl: "https://services.example.test",
+    defaultHeaders: {
+      Authorization: "Bearer compose-test",
+      "x-chain-id": "43113",
+      "x-session-active": "true",
+      "x-payment-intent-id": "intent-test",
+    },
     fetch: async (input, init) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url);
-      calls.push({ method: init?.method ?? "GET", path: `${url.pathname}${url.search}` });
-      return new Response(JSON.stringify({ agents: [], total: 0, tags: [], categories: [] }), {
+      calls.push({
+        host: url.host,
+        method: init?.method ?? "GET",
+        path: `${url.pathname}${url.search}`,
+        headers: new Headers(init?.headers),
+      });
+      const body = url.pathname.startsWith("/channels/")
+        ? {
+          code: "link-test",
+          channel: "telegram",
+          userAddress: "0x0000000000000000000000000000000000000001",
+          agentWallet: "0x0000000000000000000000000000000000000002",
+          createdAt: Date.now(),
+          expiresAt: Date.now() + 60000,
+          url: "https://t.me/compose_bot?start=link-test",
+        }
+        : { agents: [], total: 0, tags: [], categories: [] };
+      return new Response(JSON.stringify(body), {
         status: 200,
         headers: { "content-type": "application/json" },
       });
@@ -24,7 +47,9 @@ test("web consumes @compose-market/sdk as a third-party integrator", async () =>
   assert.equal(typeof sdk.directory.agents.agentverse, "function");
   assert.equal(typeof sdk.system.health, "function");
   assert.equal(typeof sdk.local.link.create, "function");
-  assert.equal(typeof sdk.backpack.permissions.list, "function");
+  assert.equal(typeof sdk.permissions.list, "function");
+  assert.equal(typeof sdk.accounts.connect, "function");
+  assert.equal(typeof sdk.channels.link, "function");
   assert.equal(typeof sdk.dispenser.status, "function");
   assert.equal(typeof sdk.settlement.status, "function");
   assert.equal("metrics" in sdk, false);
@@ -41,6 +66,22 @@ test("web consumes @compose-market/sdk as a third-party integrator", async () =>
     calls[0]?.path,
     "/api/agentverse/agents?search=research&tags=ai%2Cpayments&limit=5&sort=interactions&direction=desc",
   );
+  assert.equal(calls[0]?.host, "api.example.test");
+
+  await sdk.channels.link("telegram", {
+    userAddress: "0x0000000000000000000000000000000000000001",
+    agentWallet: "0x0000000000000000000000000000000000000002",
+    agentName: "Echo",
+  });
+
+  const channelCall = calls.at(-1);
+  assert.equal(channelCall?.host, "services.example.test");
+  assert.equal(channelCall?.method, "POST");
+  assert.equal(channelCall?.path, "/channels/telegram/link");
+  assert.equal(channelCall?.headers.has("authorization"), false);
+  assert.equal(channelCall?.headers.has("x-chain-id"), false);
+  assert.equal(channelCall?.headers.has("x-session-active"), false);
+  assert.equal(channelCall?.headers.has("x-payment-intent-id"), false);
 });
 
 test("web catalog models can carry API-owned operations without local routing", () => {
