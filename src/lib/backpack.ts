@@ -5,6 +5,7 @@ export interface BackpackConnectionInfo {
   name: string;
   connected: boolean;
   accountId?: string;
+  connectedAccountId?: string;
   status?: string;
 }
 
@@ -23,20 +24,24 @@ function isBackpackCloudPermission(value: string): value is BackpackCloudPermiss
   return BACKPACK_CLOUD_PERMISSION_TYPES.includes(value as BackpackCloudPermission);
 }
 
-function permissionStorageKey(permission: BackpackCloudPermission): string {
-  return `consent_${permission}`;
+function permissionStorageKey(agentWallet: string, permission: BackpackCloudPermission): string {
+  return `consent_${agentWallet.toLowerCase()}_${permission}`;
 }
 
-export function getCachedBackpackPermissions(): BackpackCloudPermission[] {
-  return BACKPACK_CLOUD_PERMISSION_TYPES.filter((permission) => sessionStorage.getItem(permissionStorageKey(permission)) === "granted");
+export function getCachedBackpackPermissions(agentWallet?: string | null): BackpackCloudPermission[] {
+  if (!agentWallet) return [];
+  return BACKPACK_CLOUD_PERMISSION_TYPES.filter((permission) => (
+    sessionStorage.getItem(permissionStorageKey(agentWallet, permission)) === "granted"
+  ));
 }
 
-export function cacheBackpackPermission(permission: BackpackCloudPermission, granted: boolean): void {
+export function cacheBackpackPermission(agentWallet: string, permission: BackpackCloudPermission, granted: boolean): void {
+  const key = permissionStorageKey(agentWallet, permission);
   if (granted) {
-    sessionStorage.setItem(permissionStorageKey(permission), "granted");
+    sessionStorage.setItem(key, "granted");
     return;
   }
-  sessionStorage.removeItem(permissionStorageKey(permission));
+  sessionStorage.removeItem(key);
 }
 
 export function resolveBackpackUserId(preferred?: string | null): string {
@@ -54,13 +59,13 @@ export function resolveBackpackUserId(preferred?: string | null): string {
   return created;
 }
 
-export async function fetchBackpackConnections(userAddress: string): Promise<BackpackConnectionInfo[]> {
-  const payload = await sdk.backpack.connections({ userAddress }) as { connections?: BackpackConnectionInfo[] };
+export async function fetchBackpackConnections(userAddress: string, agentWallet: string): Promise<BackpackConnectionInfo[]> {
+  const payload = await sdk.accounts.list({ userAddress, agentWallet }) as { connections?: BackpackConnectionInfo[] };
   return Array.isArray(payload.connections) ? payload.connections : [];
 }
 
-export async function fetchBackpackPermissions(userAddress: string): Promise<BackpackCloudPermission[]> {
-  const payload = await sdk.backpack.permissions.list({ userAddress }) as {
+export async function fetchBackpackPermissions(userAddress: string, agentWallet: string): Promise<BackpackCloudPermission[]> {
+  const payload = await sdk.permissions.list({ userAddress, agentWallet }) as {
     permissions?: Array<{ consentType?: string; granted?: boolean }>;
   };
 
@@ -71,18 +76,18 @@ export async function fetchBackpackPermissions(userAddress: string): Promise<Bac
     : [];
 
   BACKPACK_CLOUD_PERMISSION_TYPES.forEach((permission) => {
-    cacheBackpackPermission(permission, granted.includes(permission));
+    cacheBackpackPermission(agentWallet, permission, granted.includes(permission));
   });
 
   return granted;
 }
 
-export async function grantBackpackPermission(userAddress: string, consentType: BackpackCloudPermission): Promise<void> {
-  await sdk.backpack.permissions.grant({ userAddress, consentType });
-  cacheBackpackPermission(consentType, true);
+export async function grantBackpackPermission(userAddress: string, agentWallet: string, consentType: BackpackCloudPermission): Promise<void> {
+  await sdk.permissions.grant({ userAddress, agentWallet, consentType });
+  cacheBackpackPermission(agentWallet, consentType, true);
 }
 
-export async function revokeBackpackPermission(userAddress: string, consentType: BackpackCloudPermission): Promise<void> {
-  await sdk.backpack.permissions.revoke({ userAddress, consentType });
-  cacheBackpackPermission(consentType, false);
+export async function revokeBackpackPermission(userAddress: string, agentWallet: string, consentType: BackpackCloudPermission): Promise<void> {
+  await sdk.permissions.revoke({ userAddress, agentWallet, consentType });
+  cacheBackpackPermission(agentWallet, consentType, false);
 }
