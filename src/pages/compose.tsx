@@ -77,7 +77,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { useWorkflowExecution } from "@/hooks/use-services";
-import { useWorkflow, type ComposeNode } from "@/hooks/use-workflow";
+import { useWorkflow, type WorkflowNode } from "@/hooks/use-workflow";
 import type { WorkflowStep } from "@/lib/services";
 import { WorkflowOutputPanel, type WorkflowExecutionResult } from "@/components/output";
 import { AGENT_REGISTRIES, type Agent } from "@/lib/agents";
@@ -501,10 +501,10 @@ function MintWorkflowDialog({
                     <SelectItem value="none">No coordinator</SelectItem>
                     {coordinatorModels.map((model) => (
                       <SelectItem key={model.modelId} value={model.modelId}>
-                           <div className="flex items-center gap-2">
-                             <span>{model.name || model.modelId}</span>
-                             <span className="text-[10px] text-muted-foreground">({model.family || model.provider})</span>
-                           </div>
+                        <div className="flex items-center gap-2">
+                          <span>{model.name || model.modelId}</span>
+                          <span className="text-[10px] text-muted-foreground">({model.family || model.provider})</span>
+                        </div>
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -653,16 +653,16 @@ function RunWorkflowDialog({ open, onOpenChange, workflowName, stepCount, isRunn
 }
 
 // =============================================================================
-// Main ComposeFlow Component
+// Main Flow Component
 // =============================================================================
 
-function ComposeFlow() {
+function Flow() {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const wallet = useActiveWallet();
   const account = useActiveAccount();
   const { paymentChainId } = useChain();
-  const { sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken } = useSession();
+  const { sessionActive, budgetRemaining, composeKeyToken, ensureKeyToken } = useSession();
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
 
   // UI state - start in fullscreen mode by default
@@ -698,7 +698,7 @@ function ComposeFlow() {
   // Add trigger handler
   const handleAddTrigger = useCallback((trigger: Partial<import("@/lib/triggers").TriggerDefinition>) => {
     const id = `trigger_${Date.now()}`;
-    const newNode: ComposeNode = {
+    const newNode: WorkflowNode = {
       id,
       type: "triggerNode",
       position: { x: 100, y: nodes.length * 120 + 100 },
@@ -793,11 +793,11 @@ function ComposeFlow() {
         return updated;
       });
 
-      let activeComposeKeyToken = composeKeyToken;
-      if (sessionActive && budgetRemaining > 0 && !activeComposeKeyToken) {
-        activeComposeKeyToken = await ensureComposeKeyToken();
+      let activeKeyToken = composeKeyToken;
+      if (sessionActive && budgetRemaining > 0 && !activeKeyToken) {
+        activeKeyToken = await ensureKeyToken();
       }
-      if (!activeComposeKeyToken) {
+      if (!activeKeyToken) {
         throw new Error("Compose key session is required");
       }
 
@@ -860,7 +860,7 @@ function ComposeFlow() {
     } catch (err) {
       toast({ title: "Execution Error", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
     }
-  }, [currentWorkflow, inputJson, nodes, edges, setNodes, toast, wallet, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, paymentChainId]);
+  }, [currentWorkflow, inputJson, nodes, edges, setNodes, toast, wallet, sessionActive, budgetRemaining, composeKeyToken, ensureKeyToken, paymentChainId]);
 
   return (
     <div className="cm-compose-workspace">
@@ -1092,4 +1092,4 @@ function ComposeFlow() {
   );
 }
 
-export default ComposeFlow;
+export default Flow;

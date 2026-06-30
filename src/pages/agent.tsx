@@ -19,9 +19,11 @@ import { useChain } from "@/contexts/ChainContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Hint, ShellButton } from "@compose-market/theme/shell";
 import { useToast } from "@/hooks/use-toast";
 import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
+import { BackpackDialog } from "@/components/backpack";
 import { useOnchainAgentByIdentifier } from "@/hooks/use-onchain";
 import { MultimodalCanvas } from "@/components/chat";
 import { toAttachment, useChat, type Plan } from "@/hooks/use-chat";
@@ -29,7 +31,6 @@ import { useStream } from "@/hooks/use-stream";
 import { CostReceiptIndicator } from "@/components/receipt-indicator";
 import {
   getCachedBackpackPermissions,
-  grantBackpackPermission,
   resolveBackpackUserId,
   type BackpackCloudPermission,
 } from "@/lib/backpack";
@@ -55,6 +56,7 @@ import {
   Download,
   X,
   IdCard,
+  Backpack,
 } from "lucide-react";
 
 export default function AgentDetailPage() {
@@ -67,7 +69,7 @@ export default function AgentDetailPage() {
   const wallet = useActiveWallet();
   const account = useActiveAccount();
   const { paymentChainId } = useChain();
-  const { sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken } = useSession();
+  const { sessionActive, budgetRemaining, composeKeyToken, ensureKeyToken } = useSession();
 
   // Build the A2A-compatible endpoint URL using wallet address (canonical identifier)
   const agentWallet = agent?.walletAddress;
@@ -103,6 +105,7 @@ export default function AgentDetailPage() {
 
   // Session dialog
   const [showSessionDialog, setShowSessionDialog] = useState(false);
+  const [backpackOpen, setBackpackOpen] = useState(false);
 
   // Mobile card sheet
   const [mobileCardOpen, setMobileCardOpen] = useState(false);
@@ -139,6 +142,26 @@ export default function AgentDetailPage() {
     setChatError(null);
     resetConversationThread();
   }, [clearFiles, clearMessages, resetConversationThread]);
+
+  const openBackpack = useCallback(() => {
+    if (!agentWallet) {
+      toast({
+        title: "Agent unavailable",
+        description: "Wait for the agent to load before opening your backpack.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!account?.address) {
+      toast({
+        title: "Connect wallet",
+        description: "Connect your wallet to access your backpack.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setBackpackOpen(true);
+  }, [account?.address, agentWallet, toast]);
 
   const openWorkspaceDialog = useCallback(() => {
     if (!sessionActive || budgetRemaining <= 0) {
@@ -204,12 +227,12 @@ export default function AgentDetailPage() {
       return;
     }
 
-    let activeComposeKeyToken = await ensureComposeKeyToken();
-    if (!activeComposeKeyToken) {
-      activeComposeKeyToken = composeKeyToken;
+    let activeKeyToken = await ensureKeyToken();
+    if (!activeKeyToken) {
+      activeKeyToken = composeKeyToken;
     }
 
-    if (!activeComposeKeyToken) {
+    if (!activeKeyToken) {
       toast({
         title: "Session Sync Required",
         description: "Compose session key unavailable. Re-open your session and try again.",
@@ -241,7 +264,7 @@ export default function AgentDetailPage() {
     } finally {
       setWorkspaceUploading(false);
     }
-  }, [account, agentWallet, budgetRemaining, composeKeyToken, ensureComposeKeyToken, paymentChainId, toast, workspaceFiles]);
+  }, [account, agentWallet, budgetRemaining, composeKeyToken, ensureKeyToken, paymentChainId, toast, workspaceFiles]);
 
   // Send chat message with x402 payment
   const handleSendMessage = useCallback(async () => {
@@ -294,12 +317,12 @@ export default function AgentDetailPage() {
     });
 
     const assistantId = createAssistantPlaceholder();
-    const composeRunId = crypto.randomUUID();
+    const runId = crypto.randomUUID();
 
     try {
       if (!agent) throw new Error("Agent not loaded");
-      const activeComposeKeyToken = composeKeyToken || sdk.keys.currentToken() || await ensureComposeKeyToken();
-      if (!activeComposeKeyToken) {
+      const activeKeyToken = composeKeyToken || sdk.keys.currentToken() || await ensureKeyToken();
+      if (!activeKeyToken) {
         toast({
           title: "Session Sync Required",
           description: "Compose session key unavailable. Re-open your session and try again.",
@@ -308,7 +331,7 @@ export default function AgentDetailPage() {
         setShowSessionDialog(true);
         throw new Error("Compose session key unavailable. Re-open your session and try again.");
       }
-      sdk.keys.use(activeComposeKeyToken);
+      sdk.keys.use(activeKeyToken);
 
       const threadId = ensureConversationThread();
 
@@ -318,12 +341,13 @@ export default function AgentDetailPage() {
         message: prompt,
         threadId,
         userAddress: backpackUserId,
-        composeRunId,
-        cloudPermissions: getCachedBackpackPermissions(),
+        ...(agent.metadata ? { agentCard: agent.metadata } : {}),
+        runId: runId,
+        cloudPermissions: getCachedBackpackPermissions(agentWallet),
         ...(attachmentPart ? { attachment: attachmentPart } : {}),
         assistantId,
         options: {
-          composeKey: activeComposeKeyToken,
+          key: activeKeyToken,
           userAddress,
           chainId: paymentChainId,
         },
@@ -338,7 +362,7 @@ export default function AgentDetailPage() {
     } finally {
       setSending(false);
     }
-  }, [inputValue, sending, agentWallet, wallet, account, toast, agent, attachedFiles, addUserMessage, clearFiles, createAssistantPlaceholder, failAssistant, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, ensureConversationThread, streamer, posthog]);
+  }, [inputValue, sending, agentWallet, wallet, account, toast, agent, attachedFiles, addUserMessage, clearFiles, createAssistantPlaceholder, failAssistant, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureKeyToken, ensureConversationThread, streamer, posthog]);
 
   const handlePlanDecision = useCallback(async (
     messageId: string,
@@ -347,29 +371,18 @@ export default function AgentDetailPage() {
     feedback?: string,
   ) => {
     if (!agentWallet) return;
-    const runId = plan.composeRunId;
+    const runId = plan.runId;
     if (!runId) {
       updateAssistantMessage(messageId, {
-        proposal: { ...plan, error: "Plan decision is missing composeRunId." },
+        proposal: { ...plan, error: "Plan decision is missing runId." },
       });
       return;
     }
     updateAssistantMessage(messageId, { proposal: { ...plan, pending: true, error: undefined } });
     try {
-      const activeComposeKeyToken = composeKeyToken || sdk.keys.currentToken() || await ensureComposeKeyToken();
-      if (activeComposeKeyToken) sdk.keys.use(activeComposeKeyToken);
-      await (sdk.agent as typeof sdk.agent & {
-        decide: (input: {
-          agentWallet: string;
-          runId: string;
-          proposalId: string;
-          version: number;
-          decision: NonNullable<Plan["decision"]>;
-          approver?: string;
-          reason?: string;
-          feedback?: string;
-        }) => Promise<unknown>;
-      }).decide({
+      const activeKeyToken = composeKeyToken || sdk.keys.currentToken() || await ensureKeyToken();
+      if (activeKeyToken) sdk.keys.use(activeKeyToken);
+      await sdk.agent.decide({
         agentWallet,
         runId,
         proposalId: plan.proposalId,
@@ -402,7 +415,7 @@ export default function AgentDetailPage() {
         variant: "destructive",
       });
     }
-  }, [account?.address, agentWallet, composeKeyToken, ensureComposeKeyToken, toast, updateAssistantMessage]);
+  }, [account?.address, agentWallet, composeKeyToken, ensureKeyToken, toast, updateAssistantMessage]);
 
   const copyEndpoint = () => {
     toast({
@@ -469,7 +482,17 @@ export default function AgentDetailPage() {
         </Button>
 
         <div className="cm-control-rail__main" />
-
+        <Hint label="Backpack">
+          <ShellButton
+            size="sm"
+            tone="secondary"
+            iconOnly
+            aria-label="Backpack"
+            onClick={openBackpack}
+          >
+            <Backpack size={14} />
+          </ShellButton>
+        </Hint>
         <div className="cm-control-rail__actions">
           <Button
             asChild
@@ -554,6 +577,16 @@ export default function AgentDetailPage() {
 
       {/* Session Budget Dialog */}
       <SessionBudgetDialog open={showSessionDialog} onOpenChange={setShowSessionDialog} showTrigger={false} />
+      {account?.address && agentWallet ? (
+        <BackpackDialog
+          open={backpackOpen}
+          onOpenChange={setBackpackOpen}
+          userAddress={account.address}
+          agentWallet={agentWallet}
+          agentName={agentLabel}
+          showTrigger={false}
+        />
+      ) : null}
 
       <Dialog open={workspaceOpen} onOpenChange={setWorkspaceOpen}>
         <DialogContent>

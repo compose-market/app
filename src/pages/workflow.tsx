@@ -57,7 +57,7 @@ export default function ManowarPage() {
     const wallet = useActiveWallet();
     const account = useActiveAccount();
     const { paymentChainId } = useChain();
-    const { sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken } = useSession();
+    const { sessionActive, budgetRemaining, composeKeyToken, ensureKeyToken } = useSession();
 
     // Chat state from shared hook (includes messages, attachments, and recording)
     const workflowWallet = workflow?.walletAddress;
@@ -144,12 +144,12 @@ export default function ManowarPage() {
         });
 
         const assistantId = createAssistantPlaceholder();
-        const composeRunId = crypto.randomUUID();
+        const runId = crypto.randomUUID();
         const replayEventIndex = 0;
 
         try {
-            const activeComposeKeyToken = composeKeyToken || sdk.keys.currentToken() || await ensureComposeKeyToken();
-            if (!activeComposeKeyToken) {
+            const activeKeyToken = composeKeyToken || sdk.keys.currentToken() || await ensureKeyToken();
+            if (!activeKeyToken) {
                 toast({
                     title: "Session Sync Required",
                     description: "Compose session key unavailable. Re-open your session and try again.",
@@ -158,7 +158,7 @@ export default function ManowarPage() {
                 setShowSessionDialog(true);
                 throw new Error("Compose session key unavailable. Re-open your session and try again.");
             }
-            sdk.keys.use(activeComposeKeyToken);
+            sdk.keys.use(activeKeyToken);
 
             abortControllerRef.current = new AbortController();
 
@@ -178,14 +178,14 @@ export default function ManowarPage() {
                 message: prompt,
                 threadId,
                 userAddress,
-                composeRunId,
+                runId,
                 continuous: continuousEnabled,
                 lastEventIndex: replayEventIndex,
                 ...(attachmentPart ? { attachment: attachmentPart } : {}),
                 assistantId,
                 signal: abortControllerRef.current.signal,
                 options: {
-                    composeKey: activeComposeKeyToken,
+                    key: activeKeyToken,
                     userAddress,
                     chainId: paymentChainId,
                 },
@@ -202,7 +202,7 @@ export default function ManowarPage() {
             setSending(false);
             abortControllerRef.current = null;
         }
-    }, [inputValue, sending, workflow, workflowWallet, wallet, account, toast, attachedFiles, addUserMessage, clearFiles, createAssistantPlaceholder, failAssistant, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, continuousEnabled, streamer, posthog]);
+    }, [inputValue, sending, workflow, workflowWallet, wallet, account, toast, attachedFiles, addUserMessage, clearFiles, createAssistantPlaceholder, failAssistant, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureKeyToken, continuousEnabled, streamer, posthog]);
 
     const handleStopExecution = useCallback(async () => {
         if (!workflow?.walletAddress || !activeThreadId) return;

@@ -18,7 +18,7 @@ import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
 import { sdk } from "@/lib/sdk";
 import { toAttachment, toMessage } from "@/hooks/use-chat";
-import type { Message as Message, ComposeCallOptions } from "@compose-market/sdk";
+import type { Message as Message } from "@compose-market/sdk";
 import { useChain } from "@/contexts/ChainContext";
 import { Button } from "@/components/ui/button";
 import { Tabs } from "@/components/ui/tabs";
@@ -50,7 +50,7 @@ import { useModels } from "@/hooks/use-model";
 import { CostReceiptIndicator } from "@/components/receipt-indicator";
 import { Switcher, type Option } from "@/components/control";
 import { useToast } from "@/hooks/use-toast";
-import { useStream } from "@/hooks/use-stream";
+import { useStream, type StreamCallOptions } from "@/hooks/use-stream";
 import { useRegistryMeta } from "@/hooks/use-registry";
 import {
   buildFamilyCategories,
@@ -118,7 +118,7 @@ export default function PlaygroundPage() {
   const posthog = usePostHog();
   const wallet = useActiveWallet();
   const account = useActiveAccount();
-  const { sessionActive, budgetRemaining, formatBudget, composeKeyToken, ensureComposeKeyToken } = useSession();
+  const { sessionActive, budgetRemaining, formatBudget, composeKeyToken, ensureKeyToken } = useSession();
   const { paymentChainId } = useChain();
   const { toast } = useToast();
 
@@ -401,20 +401,20 @@ export default function PlaygroundPage() {
 
       // Make sure the SDK has the freshly-minted Compose Key JWT cached
       // in-memory before any billable call fires.
-      const activeComposeKeyToken = composeKeyToken || sdk.keys.currentToken() || await ensureComposeKeyToken();
-      if (sessionActive && budgetRemaining > 0 && !activeComposeKeyToken) {
+      const activeKeyToken = composeKeyToken || sdk.keys.currentToken() || await ensureKeyToken();
+      if (sessionActive && budgetRemaining > 0 && !activeKeyToken) {
         throw new Error("Compose session key unavailable. Re-open your session and try again.");
       }
-      if (activeComposeKeyToken) {
-        sdk.keys.use(activeComposeKeyToken);
+      if (activeKeyToken) {
+        sdk.keys.use(activeKeyToken);
       }
 
       const history = [...currentMessages.slice(currentConversationStartIndex), userMessage];
       const input: Message[] = history.map(toMessage);
       if (currentSystemPrompt.trim()) input.unshift({ role: "system", content: currentSystemPrompt.trim() });
 
-      const callOptions: ComposeCallOptions = {
-        ...(activeComposeKeyToken ? { composeKey: activeComposeKeyToken } : {}),
+      const callOptions: StreamCallOptions = {
+        ...(activeKeyToken ? { key: activeKeyToken } : {}),
         userAddress: account.address,
         chainId: paymentChainId,
       };
@@ -438,7 +438,7 @@ export default function PlaygroundPage() {
     } finally {
       setStreaming(false);
     }
-  }, [wallet, account, budgetRemaining, clearFiles, sessionActive, composeKeyToken, ensureComposeKeyToken, paymentChainId, toast, posthog, chat, setMessages, streamer]);
+  }, [wallet, account, budgetRemaining, clearFiles, sessionActive, composeKeyToken, ensureKeyToken, paymentChainId, toast, posthog, chat, setMessages, streamer]);
   const handleClearChat = useCallback(() => {
     clearMessages();
     setInferenceError(null);
