@@ -56,10 +56,19 @@ import {
     QrCode,
     Smartphone,
     ArrowLeft,
+    RadioTower,
+    Gamepad2,
+    Hash,
 } from "lucide-react";
 import { sdk } from "@/lib/sdk";
-
-const SOCKET_BASE = (import.meta.env.VITE_SOCKET_URL || "wss://services.compose.market/socket").replace(/\/+$/, "");
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import type {
+    ChannelLinkResponse,
+    ChannelName,
+    ChannelRoute,
+    ChannelStatusResponse,
+} from "@compose-market/sdk";
 
 // =============================================================================
 // Types
@@ -89,6 +98,7 @@ interface ConnectionStatus {
     name: string;
     connected: boolean;
     accountId?: string;
+    connectedAccountId?: string;
 }
 
 interface ToolkitResult {
@@ -98,6 +108,71 @@ interface ToolkitResult {
     description: string;
     categories: string[];
     authSchemes: string[];
+}
+
+type StatusMap = Partial<Record<ChannelName, ChannelStatusResponse>>;
+
+type WhatsAppState = {
+    socket: string;
+    qr?: string;
+    pairing?: string;
+    loading: boolean;
+    phone: string;
+};
+
+const CHANNELS_LIST = ["telegram", "whatsapp", "slack", "discord"] as const satisfies readonly ChannelName[];
+
+const CHANNEL_META: Record<ChannelName, {
+    label: string;
+    description: string;
+    logo: string;
+    color: string;
+}> = {
+    telegram: {
+        label: "Telegram",
+        description: "Personal bot chat",
+        logo: "https://logos.composio.dev/api/telegram",
+        color: "#24A1DE",
+    },
+    whatsapp: {
+        label: "WhatsApp",
+        description: "Linked device route",
+        logo: "https://logos.composio.dev/api/whatsapp",
+        color: "#25D366",
+    },
+    slack: {
+        label: "Slack",
+        description: "DMs and workspace threads",
+        logo: "https://logos.composio.dev/api/slack",
+        color: "#4A154B",
+    },
+    discord: {
+        label: "Discord",
+        description: "DMs and server threads",
+        logo: "https://logos.composio.dev/api/discord",
+        color: "#5865F2",
+    },
+};
+
+function routeLabel(route: ChannelRoute): string {
+    const meta = route.metadata || {};
+    const label = [
+        route.label,
+        typeof meta.label === "string" ? meta.label : undefined,
+        typeof meta.threadName === "string" ? meta.threadName : undefined,
+        typeof meta.discordChannelId === "string" ? `Discord ${meta.discordChannelId}` : undefined,
+        route.threadId,
+        route.accountId,
+    ].find((value) => typeof value === "string" && value.trim().length > 0);
+    return label || route.id;
+}
+
+function short(value: string): string {
+    return value.length > 18 ? `${value.slice(0, 8)}...${value.slice(-6)}` : value;
+}
+
+function actionUrl(link: ChannelLinkResponse): string | null {
+    return link.action?.url || link.url || null;
 }
 
 // =============================================================================
@@ -203,22 +278,6 @@ const FEATURED_PROVIDERS: ProviderDisplay[] = [
         color: "#1DB954",
         description: "Playlists, tracks, playback",
     },
-    {
-        slug: "telegram",
-        name: "Telegram",
-        logo: "https://logos.composio.dev/api/telegram",
-        color: "#229ED9",
-        description: "Bot messaging & notifications",
-        connectionType: "channel",
-    },
-    {
-        slug: "whatsapp",
-        name: "WhatsApp",
-        logo: "https://logos.composio.dev/api/whatsapp",
-        color: "#25D366",
-        description: "Scan QR to link your account",
-        connectionType: "channel",
-    },
 ];
 
 // =============================================================================
@@ -227,16 +286,20 @@ const FEATURED_PROVIDERS: ProviderDisplay[] = [
 
 interface BackpackDialogProps {
     userAddress?: string;
+    agentWallet?: string;
     open?: boolean;
     onOpenChange?: (open: boolean) => void;
     showTrigger?: boolean;
+    agentName?: string;
 }
 
 export function BackpackDialog({
     userAddress,
+    agentWallet,
     open,
     onOpenChange,
-    showTrigger = true
+    showTrigger = true,
+    agentName
 }: BackpackDialogProps) {
     const { toast } = useToast();
     const isMobile = useIsMobile();
@@ -265,9 +328,20 @@ export function BackpackDialog({
     const statusPollAbortRef = useRef<AbortController | null>(null);
     const statusPollBusyRef = useRef(false);
 
+    // Channels states
+    const [channelStatuses, setChannelStatuses] = useState<StatusMap>({});
+    const [loadingChannels, setLoadingChannels] = useState(false);
+    const [busyChannel, setBusyChannel] = useState<ChannelName | null>(null);
+    const [disconnectingChannel, setDisconnectingChannel] = useState<string | null>(null);
+
+    const [whatsappChannelState, setWhatsappChannelState] = useState<WhatsAppState | null>(null);
+    const channelsPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const channelsAbortRef = useRef<AbortController | null>(null);
+    const channelsWsRef = useRef<WebSocket | null>(null);
+
     // Permission states (cached locally, sourced from Backpack)
     const [permissions, setPermissions] = useState<Record<string, boolean>>(() => {
-        const cached = new Set(getCachedBackpackPermissions());
+        const cached = new Set(getCachedBackpackPermissions(agentWallet));
         return Object.fromEntries(
             PERMISSION_TYPES.map((permission) => [permission.type, cached.has(permission.type as BackpackCloudPermission)]),
         );
@@ -279,6 +353,8 @@ export function BackpackDialog({
     const handleOpen = open !== undefined ? open : isOpen;
     const handleOpenChange = onOpenChange || setIsOpen;
 
+    const agentLabel = agentName || (agentWallet ? `${agentWallet.slice(0, 6)}...${agentWallet.slice(-4)}` : "Agent");
+
     const clearStatusPolling = useCallback(() => {
         if (statusPollIntervalRef.current) {
             clearInterval(statusPollIntervalRef.current);
@@ -289,6 +365,23 @@ export function BackpackDialog({
             statusPollAbortRef.current = null;
         }
         statusPollBusyRef.current = false;
+    }, []);
+
+    const cleanupChannels = useCallback(() => {
+        if (channelsPollRef.current) {
+            clearInterval(channelsPollRef.current);
+            channelsPollRef.current = null;
+        }
+        if (channelsAbortRef.current) {
+            channelsAbortRef.current.abort();
+            channelsAbortRef.current = null;
+        }
+        if (channelsWsRef.current) {
+            channelsWsRef.current.close();
+            channelsWsRef.current = null;
+        }
+        setWhatsappChannelState(null);
+        setBusyChannel(null);
     }, []);
 
     const cleanupAsyncWork = useCallback(() => {
@@ -309,7 +402,8 @@ export function BackpackDialog({
             whatsappWsRef.current.close();
             whatsappWsRef.current = null;
         }
-    }, [clearStatusPolling]);
+        cleanupChannels();
+    }, [clearStatusPolling, cleanupChannels]);
 
     const resetTransientState = useCallback(() => {
         setLoadingAccount(null);
@@ -319,6 +413,8 @@ export function BackpackDialog({
         setWhatsappPairingCode(null);
         setWhatsappPhoneInput("");
         setSearching(false);
+        setWhatsappChannelState(null);
+        setBusyChannel(null);
     }, []);
 
     const handleDialogOpenChange = useCallback((nextOpen: boolean) => {
@@ -349,8 +445,12 @@ export function BackpackDialog({
         connectionsAbortRef.current = controller;
 
         try {
+            if (!agentWallet) {
+                setConnections({});
+                return;
+            }
             setRefreshing(true);
-            const data = await sdk.backpack.connections({ userAddress: effectiveUserId }, { signal: controller.signal });
+            const data = await sdk.accounts.list({ userAddress: effectiveUserId, agentWallet }, { signal: controller.signal });
             const connMap: Record<string, ConnectionStatus> = {};
 
             // Map Composio connections to our featured providers
@@ -372,11 +472,206 @@ export function BackpackDialog({
                 setRefreshing(false);
             }
         }
-    }, [effectiveUserId]);
+    }, [agentWallet, effectiveUserId]);
+
+    const refreshChannels = useCallback(async (signal?: AbortSignal) => {
+        if (!agentWallet) return;
+        setLoadingChannels(true);
+        try {
+            const entries = await Promise.all(CHANNELS_LIST.map(async (channel) => [
+                channel,
+                await sdk.channels.status(channel, { userAddress: effectiveUserId, agentWallet }, { signal }),
+            ] as const));
+            if (signal?.aborted) return;
+            setChannelStatuses(Object.fromEntries(entries) as StatusMap);
+        } catch (err) {
+            if (signal?.aborted) return;
+            console.warn("[Backpack] Could not refresh channels:", err);
+        } finally {
+            if (!signal?.aborted) setLoadingChannels(false);
+        }
+    }, [agentWallet, effectiveUserId]);
+
+    const pollChannel = useCallback((channel: ChannelName) => {
+        if (!agentWallet) return;
+        const wallet = agentWallet;
+        if (channelsPollRef.current) clearInterval(channelsPollRef.current);
+        if (channelsAbortRef.current) channelsAbortRef.current.abort();
+
+        const controller = new AbortController();
+        channelsAbortRef.current = controller;
+        let attempts = 0;
+        const tick = async () => {
+            attempts += 1;
+            try {
+                const status = await sdk.channels.status(channel, { userAddress: effectiveUserId, agentWallet: wallet }, { signal: controller.signal });
+                if (controller.signal.aborted) return;
+                setChannelStatuses((current) => ({ ...current, [channel]: status }));
+                if (status.connected || attempts >= 40) {
+                    if (channelsPollRef.current) clearInterval(channelsPollRef.current);
+                    channelsPollRef.current = null;
+                    setBusyChannel(null);
+                }
+            } catch (error) {
+                if (!controller.signal.aborted) {
+                    console.warn("[Backpack] status poll failed", error);
+                }
+            }
+        };
+        void tick();
+        channelsPollRef.current = setInterval(() => void tick(), 3000);
+    }, [agentWallet, effectiveUserId]);
+
+    const openAction = useCallback((link: ChannelLinkResponse) => {
+        const url = actionUrl(link);
+        if (!url) return;
+        window.open(url, "_blank", "noopener,noreferrer");
+    }, []);
+
+    const startWhatsAppChannel = useCallback((link: ChannelLinkResponse) => {
+        const socket = link.action?.socket;
+        if (!socket) {
+            openAction(link);
+            pollChannel("whatsapp");
+            return;
+        }
+        if (channelsWsRef.current) {
+            channelsWsRef.current.close();
+        }
+        setWhatsappChannelState({ socket, loading: true, phone: "" });
+        const ws = new WebSocket(socket);
+        channelsWsRef.current = ws;
+        ws.onmessage = (event) => {
+            try {
+                const message = JSON.parse(String(event.data)) as Record<string, unknown>;
+                if (message.type === "qr" && typeof message.qr === "string") {
+                    setWhatsappChannelState((current) => current ? { ...current, qr: message.qr as string, loading: false } : current);
+                }
+                if (message.type === "pairing_code" && typeof message.code === "string") {
+                    setWhatsappChannelState((current) => current ? { ...current, pairing: message.code as string, loading: false } : current);
+                }
+                if (message.type === "pairing_code_pending") {
+                    setWhatsappChannelState((current) => current ? { ...current, qr: undefined, pairing: undefined, loading: true } : current);
+                }
+                if (message.type === "connected" || message.type === "already_connected") {
+                    setWhatsappChannelState(null);
+                    setBusyChannel(null);
+                    void refreshChannels();
+                    toast({ title: "WhatsApp connected", description: "Channel route is ready." });
+                }
+                if (message.type === "error") {
+                    setWhatsappChannelState((current) => current ? { ...current, loading: false } : current);
+                    toast({
+                        title: "WhatsApp failed",
+                        description: typeof message.message === "string" ? message.message : "Unable to link WhatsApp.",
+                        variant: "destructive",
+                    });
+                }
+            } catch {
+                // Ignore malformed provider frames.
+            }
+        };
+        ws.onerror = () => {
+            setWhatsappChannelState((current) => current ? { ...current, loading: false } : current);
+            toast({ title: "WhatsApp socket failed", description: "Unable to reach the channel service.", variant: "destructive" });
+        };
+        ws.onclose = () => {
+            channelsWsRef.current = null;
+        };
+        pollChannel("whatsapp");
+    }, [openAction, pollChannel, refreshChannels, toast]);
+
+    const connectChannel = useCallback(async (
+        channel: ChannelName,
+        mode?: "user" | "guild",
+        privacy?: "public" | "private"
+    ) => {
+        if (!agentWallet) return;
+        setBusyChannel(channel);
+        try {
+            const link = await sdk.channels.link(channel, {
+                userAddress: effectiveUserId,
+                agentWallet,
+                agentName: agentLabel,
+                ...(mode ? { mode } : {}),
+                ...(privacy ? { privacy } : {}),
+            });
+            if (channel === "whatsapp") {
+                startWhatsAppChannel(link);
+                return;
+            }
+            openAction(link);
+            pollChannel(channel);
+            toast({ title: `${CHANNEL_META[channel].label} link opened`, description: "Complete the provider flow to bind this agent." });
+        } catch (error) {
+            setBusyChannel(null);
+            toast({
+                title: "Channel link failed",
+                description: error instanceof Error ? error.message : "Unable to create channel link.",
+                variant: "destructive",
+            });
+        }
+    }, [agentLabel, agentWallet, effectiveUserId, openAction, pollChannel, startWhatsAppChannel, toast]);
+
+    const disconnectChannel = useCallback(async (route: ChannelRoute) => {
+        if (!agentWallet) return;
+        setDisconnectingChannel(route.id);
+        try {
+            await sdk.channels.disconnect(route.channel, {
+                userAddress: effectiveUserId,
+                agentWallet,
+                accountId: route.accountId,
+                threadId: route.threadId,
+            });
+            await refreshChannels();
+            toast({ title: "Channel disconnected", description: `${CHANNEL_META[route.channel].label} route removed.` });
+        } catch (error) {
+            toast({
+                title: "Disconnect failed",
+                description: error instanceof Error ? error.message : "Unable to disconnect channel.",
+                variant: "destructive",
+            });
+        } finally {
+            setDisconnectingChannel(null);
+        }
+    }, [agentWallet, effectiveUserId, refreshChannels, toast]);
+
+    const disconnectAllRoutes = useCallback(async (channel: ChannelName, routes: ChannelRoute[]) => {
+        if (!agentWallet) return;
+        setBusyChannel(channel);
+        try {
+            await Promise.all(routes.map(route =>
+                sdk.channels.disconnect(channel, {
+                    userAddress: effectiveUserId,
+                    agentWallet,
+                    accountId: route.accountId,
+                    threadId: route.threadId,
+                })
+            ));
+            await refreshChannels();
+            toast({ title: `${CHANNEL_META[channel].label} disconnected`, description: "All routes removed." });
+        } catch (error) {
+            toast({
+                title: "Disconnect failed",
+                description: error instanceof Error ? error.message : "Unable to disconnect channel.",
+                variant: "destructive",
+            });
+        } finally {
+            setBusyChannel(null);
+        }
+    }, [agentWallet, effectiveUserId, refreshChannels, toast]);
+
+    const pairWhatsAppChannel = useCallback(() => {
+        const phone = whatsappChannelState?.phone.replace(/[^0-9]/gu, "") || "";
+        if (phone.length < 10 || channelsWsRef.current?.readyState !== WebSocket.OPEN) return;
+        channelsWsRef.current.send(JSON.stringify({ type: "pair_phone", phone }));
+        setWhatsappChannelState((current) => current ? { ...current, loading: true, pairing: undefined } : current);
+    }, [whatsappChannelState]);
 
     const fetchPermissions = useCallback(async () => {
         try {
-            const granted = await fetchBackpackPermissions(effectiveUserId);
+            if (!agentWallet) return;
+            const granted = await fetchBackpackPermissions(effectiveUserId, agentWallet);
             const grantedSet = new Set(granted);
             setPermissions(() => Object.fromEntries(
                 PERMISSION_TYPES.map((permission) => [permission.type, grantedSet.has(permission.type as BackpackCloudPermission)]),
@@ -384,13 +679,22 @@ export function BackpackDialog({
         } catch (err) {
             console.warn("[Backpack] Could not fetch permissions:", err);
         }
-    }, [effectiveUserId]);
+    }, [agentWallet, effectiveUserId]);
 
     useEffect(() => {
         if (handleOpen && activeTab === "permissions") {
             void fetchPermissions();
         }
     }, [activeTab, fetchPermissions, handleOpen]);
+
+    // Fetch channel statuses when channels tab is opened
+    useEffect(() => {
+        if (handleOpen && activeTab === "channels") {
+            void refreshChannels();
+        } else {
+            cleanupChannels();
+        }
+    }, [handleOpen, activeTab, refreshChannels, cleanupChannels]);
 
     // Fetch connections when the accounts tab is opened
     useEffect(() => {
@@ -422,7 +726,7 @@ export function BackpackDialog({
 
         setSearching(true);
         try {
-            const data = await sdk.backpack.toolkits.list({ search: query, limit: 15 }, { signal: controller.signal });
+            const data = await sdk.accounts.toolkits.list({ search: query, limit: 15 }, { signal: controller.signal });
             setSearchResults(data.toolkits || []);
         } catch (err) {
             if (controller.signal.aborted) {
@@ -516,6 +820,9 @@ export function BackpackDialog({
         setLoadingPermission(type);
 
         try {
+            if (!agentWallet) {
+                throw new Error("Open an agent page to manage per-agent browser permissions.");
+            }
             let granted = false;
 
             switch (type) {
@@ -557,7 +864,7 @@ export function BackpackDialog({
             }
 
             if (granted) {
-                await grantBackpackPermission(effectiveUserId, type as BackpackCloudPermission);
+                await grantBackpackPermission(effectiveUserId, agentWallet, type as BackpackCloudPermission);
                 setPermissions(prev => ({ ...prev, [type]: true }));
                 toast({ title: "Permission Granted", description: `${type} access enabled.` });
             }
@@ -570,11 +877,14 @@ export function BackpackDialog({
         } finally {
             setLoadingPermission(null);
         }
-    }, [effectiveUserId, toast]);
+    }, [agentWallet, effectiveUserId, toast]);
 
     const revokePermission = useCallback(async (type: string) => {
         try {
-            await revokeBackpackCloudPermission(effectiveUserId, type as BackpackCloudPermission);
+            if (!agentWallet) {
+                throw new Error("Open an agent page to manage per-agent browser permissions.");
+            }
+            await revokeBackpackCloudPermission(effectiveUserId, agentWallet, type as BackpackCloudPermission);
             setPermissions(prev => ({ ...prev, [type]: false }));
             toast({ title: "Permission Revoked", description: `${type} access disabled.` });
         } catch (err) {
@@ -584,7 +894,7 @@ export function BackpackDialog({
                 variant: "destructive",
             });
         }
-    }, [effectiveUserId, toast]);
+    }, [agentWallet, effectiveUserId, toast]);
 
     // ==========================================================================
     // OAuth Handlers — Composio Credential Broker
@@ -595,11 +905,15 @@ export function BackpackDialog({
         clearStatusPolling();
 
         try {
-            const data = await sdk.backpack.connect({
+            if (!agentWallet) {
+                throw new Error("Open an agent page to connect accounts for that agent.");
+            }
+            const data = await sdk.accounts.connect({
                 userAddress: effectiveUserId,
+                agentWallet,
                 toolkit: provider.slug,
             });
-            const redirectUrl = data.redirectUrl || data.url;
+            const redirectUrl = data.redirectUrl;
 
             if (!redirectUrl) {
                 throw new Error("No redirect URL returned from server");
@@ -620,7 +934,12 @@ export function BackpackDialog({
             });
 
             startStatusPolling(async (signal) => {
-                const statusData = await sdk.backpack.status(provider.slug, { userAddress: effectiveUserId }, { signal });
+                const statusData = await sdk.accounts.status({
+                    userAddress: effectiveUserId,
+                    agentWallet,
+                    toolkit: provider.slug,
+                    connectedAccountId: data.connectedAccountId,
+                }, { signal });
                 if (!statusData.connected) {
                     return false;
                 }
@@ -632,6 +951,7 @@ export function BackpackDialog({
                         name: provider.name,
                         connected: true,
                         accountId: statusData.accountId,
+                        connectedAccountId: statusData.connectedAccountId,
                     },
                 }));
                 toast({
@@ -650,7 +970,7 @@ export function BackpackDialog({
             });
             setLoadingAccount(null);
         }
-    }, [clearStatusPolling, effectiveUserId, startStatusPolling, toast]);
+    }, [agentWallet, clearStatusPolling, effectiveUserId, startStatusPolling, toast]);
 
     // ==========================================================================
     // Channel-Based Connection (Telegram)
@@ -661,7 +981,14 @@ export function BackpackDialog({
         clearStatusPolling();
 
         try {
-            const { deepLinkUrl } = await sdk.backpack.telegram.link({ userAddress: effectiveUserId });
+            if (!agentWallet) {
+                throw new Error("Open an agent page to bind Telegram for that agent.");
+            }
+            const link = await sdk.channels.link("telegram", { userAddress: effectiveUserId, agentWallet });
+            const deepLinkUrl = link.action?.url || link.url;
+            if (!deepLinkUrl) {
+                throw new Error("No Telegram link returned from server.");
+            }
 
             // Open Telegram deep link
             window.open(deepLinkUrl, "_blank");
@@ -672,8 +999,8 @@ export function BackpackDialog({
             });
 
             startStatusPolling(async (signal) => {
-                const statusData = await sdk.backpack.telegram.status({ userAddress: effectiveUserId }, { signal });
-                if (!statusData.bound) {
+                const statusData = await sdk.channels.status("telegram", { userAddress: effectiveUserId, agentWallet }, { signal });
+                if (!statusData.connected) {
                     return false;
                 }
 
@@ -700,13 +1027,13 @@ export function BackpackDialog({
             });
             setLoadingAccount(null);
         }
-    }, [clearStatusPolling, effectiveUserId, startStatusPolling, toast]);
+    }, [agentWallet, clearStatusPolling, effectiveUserId, startStatusPolling, toast]);
 
     // ==========================================================================
     // Channel-Based Connection (WhatsApp via Baileys WebSocket)
     // ==========================================================================
 
-    const connectWhatsApp = useCallback(() => {
+    const connectWhatsApp = useCallback(async () => {
         clearStatusPolling();
 
         // Close any existing WS connection
@@ -720,7 +1047,27 @@ export function BackpackDialog({
         setWhatsappQrLoading(true);
         setLoadingAccount("whatsapp");
 
-        const wsUrl = `${SOCKET_BASE}/whatsapp?userAddress=${encodeURIComponent(effectiveUserId)}`;
+        let wsUrl: string | undefined;
+        try {
+            if (!agentWallet) {
+                throw new Error("Open an agent page to bind WhatsApp for that agent.");
+            }
+            const link = await sdk.channels.link("whatsapp", { userAddress: effectiveUserId, agentWallet });
+            wsUrl = link.action?.socket;
+            if (!wsUrl) {
+                throw new Error("No WhatsApp pairing socket returned from server.");
+            }
+        } catch (error) {
+            toast({
+                title: "Connection Failed",
+                description: error instanceof Error ? error.message : "Could not connect WhatsApp.",
+                variant: "destructive",
+            });
+            setWhatsappScreen(null);
+            setWhatsappQrLoading(false);
+            setLoadingAccount(null);
+            return;
+        }
         console.log(`[Backpack] Connecting WhatsApp WebSocket: ${wsUrl}`);
 
         const ws = new WebSocket(wsUrl);
@@ -827,7 +1174,7 @@ export function BackpackDialog({
             console.log("[Backpack] WhatsApp WebSocket closed");
             whatsappWsRef.current = null;
         };
-    }, [effectiveUserId, toast]);
+    }, [agentWallet, clearStatusPolling, effectiveUserId, toast]);
 
     const cancelWhatsApp = useCallback(() => {
         if (whatsappWsRef.current) {
@@ -846,9 +1193,19 @@ export function BackpackDialog({
         setLoadingAccount(provider.slug);
 
         try {
-            await sdk.backpack.disconnect({
+            if (!agentWallet) {
+                throw new Error("Open an agent page to disconnect accounts for that agent.");
+            }
+            const connection = connections[provider.slug];
+            const connectedAccountId = connection?.connectedAccountId || connection?.accountId;
+            if (!connectedAccountId) {
+                throw new Error("Connected account id is missing.");
+            }
+            await sdk.accounts.disconnect({
                 userAddress: effectiveUserId,
+                agentWallet,
                 toolkit: provider.slug,
+                connectedAccountId,
             });
 
             // Update local state
@@ -871,7 +1228,7 @@ export function BackpackDialog({
         } finally {
             setLoadingAccount(null);
         }
-    }, [effectiveUserId, toast]);
+    }, [agentWallet, connections, effectiveUserId, toast]);
 
     useEffect(() => {
         return () => {
@@ -894,6 +1251,7 @@ export function BackpackDialog({
     // ==========================================================================
 
     const grantedPermissionsCount = Object.values(permissions).filter(Boolean).length;
+    const connectedChannelsCount = Object.values(channelStatuses).filter(status => (status?.routes || []).length > 0).length;
     const connectedAccountsCount = Object.values(connections).filter(c => c.connected).length;
 
     // Provider card renderer — shared between featured and search results
@@ -1161,13 +1519,22 @@ export function BackpackDialog({
                     <>
 
                         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 min-h-0 overflow-hidden">
-                            <TabsList className="grid w-full grid-cols-2 flex-shrink-0">
+                            <TabsList className="grid w-full grid-cols-3 flex-shrink-0">
                                 <TabsTrigger value="permissions" className="gap-2">
                                     <Shield className="w-4 h-4" />
                                     Permissions
                                     {grantedPermissionsCount > 0 && (
                                         <Badge variant="secondary" className="ml-1 text-xs px-1.5">
                                             {grantedPermissionsCount}
+                                        </Badge>
+                                    )}
+                                </TabsTrigger>
+                                <TabsTrigger value="channels" className="gap-2">
+                                    <RadioTower className="w-4 h-4" />
+                                    Channels
+                                    {connectedChannelsCount > 0 && (
+                                        <Badge variant="secondary" className="ml-1 text-xs px-1.5">
+                                            {connectedChannelsCount}
                                         </Badge>
                                     )}
                                 </TabsTrigger>
@@ -1212,6 +1579,194 @@ export function BackpackDialog({
                                         </div>
                                     </div>
                                 ))}
+                            </TabsContent>
+
+                            {/* Channels Tab */}
+                            <TabsContent value="channels" className="mt-4 flex flex-col flex-1 min-h-0 overflow-hidden">
+                                {loadingChannels && Object.keys(channelStatuses).length === 0 ? (
+                                    <div className="flex items-center justify-center py-8 text-muted-foreground text-sm flex-1">
+                                        <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                                        Loading channels...
+                                    </div>
+                                ) : (
+                                    <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-3">
+                                        {CHANNELS_LIST.map((channel) => {
+                                            const info = CHANNEL_META[channel];
+                                            const linked = channelStatuses[channel]?.routes || [];
+                                            const connecting = busyChannel === channel;
+                                            const isConnected = linked.length > 0;
+
+                                            return (
+                                                <div key={channel} className="space-y-2.5">
+                                                    <div className="cm-setting-row">
+                                                        <div
+                                                            className="cm-setting-row__icon overflow-hidden flex items-center justify-center"
+                                                            style={{ backgroundColor: `${info.color}15` }}
+                                                        >
+                                                            <img
+                                                                src={info.logo}
+                                                                alt={info.label}
+                                                                className="w-6 h-6 object-contain"
+                                                                onError={(e) => {
+                                                                    (e.target as HTMLImageElement).style.display = 'none';
+                                                                }}
+                                                            />
+                                                        </div>
+                                                        <div className="cm-setting-row__copy">
+                                                            <div className="cm-setting-row__label flex items-center gap-1.5">
+                                                                {info.label}
+                                                                {isConnected && (
+                                                                    <Badge variant="secondary" className="text-[10px] px-1.5 py-0 border-primary/20 text-muted-foreground font-normal">
+                                                                        {linked.length} {linked.length === 1 ? "route" : "routes"}
+                                                                    </Badge>
+                                                                )}
+                                                            </div>
+                                                            <div className="cm-setting-row__description hidden sm:block">
+                                                                {isConnected ? (
+                                                                    <span className="flex items-center gap-1 text-green-400">
+                                                                        <Check className="w-3 h-3" /> {routeLabel(linked[0])} {linked.length > 1 ? `(+${linked.length - 1} more)` : ""}
+                                                                    </span>
+                                                                ) : (
+                                                                    info.description
+                                                                )}
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="cm-setting-row__control">
+                                                            {connecting ? (
+                                                                <Button
+                                                                    variant="outline"
+                                                                    size="sm"
+                                                                    disabled
+                                                                    className="shrink-0 h-8 w-8 sm:w-auto p-0 sm:px-2.5 flex items-center justify-center"
+                                                                >
+                                                                    <Loader2 className="w-4 h-4 animate-spin text-fuchsia-400" />
+                                                                </Button>
+                                                            ) : isConnected ? (
+                                                                <Button
+                                                                    variant="destructive"
+                                                                    size="sm"
+                                                                    className="shrink-0 h-8 w-8 sm:w-auto p-0 sm:px-2.5 flex items-center justify-center"
+                                                                    onClick={() => disconnectAllRoutes(channel, linked)}
+                                                                >
+                                                                    <Unplug className="w-4 h-4" />
+                                                                    <span className="hidden sm:inline ml-1 text-xs">Disconnect</span>
+                                                                </Button>
+                                                            ) : channel === "telegram" ? (
+                                                                <Button
+                                                                    variant="outline"
+                                                                    size="sm"
+                                                                    className="shrink-0 h-8 w-8 sm:w-auto p-0 sm:px-2.5 flex items-center justify-center"
+                                                                    onClick={() => connectChannel("telegram")}
+                                                                >
+                                                                    <Send className="w-4 h-4" />
+                                                                    <span className="hidden sm:inline ml-1 text-xs">Connect</span>
+                                                                </Button>
+                                                            ) : channel === "whatsapp" ? (
+                                                                <Button
+                                                                    variant="outline"
+                                                                    size="sm"
+                                                                    className="shrink-0 h-8 w-8 sm:w-auto p-0 sm:px-2.5 flex items-center justify-center"
+                                                                    onClick={() => connectChannel("whatsapp")}
+                                                                >
+                                                                    <QrCode className="w-4 h-4" />
+                                                                    <span className="hidden sm:inline ml-1 text-xs">Connect</span>
+                                                                </Button>
+                                                            ) : (
+                                                                <Select value="" onValueChange={(val) => {
+                                                                    const [mode, privacy] = val.split(":");
+                                                                    void connectChannel(channel, mode as any, privacy as any);
+                                                                }}>
+                                                                    <SelectTrigger className="h-8 text-xs shrink-0 w-8 sm:w-24 p-0 sm:px-2.5">
+                                                                        <SelectValue placeholder="Connect" />
+                                                                    </SelectTrigger>
+                                                                    <SelectContent>
+                                                                        <SelectItem value="user">DM</SelectItem>
+                                                                        <SelectItem value="guild:public">Public {channel === "discord" ? "Server" : "Workspace"}</SelectItem>
+                                                                        <SelectItem value="guild:private">Private {channel === "discord" ? "Server" : "Workspace"}</SelectItem>
+                                                                    </SelectContent>
+                                                                </Select>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+
+                                        {/* WhatsApp Pairing Screen inline/nested at the bottom if active */}
+                                        {whatsappChannelState && (
+                                            <div className="p-3 bg-muted/40 rounded-lg border border-primary/10 space-y-3">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-2 font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">
+                                                        <QrCode className="w-4 h-4 text-green-400" />
+                                                        WhatsApp Pairing
+                                                    </div>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        onClick={() => {
+                                                            if (channelsWsRef.current) {
+                                                                channelsWsRef.current.close();
+                                                            }
+                                                            setWhatsappChannelState(null);
+                                                        }}
+                                                        className="h-6 w-6 p-0 hover:bg-muted"
+                                                    >
+                                                        <X className="w-3.5 h-3.5 text-muted-foreground" />
+                                                    </Button>
+                                                </div>
+
+                                                {whatsappChannelState.loading && (
+                                                    <div className="flex items-center gap-2 text-xs text-muted-foreground py-2 justify-center">
+                                                        <Loader2 className="w-4 h-4 animate-spin text-green-400" />
+                                                        Waiting for WhatsApp...
+                                                    </div>
+                                                )}
+
+                                                {whatsappChannelState.qr && (
+                                                    <div className="mx-auto w-full max-w-[200px] rounded-lg bg-white p-2.5 border border-primary/15">
+                                                        <img
+                                                            alt="Scan with WhatsApp"
+                                                            className="aspect-square w-full object-contain"
+                                                            src={whatsappChannelState.qr.startsWith("data:") ? whatsappChannelState.qr : `data:image/png;base64,${whatsappChannelState.qr}`}
+                                                        />
+                                                        <p className="text-[10px] text-muted-foreground text-center mt-1">Scan with WhatsApp link device</p>
+                                                    </div>
+                                                )}
+
+                                                {whatsappChannelState.pairing && (
+                                                    <div className="rounded-lg border border-green-500/20 bg-green-500/5 px-3 py-3 text-center">
+                                                        <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Pairing Code</div>
+                                                        <div className="font-mono text-2xl font-bold tracking-[0.28em] text-green-400">
+                                                            {whatsappChannelState.pairing}
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                <div className="flex flex-col gap-1.5">
+                                                    <span className="text-[10px] font-mono text-muted-foreground">Or Pair with Phone Number</span>
+                                                    <div className="flex gap-2">
+                                                        <Input
+                                                            type="tel"
+                                                            value={whatsappChannelState.phone}
+                                                            placeholder="14155551234"
+                                                            onChange={(e) => setWhatsappChannelState((current) => current ? { ...current, phone: e.target.value } : current)}
+                                                            className="h-8 text-xs bg-background/50"
+                                                        />
+                                                        <Button
+                                                            size="sm"
+                                                            onClick={pairWhatsAppChannel}
+                                                            disabled={whatsappChannelState.phone.replace(/[^0-9]/gu, "").length < 10}
+                                                            className="h-8 text-xs bg-green-600 hover:bg-green-700 text-white"
+                                                        >
+                                                            Pair
+                                                        </Button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                             </TabsContent>
 
                             {/* Connected Accounts Tab */}
