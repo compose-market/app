@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import type {
     AttachmentInput,
     ChatCompletionsCreateParams,
-    ComposeCallOptions,
+    CallOptions,
     Receipt,
     ResponsesCreateParams,
     ActivityEvent,
@@ -10,7 +10,9 @@ import type {
     RunEvent,
     SessionBudgetSnapshot,
     SessionInvalidReason,
+    PlanProposalEvent,
 } from "@compose-market/sdk";
+import { parseToolEvent } from "@compose-market/sdk";
 
 import { sdk } from "@/lib/sdk";
 import { noticeId, type Artifact, type Plan, type UseChatReturn } from "@/hooks/use-chat";
@@ -25,11 +27,12 @@ export interface StreamCallbacks {
     onVideoStatus?: (status: { jobId: string; status: "queued" | "processing" | "completed" | "failed"; progress?: number; url?: string; error?: string }) => void;
     onDone?: () => void;
     onFinal?: (final: { text: string; requestId: string | null; structuredOutput?: unknown }) => void;
+    onPlanEvent?: (event: PlanProposalEvent) => void;
 }
 
-type StreamCallOptions = Pick<
-    ComposeCallOptions,
-    "x402MaxAmountWei" | "idempotencyKey" | "composeRunId" | "composeKey" | "userAddress" | "chainId" | "timeoutMs"
+export type StreamCallOptions = Pick<
+    CallOptions,
+    "x402MaxAmountWei" | "idempotencyKey" | "runId" | "key" | "userAddress" | "chainId" | "timeoutMs"
 >;
 
 export interface AgentStreamArgs {
@@ -37,8 +40,9 @@ export interface AgentStreamArgs {
     message: string;
     threadId: string;
     userAddress: string;
+    agentCard?: unknown;
     cloudPermissions?: string[];
-    composeRunId?: string;
+    runId?: string;
     attachment?: AttachmentInput;
     assistantId: string;
     signal?: AbortSignal;
@@ -50,7 +54,7 @@ export interface WorkflowStreamArgs {
     message: string;
     threadId: string;
     userAddress: string;
-    composeRunId?: string;
+    runId?: string;
     continuous?: boolean;
     lastEventIndex?: number;
     attachment?: AttachmentInput;
@@ -217,6 +221,46 @@ export function useStream(
             sdk.events.on("receipt", (event) => callbacksRef.current.onReceipt?.(event.receipt)),
             sdk.events.on("budget", (event) => callbacksRef.current.onBudget?.(event.snapshot)),
             sdk.events.on("sessionInvalid", (event) => callbacksRef.current.onSessionInvalid?.(event.reason)),
+            sdk.events.on("planProposed", (event) => {
+                callbacksRef.current.onPlanEvent?.(event);
+            }),
+            sdk.events.on("approvalRequested", (event) => {
+                callbacksRef.current.onPlanEvent?.(event);
+            }),
+            sdk.events.on("approvalDecided", (event) => {
+                callbacksRef.current.onPlanEvent?.(event);
+            }),
+            sdk.events.on("planFeedbackRequested", (event) => {
+                callbacksRef.current.onPlanEvent?.(event);
+            }),
+            sdk.events.on("toolCallStart", (event) => {
+                if (event.source === "agent" || event.source === "workflow") {
+                    chatRef.current.startToolActivity(event.toolName, event.summary, event.displayName);
+                }
+            }),
+            sdk.events.on("toolCallEnd", (event) => {
+                if (event.source === "agent" || event.source === "workflow") {
+                    chatRef.current.finishToolActivity(event.toolName, event.summary, event.failed, event.displayName);
+                }
+            }),
+            sdk.events.on("agentArtifact", (event) => {
+                const assistantId = chatRef.current.currentAssistantIdRef.current;
+                if (!assistantId) return;
+                chatRef.current.upsertAssistantArtifact(assistantId, {
+                    id: `${event.responseId ?? event.runKey ?? "artifact"}:${Date.now()}`,
+                    artifactType: event.artifactType,
+                    url: event.url,
+                    inline: event.inline,
+                    mimeType: event.mimeType,
+                    bytes: event.bytes,
+                    responseId: event.responseId,
+                    status: event.status,
+                    jobId: event.jobId,
+                    sourceTool: event.sourceTool,
+                    source: event.source,
+                    runKey: event.runKey,
+                } as any);
+            }),
         ];
         return () => {
             for (const unsub of unsubs) unsub();
@@ -245,8 +289,9 @@ export function useStream(
                 message: args.message,
                 threadId: args.threadId,
                 userAddress: args.userAddress,
+                ...(args.agentCard ? { agentCard: args.agentCard } : {}),
                 ...(args.cloudPermissions ? { cloudPermissions: args.cloudPermissions } : {}),
-                ...(args.composeRunId ? { composeRunId: args.composeRunId } : {}),
+                ...(args.runId ? { runId: args.runId } : {}),
                 ...(args.attachment ? { attachment: args.attachment } : {}),
             },
             { ...args.options, signal: args.signal },
@@ -279,7 +324,7 @@ export function useStream(
                 message: args.message,
                 threadId: args.threadId,
                 userAddress: args.userAddress,
-                ...(args.composeRunId ? { composeRunId: args.composeRunId } : {}),
+                ...(args.runId ? { runId: args.runId } : {}),
                 ...(typeof args.continuous === "boolean" ? { continuous: args.continuous } : {}),
                 ...(typeof args.lastEventIndex === "number" ? { lastEventIndex: args.lastEventIndex } : {}),
                 ...(args.attachment ? { attachment: args.attachment } : {}),
@@ -325,15 +370,8 @@ export function useStream(
     }, []);
 
     const append = useCallback(async (args: ResponsesStreamArgs, active: LiveResponse): Promise<void> => {
-        const responses = sdk.inference.responses as unknown as {
-            append(
-                responseId: string,
-                params: { input: unknown; params?: Record<string, unknown> },
-                options?: StreamCallOptions & { signal?: AbortSignal },
-            ): Promise<unknown>;
-        };
         const input = latestInput((args.params as { input?: unknown }).input);
-        await responses.append(active.responseId, {
+        await sdk.inference.responses.append(active.responseId, {
             input,
             params: paramsWithoutInput(args.params),
         }, {
@@ -383,14 +421,7 @@ export function useStream(
                         }
                         chatRef.current.setRealtimeSession({
                             append: async (input, params) => {
-                                const responses = sdk.inference.responses as unknown as {
-                                    append(
-                                        responseId: string,
-                                        params: { input: unknown; params?: Record<string, unknown> },
-                                        options?: StreamCallOptions,
-                                    ): Promise<unknown>;
-                                };
-                                await responses.append(id, { input, ...(params ? { params } : {}) }, args.options);
+                                await sdk.inference.responses.append(id, { input, ...(params ? { params } : {}) }, args.options);
                             },
                             close: async () => {
                                 liveRef.current.delete(model);
@@ -512,14 +543,7 @@ export function useStream(
     }, [append, runRealtimeResponses]);
 
     const appendResponses = useCallback(async (args: ResponsesAppendArgs): Promise<void> => {
-        const responses = sdk.inference.responses as unknown as {
-            append(
-                responseId: string,
-                params: { input: unknown; params?: Record<string, unknown> },
-                options?: StreamCallOptions & { signal?: AbortSignal },
-            ): Promise<unknown>;
-        };
-        await responses.append(args.responseId, {
+        await sdk.inference.responses.append(args.responseId, {
             input: args.input,
             ...(args.params ? { params: args.params } : {}),
         }, {
@@ -726,16 +750,24 @@ function fail(
 
 function planFromActivityEvent(event: ActivityEvent): Plan {
     const payload = event.payload ?? {};
+    const rawType = event.raw && typeof event.raw === "object" && "type" in event.raw
+        ? (event.raw as Record<string, unknown>).type as string
+        : "";
+    const planType: Plan["type"] = rawType === "approval.decided"
+        ? "approval.decided"
+        : rawType === "plan.feedback_requested"
+            ? "plan.feedback_requested"
+            : rawType === "approval.requested"
+                ? "approval.requested"
+                : "plan.proposed";
     return {
-        type: event.raw && typeof event.raw === "object" && "type" in event.raw && event.raw.type === "harness_plan_decided"
-            ? "harness_plan_decided"
-            : "harness_plan_proposed",
+        type: planType,
         proposalId: str(payload.proposalId) ?? event.id,
         version: num(payload.version) ?? 1,
         state: str(payload.state) ?? event.status ?? "pending",
         decision: decision(payload.decision),
-        rootComposeRunId: event.rootId,
-        composeRunId: event.runId,
+        rootRunId: event.rootId,
+        runId: event.runId,
         proposal: payload.proposal,
         markdown: str(payload.markdown),
         approver: str(payload.approver),

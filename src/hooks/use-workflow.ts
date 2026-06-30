@@ -5,7 +5,7 @@ import {
   useNodesState,
   type Connection,
   type Edge,
-  type Node,
+  type Node as RFNode,
   type OnInit,
   type ReactFlowInstance,
 } from "@xyflow/react";
@@ -18,7 +18,7 @@ import type {
   TriggerNodeData,
 } from "@/components/compose/nodes";
 
-export type ComposeNode = Node<StepNodeData | AgentNodeData | TriggerNodeData | HookNodeData>;
+export type WorkflowNode = RFNode<StepNodeData | AgentNodeData | TriggerNodeData | HookNodeData>;
 
 interface UseWorkflowOptions {
   onWarpRequired?: (agent: Agent) => void;
@@ -35,7 +35,7 @@ function createConnectorNode(
   connectorId: string,
   tool: ConnectorTool,
   position: { x: number; y: number },
-): ComposeNode {
+): WorkflowNode {
   const id = `step_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const step: WorkflowStep = {
     id,
@@ -63,7 +63,7 @@ function createConnectorNode(
 function createAgentNode(
   agent: Agent,
   position: { x: number; y: number },
-): ComposeNode {
+): WorkflowNode {
   const id = `agent_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const step = {
     id,
@@ -94,8 +94,8 @@ export function useWorkflow(options: UseWorkflowOptions = {}) {
   const [workflowName, setWorkflowName] = useState("Untitled Workflow");
   const [workflowDescription, setWorkflowDescription] = useState("");
   const [inputJson, setInputJson] = useState("{}");
-  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance<ComposeNode, Edge> | null>(null);
-  const [nodes, setNodes, onNodesChange] = useNodesState<ComposeNode>([]);
+  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance<WorkflowNode, Edge> | null>(null);
+  const [nodes, setNodes, onNodesChange] = useNodesState<WorkflowNode>([] as WorkflowNode[]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
   const getDropPosition = useCallback((x?: number, y?: number) => {
@@ -132,23 +132,23 @@ export function useWorkflow(options: UseWorkflowOptions = {}) {
     }, current));
   }, [setEdges]);
 
-  const onInit = useCallback<OnInit<ComposeNode, Edge>>((instance) => {
+  const onInit = useCallback<OnInit<WorkflowNode, Edge>>((instance) => {
     setReactFlowInstance(instance);
   }, []);
 
   const onDrop = useCallback((event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
 
-    const pluginPayload = event.dataTransfer.getData("application/compose-plugin");
-    if (pluginPayload) {
-      const plugin = JSON.parse(pluginPayload) as { registryId: string; name: string; description?: string };
+    const connectorPayload = event.dataTransfer.getData("application/compose-connector");
+    if (connectorPayload) {
+      const connector = JSON.parse(connectorPayload) as { registryId: string; name: string; description?: string };
       setNodes((current) => [
         ...current,
         createConnectorNode(
-          plugin.registryId,
+          connector.registryId,
           {
             name: "execute",
-            description: plugin.description || `Execute ${plugin.name}`,
+            description: connector.description || `Execute ${connector.name}`,
             inputSchema: { type: "object", properties: {} },
           },
           getDropPosition(event.clientX, event.clientY),
@@ -188,7 +188,7 @@ export function useWorkflow(options: UseWorkflowOptions = {}) {
 
   const workflowAgentIds = useMemo(() => (
     nodes
-      .filter((node): node is Node<AgentNodeData> => node.type === "agentNode")
+      .filter((node): node is RFNode<AgentNodeData> => node.type === "agentNode")
       .map((node) => node.data.agent.onchainAgentId)
       .filter((agentId): agentId is number => typeof agentId === "number")
   ), [nodes]);

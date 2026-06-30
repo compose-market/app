@@ -16,8 +16,9 @@ import type {
     ActivityEvent,
     ActivityState,
     ModelEvent,
+    PlanDecision,
 } from "@compose-market/sdk";
-import { createActivityState, reduceActivityState } from "@compose-market/sdk";
+import { createActivityState, reduceActivityState, decodeActivityEvent } from "@compose-market/sdk";
 import { uploadConversationFile, cleanupConversationFiles } from "@/lib/pinata";
 import {
     createObjectUrlPreview,
@@ -32,13 +33,13 @@ import {
 export type MessageType = "text" | "image" | "audio" | "video" | "embedding" | "pdf" | "file";
 
 export interface Plan {
-    type: "harness_plan_proposed" | "harness_plan_decided";
+    type: "plan.proposed" | "approval.requested" | "approval.decided" | "plan.feedback_requested";
     proposalId: string;
     version: number;
     state: string;
-    decision?: "approved" | "rejected" | "changes_requested";
-    rootComposeRunId?: string;
-    composeRunId?: string;
+    decision?: PlanDecision;
+    rootRunId?: string;
+    runId?: string;
     requestedBy?: string;
     proposal?: unknown;
     markdown?: string;

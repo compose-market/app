@@ -24,8 +24,8 @@ const BROKER_BASE = getBrokerBaseUrl();
 /** Server origin types (user-facing). */
 export type ServerOrigin = CanonicalConnectorOrigin;
 
-/** Record type: agent (autonomous AI agents) or plugin (tools/connectors). */
-export type RecordType = "agent" | "plugin";
+/** Record type: agent (autonomous AI agents) or connector (tools/connectors). */
+export type RecordType = "agent" | "connector";
 
 /** Unified server record. */
 export interface RegistryServer {
@@ -120,18 +120,18 @@ interface BrokerServerCard extends BrokerServerSummary {
     credentials: Array<{ varName: string; description?: string | null; obtainUrl?: string | null }>;
 }
 
-interface BrokerOnchainPlugin {
+interface BrokerOnchainConnector {
     id: string;
     name: string;
     description: string;
     toolCount: number;
-    tools: Array<{ name: string; description: string; parameters: Record<string, unknown>; pluginId: string }>;
+    tools: Array<{ name: string; description: string; parameters: Record<string, unknown>; connectorId: string }>;
     requiresApiKey?: boolean;
     apiKeyConfigured?: boolean;
 }
 
 interface BrokerOnchainResponse {
-    plugins: BrokerOnchainPlugin[];
+    connectors: BrokerOnchainConnector[];
     status: {
         initialized: boolean;
         walletAddress: string | null;
@@ -160,7 +160,7 @@ function summaryToRegistryServer(s: BrokerServerSummary): RegistryServer {
     return {
         registryId: binding.registryId,
         origin,
-        type: "plugin",
+        type: "connector",
         sources: [origin],
         canonicalKey: s.slug,
         name: s.name,
@@ -184,7 +184,7 @@ function cardToRegistryServer(s: BrokerServerCard): RegistryServer {
     return {
         registryId: binding.registryId,
         origin,
-        type: "plugin",
+        type: "connector",
         sources: [origin],
         canonicalKey: s.slug,
         name: s.name,
@@ -210,12 +210,12 @@ function cardToRegistryServer(s: BrokerServerCard): RegistryServer {
     };
 }
 
-function pluginToRegistryServer(p: BrokerOnchainPlugin): RegistryServer {
+function connectorToRegistryServer(p: BrokerOnchainConnector): RegistryServer {
     const binding = normalizeConnectorBinding({ registryId: p.id, origin: "onchain" });
     return {
         registryId: binding.registryId,
         origin: binding.origin,
-        type: "plugin",
+        type: "connector",
         sources: [binding.origin],
         canonicalKey: p.id,
         name: p.name,
@@ -267,8 +267,8 @@ async function fetchServers(options: ListServersOptions = {}): Promise<RegistryL
                 if (!res.ok) return { total: 0, servers: [] };
                 const data = await res.json() as BrokerOnchainResponse;
                 return {
-                    total: data.plugins.length,
-                    servers: data.plugins.map(pluginToRegistryServer),
+                    total: data.connectors.length,
+                    servers: data.connectors.map(connectorToRegistryServer),
                 };
             }),
         );
@@ -325,8 +325,8 @@ async function searchServers(query: string, limit = DEFAULT_REGISTRY_PAGE_SIZE, 
     const needle = normalizedQuery;
     let onchainServers: RegistryServer[] = [];
     if (onchainData) {
-        onchainServers = onchainData.plugins
-            .map(pluginToRegistryServer)
+        onchainServers = onchainData.connectors
+            .map(connectorToRegistryServer)
             .filter((server) => (
                 server.name.toLowerCase().includes(needle)
                 || server.slug.toLowerCase().includes(needle)
@@ -358,8 +358,8 @@ async function fetchServer(registryId: string): Promise<RegistryServer> {
         const id = binding.slug;
         const res = await fetch(`${BROKER_BASE}/onchain/${encodeURIComponent(id)}`);
         if (!res.ok) throw new Error(`Failed to fetch onchain connector: ${res.status}`);
-        const plugin = await res.json() as BrokerOnchainPlugin;
-        return pluginToRegistryServer(plugin);
+        const connector = await res.json() as BrokerOnchainConnector;
+        return connectorToRegistryServer(connector);
     }
     const slug = binding.slug;
     const res = await fetch(`${BROKER_BASE}/mcps/${encodeURIComponent(slug)}`);
@@ -374,9 +374,9 @@ async function fetchRegistryMeta(): Promise<RegistryMeta> {
         fetch(`${BROKER_BASE}/onchain`).then((r) => r.ok ? r.json() as Promise<BrokerOnchainResponse> : Promise.resolve(null)),
     ]);
     return {
-        totalServers: toolsMeta.total + (onchain?.plugins.length ?? 0),
+        totalServers: toolsMeta.total + (onchain?.connectors.length ?? 0),
         toolsServers: toolsMeta.origins["mcp"] ?? 0,
-        onchainServers: onchain?.plugins.length ?? 0,
+        onchainServers: onchain?.connectors.length ?? 0,
         loadedAt: new Date().toISOString(),
     };
 }

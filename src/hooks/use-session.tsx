@@ -10,7 +10,7 @@ import {
 import { usePostHog } from "@posthog/react";
 import { useActiveAccount } from "thirdweb/react";
 import {
-    ComposeError,
+    Error,
     type BudgetEvent,
     type SessionActiveEvent,
     type SessionExpiredEvent,
@@ -55,7 +55,7 @@ interface SessionContextValue {
     isCreating: boolean;
     error: string | null;
     createSession: (budgetUSDC: number, durationHours?: number) => Promise<boolean>;
-    ensureComposeKeyToken: () => Promise<string | null>;
+    ensureKeyToken: () => Promise<string | null>;
     endSession: () => void;
     hasBudget: (requiredWei?: number) => boolean;
     formatBudget: (weiAmount: number) => string;
@@ -90,7 +90,7 @@ function toNumberSafe(value: string | number | null | undefined, fallback = 0): 
 
 function toBudgetUsdString(value: number): string {
     if (!Number.isFinite(value) || value <= 0) {
-        throw new Error("Session budget must be a positive USDC amount");
+        throw new globalThis.Error("Session budget must be a positive USDC amount");
     }
     return value.toFixed(6).replace(/\.?0+$/, "");
 }
@@ -181,7 +181,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         void syncSessionFromBackend();
     }, [account?.address, paymentChainId, syncSessionFromBackend]);
 
-    const ensureComposeKeyToken = useCallback(async (): Promise<string | null> => {
+    const ensureKeyToken = useCallback(async (): Promise<string | null> => {
         if (!account?.address) return null;
         const cached = sdk.keys.currentToken();
         if (cached) return cached;
@@ -299,7 +299,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             const activeChain = CHAIN_OBJECTS[paymentChainId as keyof typeof CHAIN_OBJECTS];
             const usdcAddress = USDC_ADDRESSES[paymentChainId];
             if (!activeChain || !usdcAddress) {
-                throw new Error(`Session payments are not configured for chain ${paymentChainId}`);
+                throw new globalThis.Error(`Session payments are not configured for chain ${paymentChainId}`);
             }
 
             const { getContract, sendTransaction, allowance, approve, balanceOf } = await loadSessionThirdwebDeps();
@@ -316,7 +316,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
             if (currentBalance < BigInt(budgetWei)) {
                 const balanceUSDC = Number(currentBalance) / 1_000_000;
-                throw new Error(
+                throw new globalThis.Error(
                     `Insufficient USDC balance. You have $${balanceUSDC.toFixed(2)} but want to budget $${budgetUSDC.toFixed(2)}`,
                 );
             }
@@ -371,11 +371,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         } catch (createError) {
             const errorMessage = createError instanceof Error
                 ? createError.message
-                : createError instanceof ComposeError
+                : createError instanceof Error
                     ? createError.message
                     : "Failed to create session";
             posthog?.captureException(
-                createError instanceof Error ? createError : new Error(String(createError)),
+                createError instanceof Error ? createError : new globalThis.Error(String(createError)),
                 {
                     $exception_message: "session_create_failed",
                     chain_id: paymentChainId,
@@ -411,7 +411,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         isCreating,
         error,
         createSession,
-        ensureComposeKeyToken,
+        ensureKeyToken,
         endSession,
         hasBudget,
         formatBudget,
@@ -432,7 +432,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 export function useSession(): SessionContextValue {
     const context = useContext(SessionContext);
     if (!context) {
-        throw new Error("useSession must be used within a SessionProvider");
+        throw new globalThis.Error("useSession must be used within a SessionProvider");
     }
 
     return context;
