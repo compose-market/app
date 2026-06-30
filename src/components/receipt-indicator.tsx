@@ -9,56 +9,7 @@ import { useEffect, useState } from "react";
 import { Receipt as ReceiptIcon } from "lucide-react";
 import { sdk } from "@/lib/sdk";
 import { useSession } from "@/hooks/use-session";
-
-interface ReceiptCumulative {
-    totalAmountWei: string;
-    providerAmountWei?: string;
-    platformFeeWei?: string;
-    receiptCount: number;
-}
-
-interface ReceiptFees {
-    total: {
-        percent: string;
-        amount: string;
-    };
-    distribution: Record<string, string>;
-}
-
-interface ReceiptBill {
-    agent: string;
-    agentWallet?: string;
-    depth: number;
-    model?: string;
-    tokens: Record<string, number>;
-    tools: string[];
-    total: string;
-    duration: string;
-    txId?: string;
-    fees: ReceiptFees;
-    children?: ReceiptBill[];
-}
-
-interface ReceiptRecord {
-    user?: string;
-    runId?: string;
-    duration?: string;
-    bills?: ReceiptBill[];
-    cumulative?: ReceiptCumulative;
-}
-
-interface ReceiptHistory {
-    userAddress: string;
-    chainId: number;
-    cumulative: ReceiptCumulative;
-    receipts: ReceiptRecord[];
-}
-
-type ReceiptsSdk = typeof sdk & {
-    receipts?: {
-        list(input?: { chainId?: number; limit?: number; signal?: AbortSignal }): Promise<ReceiptHistory>;
-    };
-};
+import type { Receipt, ReceiptBill, ReceiptCumulative, ReceiptListResponse } from "@compose-market/sdk";
 
 function formatUsd(value: number): string {
     if (value >= 1) return `$${value.toFixed(2)}`;
@@ -87,35 +38,21 @@ function shortTx(hash: string | undefined): string | null {
     return `${hash.slice(0, 6)}…${hash.slice(-4)}`;
 }
 
-function receiptTotal(receipt: ReceiptRecord | null): string | null {
+function receiptTotal(receipt: Receipt | null): string | null {
     return formatReceiptUsd(receipt?.bills?.[0]?.total);
 }
 
-function receiptTx(receipt: ReceiptRecord | null): string | undefined {
+function receiptTx(receipt: Receipt | null): string | undefined {
     return receipt?.bills?.find((bill: ReceiptBill) => bill.txId)?.txId;
 }
 
-async function listReceipts(chainId: number, signal: AbortSignal): Promise<ReceiptHistory> {
-    const capable = sdk as ReceiptsSdk;
-    if (capable.receipts?.list) {
-        return await capable.receipts.list({ chainId, limit: 1, signal }) as unknown as ReceiptHistory;
-    }
-
-    const response = await sdk.fetch(`/api/receipts?chainId=${chainId}&limit=1`, {
-        method: "GET",
-        chainId,
-        paymentMode: "composeKey",
-        signal,
-    });
-    if (!response.ok) {
-        throw new Error(`receipt history request failed (${response.status})`);
-    }
-    return await response.json() as ReceiptHistory;
+async function listReceipts(chainId: number, signal: AbortSignal): Promise<ReceiptListResponse> {
+    return await sdk.receipts.list({ chainId, limit: 1, signal });
 }
 
 export function CostReceiptIndicator({ className }: { className?: string }) {
     const { session, composeKeyToken } = useSession();
-    const [receipt, setReceipt] = useState<ReceiptRecord | null>(null);
+    const [receipt, setReceipt] = useState<Receipt | null>(null);
     const [cumulative, setCumulative] = useState<ReceiptCumulative | null>(null);
 
     useEffect(() => {
@@ -139,30 +76,35 @@ export function CostReceiptIndicator({ className }: { className?: string }) {
 
     useEffect(() => {
         return sdk.events.on("receipt", (event) => {
-            const next = event.receipt as ReceiptRecord;
-            setReceipt(next);
-            if (next.cumulative) {
-                setCumulative(next.cumulative);
+            setReceipt(event.receipt);
+            if (event.receipt) {
+                setCumulative((prev) => prev ? {
+                    ...prev,
+                    totalAmountWei: String(Number(prev.totalAmountWei) + Number(event.receipt?.bills?.[0]?.total ?? 0)),
+                    receiptCount: prev.receiptCount + 1,
+                } : prev);
             }
         });
     }, []);
 
-    if (!receipt && !cumulative) return null;
+    const totalUsd = formatWeiUsd(cumulative?.totalAmountWei);
+    const lastTotal = receiptTotal(receipt);
+    const txHash = shortTx(receiptTx(receipt));
 
-    const totalWei = cumulative?.totalAmountWei;
-    const usd = receiptTotal(receipt) ?? formatWeiUsd(totalWei);
-    const tx = shortTx(receiptTx(receipt));
-    const count = cumulative?.receiptCount;
+    if (!composeKeyToken) return null;
 
     return (
-        <div
-            className={`inline-flex items-center gap-1.5 rounded-sm border border-emerald-500/30 bg-emerald-500/5 px-2 py-1 text-[10px] font-mono text-emerald-300 ${className ?? ""}`}
-            title={`Session total ${usd ?? "$0.000000"}${count ? ` across ${count} receipt${count === 1 ? "" : "s"}` : ""}${receipt?.runId ? ` · run ${receipt.runId}` : ""}${tx ? ` · tx ${receiptTx(receipt)}` : ""}`}
-        >
-            <ReceiptIcon className="h-3 w-3" aria-hidden="true" />
-            <span>{usd ?? "—"}</span>
-            {typeof count === "number" && count > 0 ? <span className="text-emerald-200/60">{count}</span> : null}
-            {tx ? <span className="text-emerald-200/60">{tx}</span> : null}
+        <div className={className}>
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <ReceiptIcon className="w-3.5 h-3.5" />
+                {totalUsd && <span className="font-mono">{totalUsd}</span>}
+                {cumulative && <span className="text-muted-foreground/60">({cumulative.receiptCount})</span>}
+                {txHash && (
+                    <span className="font-mono text-muted-foreground/60 ml-1" title={receiptTx(receipt)}>
+                        {txHash}
+                    </span>
+                )}
+            </div>
         </div>
     );
 }
