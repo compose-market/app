@@ -2,7 +2,7 @@
  * Floating Toolbox Component
  * 
  * Draggable toolbox for fullscreen compose mode.
- * Contains plugin/agent/trigger pickers and action buttons.
+ * Contains connector/agent/trigger pickers and action buttons.
  */
 
 import { useState, useEffect, useRef } from "react";

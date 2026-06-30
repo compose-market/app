@@ -2,7 +2,7 @@
  * Connector Picker Component
  *
  * Unified search across tools, onchain, and Eliza registries.
- * Single-click adds plugin to canvas, drag-drop also supported.
+ * Single-click adds connector to canvas, drag-drop also supported.
  */
 
 import { useMemo, useState } from "react";
@@ -34,7 +34,7 @@ export function ConnectorPicker({ onSelect }: ConnectorPickerProps) {
     });
 
     const { data: allData, isLoading: isLoadingAll } = useRegistryServers({
-        type: "plugin",
+        type: "connector",
         origin: "onchain,mcp",
     });
 
@@ -76,7 +76,7 @@ export function ConnectorPicker({ onSelect }: ConnectorPickerProps) {
                 />
             </div>
 
-            {/* Server/Plugin List */}
+            {/* Server/Connector List */}
             <div>
                 <Label className="text-[10px] font-mono text-muted-foreground mb-1.5 block">
                     SELECT CONNECTOR
@@ -113,7 +113,7 @@ export function ConnectorPicker({ onSelect }: ConnectorPickerProps) {
                                         onClick={handleDirectAdd}
                                         onKeyDown={(e) => e.key === "Enter" && handleDirectAdd()}
                                         onDragStart={(e) => {
-                                            e.dataTransfer.setData("application/compose-plugin", JSON.stringify(server));
+                                            e.dataTransfer.setData("application/compose-connector", JSON.stringify(server));
                                             e.dataTransfer.effectAllowed = "copy";
                                         }}
                                         className="w-full text-left p-2 rounded-sm border transition-all group cursor-pointer hover:border-cyan-500/50 hover:bg-cyan-500/10 border-sidebar-border"

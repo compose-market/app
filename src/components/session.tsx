@@ -16,7 +16,7 @@ import { useWalletAccount } from "@/components/connector";
 import { toast } from "sonner";
 import { sdk } from "@/lib/sdk";
 import { cn } from "@/lib/utils";
-import type { ComposeKeyRecord } from "@compose-market/sdk";
+import type { KeyRecord } from "@compose-market/sdk";
 
 interface SessionBudgetDialogProps {
   open?: boolean;
@@ -54,7 +54,7 @@ function formatTimeRemaining(expiresAt: number): string {
   return `${minutes}m`;
 }
 
-function isActiveKey(key: ComposeKeyRecord): boolean {
+function isActiveKey(key: KeyRecord): boolean {
   return !key.revokedAt && key.expiresAt > Date.now();
 }
 
@@ -202,8 +202,8 @@ export function SessionIndicator({
 
 function SessionManageDialog({ open, onOpenChange }: SessionManageDialogProps) {
   const { account } = useWalletAccount();
-  const { session, ensureComposeKeyToken } = useSession();
-  const [sessions, setSessions] = useState<ComposeKeyRecord[]>([]);
+  const { session, ensureKeyToken } = useSession();
+  const [sessions, setSessions] = useState<KeyRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null);
@@ -215,7 +215,7 @@ function SessionManageDialog({ open, onOpenChange }: SessionManageDialogProps) {
 
     setLoading(true);
     try {
-      const composeKeyToken = await ensureComposeKeyToken();
+      const composeKeyToken = await ensureKeyToken();
       if (!composeKeyToken) {
         throw new Error("Compose Key token unavailable");
       }
@@ -227,7 +227,7 @@ function SessionManageDialog({ open, onOpenChange }: SessionManageDialogProps) {
     } finally {
       setLoading(false);
     }
-  }, [account?.address, ensureComposeKeyToken]);
+  }, [account?.address, ensureKeyToken]);
 
   useEffect(() => {
     if (open) {
@@ -241,7 +241,7 @@ function SessionManageDialog({ open, onOpenChange }: SessionManageDialogProps) {
     }
 
     try {
-      const composeKeyToken = await ensureComposeKeyToken();
+      const composeKeyToken = await ensureKeyToken();
       if (!composeKeyToken) {
         throw new Error("Compose Key token unavailable");
       }
@@ -329,7 +329,7 @@ function SessionManageDialog({ open, onOpenChange }: SessionManageDialogProps) {
 }
 
 function KeyDialog({ open, onOpenChange }: KeyDialogProps) {
-  const { session, ensureComposeKeyToken } = useSession();
+  const { session, ensureKeyToken } = useSession();
   const { account } = useWalletAccount();
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedKey, setGeneratedKey] = useState<string | null>(null);
@@ -343,7 +343,7 @@ function KeyDialog({ open, onOpenChange }: KeyDialogProps) {
 
     setIsGenerating(true);
     try {
-      const composeKeyToken = await ensureComposeKeyToken();
+      const composeKeyToken = await ensureKeyToken();
       if (!composeKeyToken) {
         throw new Error("Compose Key token unavailable");
       }

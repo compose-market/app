@@ -233,7 +233,7 @@ export function ConnectorTester({
 }: ConnectorTesterProps) {
     const wallet = useActiveWallet();
     const { paymentChainId } = useChain();
-    const { composeKeyToken, ensureComposeKeyToken } = useSession();
+    const { composeKeyToken, ensureKeyToken } = useSession();
     const resultsEndRef = useRef<HTMLDivElement>(null);
 
     // Common state
@@ -357,11 +357,11 @@ export function ConnectorTester({
         setConnectorError(null);
 
         try {
-            let activeComposeKeyToken = composeKeyToken;
-            if (!activeComposeKeyToken) {
-                activeComposeKeyToken = await ensureComposeKeyToken();
+            let activeKeyToken = composeKeyToken;
+            if (!activeKeyToken) {
+                activeKeyToken = await ensureKeyToken();
             }
-            if (!activeComposeKeyToken) {
+            if (!activeKeyToken) {
                 throw new Error("Compose key session is required");
             }
 
@@ -398,7 +398,7 @@ export function ConnectorTester({
         } finally {
             setExecutingConnector(false);
         }
-    }, [selectedGoatConnector, selectedTool, toolArgs, executingConnector, wallet, composeKeyToken, ensureComposeKeyToken, onchainStatus, paymentChainId]);
+    }, [selectedGoatConnector, selectedTool, toolArgs, executingConnector, wallet, composeKeyToken, ensureKeyToken, onchainStatus, paymentChainId]);
 
     // ==========================================================================
     // Tools Handlers
@@ -475,11 +475,11 @@ export function ConnectorTester({
         setConnectorError(null);
 
         try {
-            let activeComposeKeyToken = composeKeyToken;
-            if (!activeComposeKeyToken) {
-                activeComposeKeyToken = await ensureComposeKeyToken();
+            let activeKeyToken = composeKeyToken;
+            if (!activeKeyToken) {
+                activeKeyToken = await ensureKeyToken();
             }
-            if (!activeComposeKeyToken) {
+            if (!activeKeyToken) {
                 throw new Error("Compose key session is required");
             }
 
@@ -515,7 +515,7 @@ export function ConnectorTester({
         } finally {
             setExecutingConnector(false);
         }
-    }, [selectedMcpServer, selectedTool, toolArgs, executingConnector, wallet, composeKeyToken, ensureComposeKeyToken, paymentChainId]);
+    }, [selectedMcpServer, selectedTool, toolArgs, executingConnector, wallet, composeKeyToken, ensureKeyToken, paymentChainId]);
 
     // ==========================================================================
     // Source Change Handler

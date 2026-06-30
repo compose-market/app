@@ -1,7 +1,7 @@
 /**
  * Connector Detail Dialog Component
  * 
- * Shows detailed info about a connector/plugin with test execution capability.
+ * Shows detailed info about a connector with test execution capability.
  */
 
 import { useState, useEffect } from "react";

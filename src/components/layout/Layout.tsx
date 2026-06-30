@@ -9,11 +9,9 @@ import {
   PlusCircle,
   Search,
   Sparkles,
-  Vault,
 } from "lucide-react";
 import { AppShell } from "@compose-market/theme/app";
 import { WalletConnector, useWalletAccount } from "@/components/connector";
-import { BackpackDialog } from "@/components/backpack";
 import { SessionIndicator } from "@/components/session";
 import { DispenserButton } from "@/components/dispenser";
 import { NetworkSelector } from "@/components/ui/network-selector";
@@ -33,7 +31,6 @@ const links = [
 
 export function Layout({ children }: LayoutProps) {
   const [location] = useLocation();
-  const [vaultOpen, setVaultOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const hudRef = useRef<HTMLDivElement | null>(null);
@@ -67,7 +64,7 @@ export function Layout({ children }: LayoutProps) {
       contentClassName="h-dvh min-h-0 text-foreground font-sans selection:bg-fuchsia-500/30 selection:text-fuchsia-200 overflow-hidden"
     >
       <div className="cm-app-chrome">
-        <Nav location={location} onVault={() => setVaultOpen(true)} />
+        <Nav location={location} />
 
         <div className="cm-app-chrome__hud" ref={hudRef} aria-label="Workspace controls">
           <div className="cm-app-chrome__hud-group" data-search-open={searchOpen}>
@@ -107,7 +104,7 @@ export function Layout({ children }: LayoutProps) {
           </div>
         </div>
 
-        <BackpackDialog open={vaultOpen} onOpenChange={setVaultOpen} showTrigger={false} />
+
 
         <main className="cm-app-chrome__main cm-web-main">
           <div className="cm-shell-page cm-web-workspace animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -119,7 +116,7 @@ export function Layout({ children }: LayoutProps) {
   );
 }
 
-function Nav({ location, onVault }: { location: string; onVault: () => void }) {
+function Nav({ location }: { location: string }) {
   return (
     <nav className="cm-app-chrome__navdock" aria-label="Primary navigation">
       <div className="cm-app-chrome__navgroup">
@@ -142,18 +139,6 @@ function Nav({ location, onVault }: { location: string; onVault: () => void }) {
             </Link>
           );
         })}
-        <button
-          type="button"
-          className="cm-app-chrome__navitem"
-          onClick={onVault}
-          aria-label="Vault"
-          title="Vault"
-        >
-          <span className="cm-app-chrome__navitem-icon" aria-hidden="true">
-            <Vault size={18} />
-          </span>
-          <span className="cm-app-chrome__tooltip">Vault</span>
-        </button>
       </div>
       <div className="cm-app-chrome__navutility" aria-label="Network">
         <NetworkSelector compact showBalance className="cm-app-chrome__navselect" />
