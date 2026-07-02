@@ -7,7 +7,7 @@
  * Layout: Chat on left, AgentCard on right
  * Uses shared MultimodalCanvas component and hooks for the chat interface.
  */
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { usePostHog } from "@posthog/react";
 import { mpTrack, mpError } from "@/lib/mixpanel";
 import { useParams } from "wouter";
@@ -15,6 +15,7 @@ import { Link } from "wouter";
 import { useActiveWallet, useActiveAccount } from "thirdweb/react";
 import { sdk } from "@/lib/sdk";
 import { uploadWorkspaceFiles } from "@/lib/workspace";
+import { cn } from "@/lib/utils";
 import { useChain } from "@/contexts/ChainContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -28,6 +29,7 @@ import { useOnchainAgentByIdentifier } from "@/hooks/use-onchain";
 import { MultimodalCanvas } from "@/components/chat";
 import { toAttachment, useChat, type Plan } from "@/hooks/use-chat";
 import { useStream } from "@/hooks/use-stream";
+import { MissionControlSidePanel } from "@/components/mission-control";
 import { CostReceiptIndicator } from "@/components/receipt-indicator";
 import {
   getCachedBackpackPermissions,
@@ -57,6 +59,7 @@ import {
   X,
   IdCard,
   Backpack,
+  Activity,
 } from "lucide-react";
 
 export default function AgentDetailPage() {
@@ -83,6 +86,7 @@ export default function AgentDetailPage() {
     addUserMessage, createAssistantPlaceholder, updateAssistantMessage,
     failAssistant,
     activityState,
+    latestActivity, latestPlan,
     // Attachments
     attachedFiles, fileInputRef, handleFileSelect, handleRemoveFile, clearFiles,
     // Recording
@@ -107,26 +111,64 @@ export default function AgentDetailPage() {
   const [showSessionDialog, setShowSessionDialog] = useState(false);
   const [backpackOpen, setBackpackOpen] = useState(false);
 
-  // Mobile card sheet
-  const [mobileCardOpen, setMobileCardOpen] = useState(false);
+  // Side panel tab state — both AgentCard and MissionControl always accessible
+  const [activeSideTab, setActiveSideTab] = useState<"agent" | "mission">("agent");
+  const [mobileSideOpen, setMobileSideOpen] = useState(false);
   const threadIdRef = useRef<string | null>(null);
 
-  const resetConversationThread = useCallback(() => {
+  const showMissionControl = sending || Boolean(latestActivity) || Boolean(latestPlan);
+
+  const getConversationThreadKey = useCallback(() => {
     const userAddress = wallet?.getAccount()?.address;
     if (!agentWallet || !userAddress) {
+      return null;
+    }
+    const backpackUserId = resolveBackpackUserId(userAddress);
+    return {
+      backpackUserId,
+      key: `agent-thread-${backpackUserId}-${agentWallet}`,
+    };
+  }, [agentWallet, wallet]);
+
+  // Auto-switch to mission tab when streaming starts
+  const prevSending = useRef(sending);
+  useEffect(() => {
+    if (sending && !prevSending.current) {
+      setActiveSideTab("mission");
+    }
+    prevSending.current = sending;
+  }, [sending]);
+
+  const resetConversationThread = useCallback(() => {
+    const thread = getConversationThreadKey();
+    if (!thread) {
       threadIdRef.current = null;
       return null;
     }
 
-    const backpackUserId = resolveBackpackUserId(userAddress);
-    const nextThreadId = `thread-${backpackUserId}-${agentWallet}-${crypto.randomUUID()}`;
+    const threadKey = thread.key;
+    sessionStorage.removeItem(threadKey);
+    const nextThreadId = `thread-${thread.backpackUserId}-${agentWallet}-${crypto.randomUUID()}`;
+    sessionStorage.setItem(threadKey, nextThreadId);
     threadIdRef.current = nextThreadId;
     return nextThreadId;
-  }, [agentWallet, wallet]);
+  }, [agentWallet, getConversationThreadKey]);
 
   const ensureConversationThread = useCallback(() => {
-    if (threadIdRef.current) {
+    const thread = getConversationThreadKey();
+    if (!thread) {
+      throw new Error("Unable to initialize agent conversation thread");
+    }
+
+    const threadKey = thread.key;
+    if (threadIdRef.current && sessionStorage.getItem(threadKey) === threadIdRef.current) {
       return threadIdRef.current;
+    }
+
+    const storedThreadId = sessionStorage.getItem(threadKey);
+    if (storedThreadId) {
+      threadIdRef.current = storedThreadId;
+      return storedThreadId;
     }
 
     const createdThreadId = resetConversationThread();
@@ -134,7 +176,7 @@ export default function AgentDetailPage() {
       throw new Error("Unable to initialize agent conversation thread");
     }
     return createdThreadId;
-  }, [resetConversationThread]);
+  }, [getConversationThreadKey, resetConversationThread]);
 
   const handleClearChat = useCallback(() => {
     clearMessages();
@@ -267,13 +309,13 @@ export default function AgentDetailPage() {
   }, [account, agentWallet, budgetRemaining, composeKeyToken, ensureKeyToken, paymentChainId, toast, workspaceFiles]);
 
   // Send chat message with x402 payment
-  const handleSendMessage = useCallback(async () => {
-    if (attachedFiles.some(f => f.uploading)) return;
-    if ((!inputValue.trim() && attachedFiles.length === 0) || sending || !agentWallet) return;
+  const handleSendMessage = useCallback(async (selectedSlashCommands: string[] = []) => {
+    if (attachedFiles.some(f => f.uploading)) return false;
+    if ((!inputValue.trim() && attachedFiles.length === 0) || sending || !agentWallet) return false;
 
     if (!wallet || !account) {
       toast({ title: "Connect wallet", description: "Please connect your wallet to chat", variant: "destructive" });
-      return;
+      return false;
     }
 
     // Require active session for all chains (enables session bypass for <100ms latency)
@@ -284,13 +326,27 @@ export default function AgentDetailPage() {
         variant: "destructive"
       });
       setShowSessionDialog(true);
-      return;
+      return false;
     }
 
     const attached = attachedFiles[0];
     const userAddress = wallet.getAccount()?.address ?? account.address;
     const backpackUserId = resolveBackpackUserId(userAddress);
     const prompt = inputValue.trim();
+    const selected = new Set(selectedSlashCommands);
+    const selectedControls = {
+      ...(selected.has("plan") ? { plan: true } : {}),
+      ...(selected.has("sandbox") ? { sandbox: true } : {}),
+      ...(selected.has("proof") ? { proof: true } : {}),
+      ...(selected.has("goal") ? {
+        action: {
+          name: "goal",
+          source: "slash",
+          args: { objective: prompt },
+        },
+      } : {}),
+    };
+    let accepted = false;
 
     addUserMessage(prompt, {
       type: attached?.type === "image" || attached?.type === "audio" || attached?.type === "video" ? attached.type : "text",
@@ -302,6 +358,7 @@ export default function AgentDetailPage() {
     clearFiles();
     setSending(true);
     setChatError(null);
+    accepted = true;
 
     posthog?.capture("agent_chat_sent", {
       agent_wallet: agentWallet,
@@ -345,6 +402,7 @@ export default function AgentDetailPage() {
         runId: runId,
         cloudPermissions: getCachedBackpackPermissions(agentWallet),
         ...(attachmentPart ? { attachment: attachmentPart } : {}),
+        ...selectedControls,
         assistantId,
         options: {
           key: activeKeyToken,
@@ -362,6 +420,7 @@ export default function AgentDetailPage() {
     } finally {
       setSending(false);
     }
+    return accepted;
   }, [inputValue, sending, agentWallet, wallet, account, toast, agent, attachedFiles, addUserMessage, clearFiles, createAssistantPlaceholder, failAssistant, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureKeyToken, ensureConversationThread, streamer, posthog]);
 
   const handlePlanDecision = useCallback(async (
@@ -505,15 +564,15 @@ export default function AgentDetailPage() {
               <span className="hidden sm:inline">Install locally</span>
             </Link>
           </Button>
-          {/* Mobile Card Button - only visible on mobile */}
+          {/* Mobile Side Panel Button — opens tabbed side panel */}
           <Button
             variant="ghost"
             size="sm"
             className="cm-shell-button cm-shell-button--ghost cm-shell-button--sm cm-agent-detail-card-button"
-            onClick={() => setMobileCardOpen(true)}
-            aria-label="View agent details"
+            onClick={() => setMobileSideOpen(true)}
+            aria-label="View side panel"
           >
-            <IdCard className="w-4 h-4" />
+            {activeSideTab === "mission" ? <Activity className="w-4 h-4" /> : <IdCard className="w-4 h-4" />}
           </Button>
         </div>
       </div>
@@ -560,18 +619,69 @@ export default function AgentDetailPage() {
             onDeleteMessage={(id) => setMessages(prev => prev.filter(m => m.id !== id))}
             onPlanDecision={handlePlanDecision}
             onClearChat={handleClearChat}
+            onFocusMissionControl={() => { setActiveSideTab("mission"); setMobileSideOpen(true); }}
             height="h-full"
             emptyStateText="Start a conversation with this agent."
             emptyStateSubtext="Requires x402 payment session."
           />
         </div>
 
-        {/* Agent Card (1/3 width on desktop, hidden on mobile by default) */}
+        {/* Side Panel: Tabbed — AgentCard and Mission Control both always accessible */}
         <div className="cm-split__side">
-          <AgentCard
-            agent={agent}
-            onCopyEndpoint={copyEndpoint}
-          />
+          <div className="cm-side-panel-tabs" data-tab={activeSideTab}>
+            <div className="cm-mirror-pane__toolbar">
+              <button
+                type="button"
+                className={cn(
+                  "cm-mirror-pane__toolbar-btn",
+                  activeSideTab === "agent" && "cm-mirror-pane__toolbar-btn--active-cyan",
+                )}
+                onClick={() => setActiveSideTab("agent")}
+                aria-pressed={activeSideTab === "agent"}
+              >
+                <IdCard className="w-3.5 h-3.5" />
+                <span className="cm-mirror-pane__toolbar-label">Agent</span>
+              </button>
+              <button
+                type="button"
+                className={cn(
+                  "cm-mirror-pane__toolbar-btn",
+                  activeSideTab === "mission" && "cm-mirror-pane__toolbar-btn--active-fuchsia",
+                )}
+                onClick={() => setActiveSideTab("mission")}
+                aria-pressed={activeSideTab === "mission"}
+              >
+                <Activity className="w-3.5 h-3.5" />
+                <span className="cm-mirror-pane__toolbar-label">Mission</span>
+                {showMissionControl && activeSideTab !== "mission" && (
+                  <span className="cm-side-panel-tabs__badge" />
+                )}
+              </button>
+            </div>
+            <div className="cm-side-panel-tabs__body">
+              {activeSideTab === "agent" && (
+                <AgentCard agent={agent} onCopyEndpoint={copyEndpoint} />
+              )}
+              {activeSideTab === "mission" && (
+                showMissionControl ? (
+                  <MissionControlSidePanel
+                    activity={latestActivity}
+                    plan={latestPlan}
+                    messages={messages}
+                    phase={activityState?.phase}
+                    phaseLabel={activityState?.label}
+                    agentLabel={agentLabel}
+                    onPlanDecision={handlePlanDecision}
+                  />
+                ) : (
+                  <div className="cm-side-panel-tabs__empty">
+                    <Activity className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                    <p className="text-xs text-muted-foreground">No active missions. Start a conversation to see live activity.</p>
+                  </div>
+                )
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -647,21 +757,68 @@ export default function AgentDetailPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Mobile Card Sheet */}
-      <Sheet open={mobileCardOpen} onOpenChange={setMobileCardOpen}>
+      {/* Mobile Side Panel Sheet — unified with tabs */}
+      <Sheet open={mobileSideOpen} onOpenChange={setMobileSideOpen}>
         <SheetContent side="right" className="cm-sheet-panel cm-sheet-panel--inspect p-0">
           <SheetHeader className="p-4 border-b border-sidebar-border shrink-0">
             <SheetTitle className="font-display text-cyan-400 flex items-center gap-2">
-              <IdCard className="w-4 h-4" />
-              Agent Details
+              {activeSideTab === "mission" ? <Activity className="w-4 h-4" /> : <IdCard className="w-4 h-4" />}
+              {activeSideTab === "mission" ? "Mission Control" : "Agent Details"}
             </SheetTitle>
           </SheetHeader>
           <div className="cm-sheet-body cm-sheet-body--inspect">
-            <AgentCard
-              agent={agent}
-              onCopyEndpoint={copyEndpoint}
-              className="cm-agent-card--match-chat"
-            />
+            <div className="cm-side-panel-tabs" data-tab={activeSideTab}>
+              <div className="cm-mirror-pane__toolbar">
+                <button
+                  type="button"
+                  className={cn(
+                    "cm-mirror-pane__toolbar-btn",
+                    activeSideTab === "agent" && "cm-mirror-pane__toolbar-btn--active-cyan",
+                  )}
+                  onClick={() => setActiveSideTab("agent")}
+                  aria-pressed={activeSideTab === "agent"}
+                >
+                  <IdCard className="w-3.5 h-3.5" />
+                  <span className="cm-mirror-pane__toolbar-label">Agent</span>
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    "cm-mirror-pane__toolbar-btn",
+                    activeSideTab === "mission" && "cm-mirror-pane__toolbar-btn--active-fuchsia",
+                  )}
+                  onClick={() => setActiveSideTab("mission")}
+                  aria-pressed={activeSideTab === "mission"}
+                >
+                  <Activity className="w-3.5 h-3.5" />
+                  <span className="cm-mirror-pane__toolbar-label">Mission</span>
+                </button>
+              </div>
+              <div className="cm-side-panel-tabs__body">
+                {activeSideTab === "agent" && (
+                  <AgentCard agent={agent} onCopyEndpoint={copyEndpoint} className="cm-agent-card--match-chat" />
+                )}
+                {activeSideTab === "mission" && (
+                  showMissionControl ? (
+                    <MissionControlSidePanel
+                      activity={latestActivity}
+                      plan={latestPlan}
+                      messages={messages}
+                      phase={activityState?.phase}
+                      phaseLabel={activityState?.label}
+                      agentLabel={agentLabel}
+                      onPlanDecision={handlePlanDecision}
+                      className="cm-mission-control--mobile"
+                    />
+                  ) : (
+                    <div className="cm-side-panel-tabs__empty">
+                      <Activity className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                      <p className="text-xs text-muted-foreground">No active missions. Start a conversation to see live activity.</p>
+                    </div>
+                  )
+                )}
+              </div>
+            </div>
           </div>
         </SheetContent>
       </Sheet>
