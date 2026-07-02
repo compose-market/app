@@ -1,5 +1,5 @@
-import { useMemo, useState, useEffect, useCallback } from "react";
-import { Terminal, Target, Users, Shield, FileText, Folder, Receipt, Layers } from "lucide-react";
+import { useMemo } from "react";
+import { Terminal, Target, Users, Shield, FileText, Folder, Receipt, Layers, X } from "lucide-react";
 
 export interface SlashCommand {
     name: string;
@@ -56,55 +56,54 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     },
 ];
 
-interface SlashCommandPopoverProps {
-    input: string;
-    onSelect: (command: SlashCommand) => void;
-    onDismiss: () => void;
+export const selectableSlashCommandNames = ["plan", "goal", "sandbox", "proof"] as const;
+
+const selectableSlashCommandNameSet = new Set<string>(selectableSlashCommandNames);
+
+export function isSelectableSlashCommandName(name: string): boolean {
+    return selectableSlashCommandNameSet.has(name.trim().replace(/^\/+/u, "").toLowerCase());
 }
 
-export function SlashCommandPopover({ input, onSelect, onDismiss }: SlashCommandPopoverProps) {
-    const [selectedIndex, setSelectedIndex] = useState(0);
+export function nextSelectedSlashCommands(selected: string[], name: string): string[] {
+    const normalized = name.trim().replace(/^\/+/u, "").toLowerCase();
+    if (!isSelectableSlashCommandName(normalized) || selected.includes(normalized)) return selected;
+    return [...selected, normalized];
+}
 
-    const query = useMemo(() => {
-        if (!input.startsWith("/")) return null;
-        const parts = input.slice(1).split(/\s+/);
-        return parts[0]?.toLowerCase() ?? "";
-    }, [input]);
+export function withoutSelectedSlashCommand(selected: string[], name: string): string[] {
+    const normalized = name.trim().replace(/^\/+/u, "").toLowerCase();
+    return selected.filter((command) => command !== normalized);
+}
 
-    const matches = useMemo(() => {
-        if (query === null) return [];
-        if (query === "") return SLASH_COMMANDS;
-        return SLASH_COMMANDS.filter((cmd) => cmd.name.startsWith(query));
-    }, [query]);
+export function clearSlashCommandToken(input: string): string {
+    if (!input.startsWith("/")) return input;
+    return input.replace(/^\/[a-z0-9_-]*\s*/iu, "");
+}
 
-    useEffect(() => {
-        setSelectedIndex(0);
-    }, [query]);
+function slashCommandQuery(input: string): string | null {
+    if (!input.startsWith("/")) return null;
+    const parts = input.slice(1).split(/\s+/);
+    return parts[0]?.toLowerCase() ?? "";
+}
 
-    const handleKeyDown = useCallback((e: KeyboardEvent) => {
-        if (matches.length === 0) return;
-        if (e.key === "ArrowDown") {
-            e.preventDefault();
-            setSelectedIndex((prev) => (prev + 1) % matches.length);
-        } else if (e.key === "ArrowUp") {
-            e.preventDefault();
-            setSelectedIndex((prev) => (prev - 1 + matches.length) % matches.length);
-        } else if (e.key === "Tab" || (e.key === "Enter" && matches.length > 0)) {
-            e.preventDefault();
-            onSelect(matches[selectedIndex]);
-        } else if (e.key === "Escape") {
-            e.preventDefault();
-            onDismiss();
-        }
-    }, [matches, selectedIndex, onSelect, onDismiss]);
+export function slashCommandMatches(input: string): SlashCommand[] {
+    const query = slashCommandQuery(input);
+    if (query === null) return [];
+    if (query === "") return SLASH_COMMANDS;
+    return SLASH_COMMANDS.filter((cmd) => cmd.name.startsWith(query));
+}
 
-    useEffect(() => {
-        if (query === null || matches.length === 0) return;
-        window.addEventListener("keydown", handleKeyDown, true);
-        return () => window.removeEventListener("keydown", handleKeyDown, true);
-    }, [query, matches, handleKeyDown]);
+interface SlashCommandPopoverProps {
+    input: string;
+    selectedIndex: number;
+    onSelect: (command: SlashCommand) => void;
+    onHighlight: (index: number) => void;
+}
 
-    if (query === null || matches.length === 0) return null;
+export function SlashCommandPopover({ input, selectedIndex, onSelect, onHighlight }: SlashCommandPopoverProps) {
+    const matches = useMemo(() => slashCommandMatches(input), [input]);
+
+    if (matches.length === 0) return null;
 
     return (
         <div className="absolute bottom-full left-0 right-0 mb-2 z-50">
@@ -121,9 +120,10 @@ export function SlashCommandPopover({ input, onSelect, onDismiss }: SlashCommand
                                 key={cmd.name}
                                 onMouseDown={(e) => {
                                     e.preventDefault();
+                                    e.stopPropagation();
                                     onSelect(cmd);
                                 }}
-                                onMouseEnter={() => setSelectedIndex(index)}
+                                onMouseEnter={() => onHighlight(index)}
                                 className={`w-full flex items-center gap-3 px-3 py-2 text-left transition-colors ${
                                     index === selectedIndex ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
                                 }`}
@@ -143,6 +143,40 @@ export function SlashCommandPopover({ input, onSelect, onDismiss }: SlashCommand
                     })}
                 </div>
             </div>
+        </div>
+    );
+}
+
+export function SelectedSlashCommandBadges({
+    selected,
+    onRemove,
+}: {
+    selected: string[];
+    onRemove: (name: string) => void;
+}) {
+    if (selected.length === 0) return null;
+    return (
+        <div className="mb-2 flex flex-wrap items-center gap-1.5">
+            {selected.map((name) => (
+                <span
+                    key={name}
+                    className="inline-flex h-6 items-center gap-1 rounded-full border border-primary/20 bg-primary/10 px-2 text-xs font-mono text-primary"
+                >
+                    /{name}
+                    <button
+                        type="button"
+                        className="inline-flex h-4 w-4 items-center justify-center rounded-full text-primary/80 hover:bg-primary/15 hover:text-primary"
+                        aria-label={`Remove /${name}`}
+                        onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            onRemove(name);
+                        }}
+                    >
+                        <X className="h-3 w-3" />
+                    </button>
+                </span>
+            ))}
         </div>
     );
 }

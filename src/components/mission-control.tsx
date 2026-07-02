@@ -1,361 +1,639 @@
-import React, { useState, useEffect, useRef, Suspense, lazy } from "react";
+/**
+ * Mission Control Side Panel
+ *
+ * Renders the full fractal activity tree + plan review in the side panel.
+ * Uses rich server-side display data (target.name, target.details, target.summary)
+ * to show human-readable information — never leaks internal JSON/protocol details.
+ *
+ * Hierarchy:
+ *   Main Agent (depth 0)
+ *   └── Tool / Memory (depth 1)
+ *       ├── Tool actions (depth 2)
+ *       └── Sub-Agent (depth 1, fractal — same structure recursively)
+ *           └── ...up to depth 3
+ */
+import React, { useState, useEffect, useRef, Suspense, lazy, useMemo } from "react";
 import {
-  MissionPocket,
-  AgentNode,
-  PlanTask,
-  PlanActions,
-  PlanVersionCarousel,
-  StreamNode,
-  StreamNotice,
-  PlanReview as SharedPlanReview,
+    MissionControlPanel,
+    MissionPocket,
+    AgentNode,
+    StreamNode,
+    PlanGate,
+    PlanTask,
+    PlanActions,
+    PlanVersionCarousel,
 } from "@compose-market/theme";
-import { cn } from "@/lib/utils";
-import { Textarea } from "@/components/ui/textarea";
-import { Button } from "@/components/ui/button";
-import type { ActivityState, ActivityNode, ActivityKind } from "@compose-market/sdk";
+import type { ActivityState, ActivityNode } from "@compose-market/sdk";
 import type { Plan, Message } from "@/hooks/use-chat";
 
 const LazyMarkdownRenderer = lazy(() =>
-  import("@/lib/performance/markdown").then((module) => ({ default: module.MarkdownRenderer }))
+    import("@/lib/performance/markdown").then((module) => ({ default: module.MarkdownRenderer }))
 );
 
-export interface MissionControlProps {
-  messageId: string;
-  messages: Message[];
-  activity?: ActivityState;
-  plan?: Plan;
-  nodeId?: string;
-  onPlanDecision?: (
-    messageId: string,
-    plan: Plan,
-    decision: "approved" | "rejected" | "changes_requested",
-    feedback?: string
-  ) => void;
-  onStopRealtime?: () => void;
+export interface MissionControlSidePanelProps {
+    activity?: ActivityState;
+    plan?: Plan;
+    messages: Message[];
+    phase?: "idle" | "thinking" | "tool" | "streaming" | "error";
+    phaseLabel?: string;
+    agentLabel?: string;
+    onPlanDecision?: (
+        messageId: string,
+        plan: Plan,
+        decision: "approved" | "rejected" | "changes_requested",
+        feedback?: string,
+    ) => void;
+    className?: string;
 }
 
-// Helper to shorten long IDs
 function shortId(value?: string): string {
-  if (!value) return "";
-  return value.length > 14 ? `${value.slice(0, 6)}...${value.slice(-4)}` : value;
+    if (!value) return "";
+    return value.length > 14 ? `${value.slice(0, 6)}...${value.slice(-4)}` : value;
 }
 
-// Clean labels for display
 function cleanLabel(value?: string): string {
-  if (!value) return "";
-  return value
-    .replace(/[_-]+/g, " ")
-    .replace(/\b(runtime|debug|info|source)\b:?/gi, "")
-    .replace(/\s+/g, " ")
-    .trim();
+    if (!value) return "";
+    return value
+        .replace(/[_-]+/g, " ")
+        .replace(/\b(runtime|debug|info|source)\b:?/gi, "")
+        .replace(/\s+/g, " ")
+        .trim();
 }
 
-// Map ActivityNode status to theme status
-function mapStatus(status: string): "pending" | "running" | "completed" | "failed" {
-  if (status === "pending") return "pending";
-  if (status === "running") return "running";
-  if (status === "completed") return "completed";
-  if (status === "failed") return "failed";
-  return "pending";
+function text(value: unknown): string | undefined {
+    if (typeof value === "string" && value.length > 0) return value;
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+    return undefined;
 }
 
-// Check if node is visible/relevant for swarm timeline
+function truncate(value: string, max = 80): string {
+    return value.length > max ? `${value.slice(0, max - 1)}\u2026` : value;
+}
+
+const GENERIC_WORDS = new Set(["model", "connector", "agent", "tool", "conclave", "search", "harness", "route", "swarm"]);
+
+function isGenericWord(value?: string): boolean {
+    return !value || GENERIC_WORDS.has(value.toLowerCase());
+}
+
 function isVisibleNode(node: ActivityNode): boolean {
-  if (node.kind === "trace" || node.kind === "plan") return false;
-  if (node.kind === "message" && !node.parentId) return false;
-  return true;
+    if (node.kind === "trace" || node.kind === "plan") return false;
+    if (node.kind === "message" && !node.parentId) return false;
+    return true;
 }
 
-export function MissionControl({
-  messageId,
-  messages,
-  activity,
-  plan: initialPlan,
-  nodeId,
-  onPlanDecision,
-}: MissionControlProps) {
-  // --- Plan Version Carousel State ---
-  // Collect all proposals in the entire conversation history that belong to the same flow/proposalId
-  const allProposals = messages
-    .map((m) => m.proposal)
-    .filter((p): p is Plan => Boolean(p))
-    .filter(
-      (p, idx, self) =>
-        self.findIndex((x) => x.proposalId === p.proposalId && x.version === p.version) === idx
-    )
-    .sort((a, b) => a.version - b.version);
+function statusLabel(status: ActivityNode["status"]): string | undefined {
+    if (status === "pending") return "Pending";
+    if (status === "running") return "Running";
+    if (status === "completed") return "Completed";
+    if (status === "failed") return "Failed";
+    if (status === "cancelled") return "Stopped";
+    return undefined;
+}
 
-  const currentPlanIndex = allProposals.findIndex(
-    (p) => p.version === (initialPlan?.version ?? 0)
-  );
+// =============================================================================
+// Rich Title — digs into target.details for actual names, never shows generic kind words
+// =============================================================================
 
-  const [activePlanIdx, setActivePlanIdx] = useState<number>(
-    currentPlanIndex !== -1 ? currentPlanIndex : allProposals.length - 1
-  );
+function nodeTitle(node: ActivityNode): string {
+    const target = node.target;
+    const details = target?.details;
+    const raw = node.raw as Record<string, unknown> | undefined;
 
-  // Sync active plan index to the latest version when a new one is proposed
-  const prevProposalsLength = useRef(allProposals.length);
-  useEffect(() => {
-    if (allProposals.length > prevProposalsLength.current) {
-      setActivePlanIdx(allProposals.length - 1);
+    if (node.kind === "tool") {
+        const kind = target?.kind;
+        if (kind === "model") {
+            const name = firstNonGeneric(target?.name, text(details?.model), text(details?.provider), node.name);
+            return name ?? "Model call";
+        }
+        if (kind === "connector") {
+            const name = firstNonGeneric(target?.name, text(details?.connector), node.name);
+            return name ?? "Connector call";
+        }
+        if (kind === "agent") {
+            const name = firstNonGeneric(target?.name, node.name);
+            return name ?? "Agent search";
+        }
+        if (kind === "search") {
+            const name = firstNonGeneric(target?.name, node.name);
+            return name ?? "Search";
+        }
+        if (kind === "conclave") {
+            return target?.target ?? "Conclave";
+        }
+        return firstNonGeneric(target?.name, node.name) ?? "Tool call";
     }
-    prevProposalsLength.current = allProposals.length;
-  }, [allProposals.length]);
 
-  // Sync active plan index to the current plan index whenever it changes from initial state
-  useEffect(() => {
-    if (currentPlanIndex !== -1) {
-      setActivePlanIdx(currentPlanIndex);
+    if (node.kind === "agent") {
+        const subId = text(details?.subId);
+        const role = subId ? subId.split(":").pop() : undefined;
+        const name = firstNonGeneric(role, target?.name, node.name, text(raw?.agentName));
+        return name ?? "Agent";
     }
-  }, [currentPlanIndex]);
 
-  const activePlan = allProposals[activePlanIdx] ?? initialPlan;
+    if (node.kind === "thinking") return "Thinking";
+    if (node.kind === "conclave") return "Conclave";
+    if (node.kind === "route") return "Route";
+    if (node.kind === "message") return "Message";
+    if (node.kind === "error") return "Action failed";
+    if (node.kind === "run") {
+        if (node.status === "completed") return "Run completed";
+        if (node.status === "cancelled") return "Run stopped";
+        return "Run";
+    }
+    return firstNonGeneric(target?.name, node.name) ?? "Activity";
+}
 
-  // Find the exact message ID that contains this active plan version to make decisions on the correct message
-  const activePlanMessage = messages.find(
-    (m) =>
-      m.proposal?.proposalId === activePlan?.proposalId &&
-      m.proposal?.version === activePlan?.version
-  );
-  const activeMessageId = activePlanMessage?.id ?? messageId;
+function firstNonGeneric(...values: Array<string | undefined>): string | undefined {
+    for (const v of values) {
+        if (v && !isGenericWord(v)) return cleanLabel(v);
+    }
+    return undefined;
+}
 
-  // Plan Feedback Textarea State
-  const [feedbackOpen, setFeedbackOpen] = useState(false);
-  const [feedbackText, setFeedbackText] = useState("");
+// =============================================================================
+// Summary — what the node is actually doing (human-readable)
+// =============================================================================
 
-  if (!activity && !activePlan) return null;
+function nodeSummary(node: ActivityNode): string | undefined {
+    const payload = node.payload ?? {};
+    const target = node.target;
 
-  // Render Plan Review Section
-  const renderPlanSection = () => {
-    if (!activePlan) return null;
+    if (node.kind === "message") {
+        return node.text ? truncate(cleanLabel(node.text) || "", 120) : undefined;
+    }
 
-    const decided =
-      activePlan.decision ||
-      activePlan.state === "approved" ||
-      activePlan.state === "rejected" ||
-      activePlan.state === "changes_requested";
+    if (node.kind === "conclave") {
+        const action = text(payload.action) ?? text(target?.details?.action);
+        const key = text(payload.key) ?? target?.target;
+        if (action && key) return `${action} ${key}`;
+        return target?.summary ? cleanLabel(target.summary) : undefined;
+    }
 
-    const canAct = Boolean(onPlanDecision) && !activePlan.pending && !decided;
-    const versionMetadata = (
-      <>
-        <span>v{activePlan.version}</span>
-        {activePlan.proposalId && <span>{shortId(activePlan.proposalId)}</span>}
-        {activePlan.runId && <span>{shortId(activePlan.runId)}</span>}
-      </>
+    const summary = node.text
+        || target?.summary
+        || text(payload.message)
+        || text(payload.summary)
+        || text(payload.error)
+        || text(payload.reason);
+
+    if (summary) return truncate(cleanLabel(summary) || "", 120);
+
+    if (node.kind === "tool" && node.status === "running" && payload.input) {
+        const inputStr = typeof payload.input === "string"
+            ? payload.input
+            : JSON.stringify(payload.input).slice(0, 120);
+        return truncate(inputStr, 120);
+    }
+
+    if (node.kind === "tool" && node.status === "completed" && payload.output) {
+        const outputStr = typeof payload.output === "string"
+            ? payload.output
+            : text(payload.message) ?? undefined;
+        if (outputStr) return truncate(outputStr, 120);
+    }
+
+    return undefined;
+}
+
+// =============================================================================
+// Summary Preview — shown in collapsed <summary> row (one-liner)
+// =============================================================================
+
+function nodeSummaryPreview(node: ActivityNode): string | undefined {
+    const target = node.target;
+
+    if (node.kind === "conclave") {
+        const action = text(target?.details?.action) ?? text(node.payload?.action);
+        const key = target?.target ?? text(node.payload?.key);
+        if (action && key) return `${action} ${key}`;
+        return target?.summary ? cleanLabel(target.summary) : undefined;
+    }
+
+    if (node.kind === "message" && node.text) {
+        return truncate(cleanLabel(node.text) || "", 80);
+    }
+
+    if (target?.summary && !isGenericWord(target.summary)) {
+        return truncate(cleanLabel(target.summary) || "", 80);
+    }
+
+    const payload = node.payload ?? {};
+    if (node.kind === "tool" && payload.input) {
+        const input = payload.input;
+        const inputStr = typeof input === "string"
+            ? input
+            : text((input as Record<string, unknown>)?.query) ?? text((input as Record<string, unknown>)?.prompt) ?? JSON.stringify(input).slice(0, 80);
+        return truncate(inputStr, 80);
+    }
+
+    return undefined;
+}
+
+// =============================================================================
+// Metadata
+// =============================================================================
+
+function nodeMeta(node: ActivityNode): string | undefined {
+    const status = statusLabel(node.status);
+    const updates = node.events > 1 ? `${node.events} events` : undefined;
+    return [status, updates].filter(Boolean).join(" \u00B7 ") || undefined;
+}
+
+// =============================================================================
+// Grouping — collapse same-kind root nodes into a single collapsible parent
+// =============================================================================
+
+interface GroupedNode {
+    kind: string;
+    title: string;
+    status: string;
+    nodes: ActivityNode[];
+}
+
+function groupRoots(roots: ActivityNode[]): Array<ActivityNode | GroupedNode> {
+    const buckets = new Map<string, ActivityNode[]>();
+    const orderedKinds: string[] = [];
+
+    for (const root of roots) {
+        const key = root.kind;
+        if (!buckets.has(key)) {
+            buckets.set(key, []);
+            orderedKinds.push(key);
+        }
+        buckets.get(key)!.push(root);
+    }
+
+    const result: Array<ActivityNode | GroupedNode> = [];
+    for (const kind of orderedKinds) {
+        const nodes = buckets.get(kind)!;
+        if (nodes.length <= 1) {
+            result.push(nodes[0]);
+        } else {
+            const hasRunning = nodes.some((n) => n.status === "running");
+            const hasFailed = nodes.some((n) => n.status === "failed");
+            result.push({
+                kind,
+                title: `${kindLabel(kind)} \u2014 ${nodes.length} actions`,
+                status: hasRunning ? "running" : hasFailed ? "failed" : "completed",
+                nodes,
+            });
+        }
+    }
+    return result;
+}
+
+function kindLabel(kind: string): string {
+    const labels: Record<string, string> = {
+        conclave: "Conclave",
+        tool: "Tool calls",
+        thinking: "Thinking",
+        route: "Routes",
+        run: "Runs",
+        agent: "Agents",
+        message: "Messages",
+        error: "Errors",
+    };
+    return labels[kind] ?? kind;
+}
+
+// =============================================================================
+// SwarmNode — recursive fractal renderer
+// =============================================================================
+
+interface SwarmNodeProps {
+    node: ActivityNode;
+    activity: ActivityState;
+    depth: number;
+    visited: Set<string>;
+}
+
+function SwarmNode({ node, activity, depth, visited }: SwarmNodeProps) {
+    if (!isVisibleNode(node) || visited.has(node.id)) return null;
+    visited.add(node.id);
+
+    const children = node.children
+        .map((id) => activity.nodes[id])
+        .filter((child): child is ActivityNode => Boolean(child));
+
+    const isAgent = node.kind === "agent" || node.kind === "thinking" || node.kind === "run";
+    const isFailed = node.status === "failed";
+    const isRunning = node.status === "running";
+    const targetKind = node.target?.kind;
+    const d = Math.min(depth, 3);
+    const title = nodeTitle(node);
+    const summary = nodeSummary(node);
+    const preview = nodeSummaryPreview(node);
+    const meta = nodeMeta(node);
+    const details = node.target?.details;
+    const modelName = text(details?.model) || text(details?.provider);
+
+    const childElements = children.length > 0 ? (
+        <>
+            {children.map((child) => (
+                <SwarmNode
+                    key={child.id}
+                    node={child}
+                    activity={activity}
+                    depth={depth + 1}
+                    visited={visited}
+                />
+            ))}
+        </>
+    ) : null;
+
+    if (isAgent) {
+        return (
+            <AgentNode
+                title={title}
+                status={node.status}
+                depth={d}
+                targetKind={targetKind}
+                modelName={modelName}
+                summary={summary}
+                summaryPreview={preview}
+                metadata={meta}
+                defaultOpen={d === 0 || isRunning || isFailed}
+            >
+                {childElements}
+            </AgentNode>
+        );
+    }
+
+    return (
+        <StreamNode
+            title={title}
+            kind={node.kind}
+            status={node.status}
+            depth={d}
+            targetKind={targetKind}
+            summary={summary}
+            summaryPreview={preview}
+            metadata={meta}
+            defaultOpen={isFailed || (isRunning && d <= 1)}
+        >
+            {childElements}
+        </StreamNode>
     );
+}
 
-    // Simple parser for parsing markdown checkboxes [ ] or [x] into structured PlanTasks
-    const parseTasksFromMarkdown = (md?: string): Array<{ title: string; status: "pending" | "running" | "completed" | "failed" }> => {
-      if (!md) return [];
-      const lines = md.split("\n");
-      const tasks: Array<{ title: string; status: "pending" | "running" | "completed" | "failed" }> = [];
-      
-      for (const line of lines) {
+// =============================================================================
+// GroupedSwarmNode — renders a grouped parent with children inside
+// =============================================================================
+
+function GroupedSwarmNode({ group, activity }: { group: GroupedNode; activity: ActivityState }) {
+    const visited = new Set<string>();
+    const hasRunning = group.status === "running";
+    const hasFailed = group.status === "failed";
+
+    return (
+        <StreamNode
+            title={group.title}
+            kind={group.kind}
+            status={group.status}
+            depth={0}
+            defaultOpen={hasRunning || hasFailed}
+        >
+            {group.nodes.map((node) => (
+                <SwarmNode
+                    key={node.id}
+                    node={node}
+                    activity={activity}
+                    depth={1}
+                    visited={visited}
+                />
+            ))}
+        </StreamNode>
+    );
+}
+
+// =============================================================================
+// Plan parsing
+// =============================================================================
+
+function parseTasksFromMarkdown(md?: string): Array<{ title: string; status: "pending" | "completed" }> {
+    if (!md) return [];
+    const tasks: Array<{ title: string; status: "pending" | "completed" }> = [];
+    for (const line of md.split("\n")) {
         const match = line.match(/^\s*[-*]\s*\[([ xX])\]\s*(.+)$/);
         if (match) {
-          const checked = match[1].toLowerCase() === "x";
-          tasks.push({
-            title: match[2].trim(),
-            status: checked ? "completed" : "pending",
-          });
+            tasks.push({
+                title: match[2].trim(),
+                status: match[1].toLowerCase() === "x" ? "completed" : "pending",
+            });
         }
-      }
-      return tasks;
-    };
+    }
+    return tasks;
+}
 
-    const tasks = parseTasksFromMarkdown(activePlan.markdown);
+// =============================================================================
+// Main Component
+// =============================================================================
 
-    return (
-      <details className="cm-chat-plan mb-3 w-full" open={!decided}>
-        <summary className="cm-stream-node__summary-row border border-accent/15 rounded-lg bg-card/10 hover:bg-card/25 cursor-pointer">
-          <span className="cm-stream-node__marker bg-emerald-400 shadow-emerald-400" />
-          <span className="cm-stream-node__title font-bold text-emerald-400">
-            {decided ? `Plan Decided: ${activePlan.decision?.replace("_", " ") || activePlan.state}` : "Review Proposed Plan"}
-          </span>
-          <span className="cm-stream-node__metadata">{versionMetadata}</span>
-        </summary>
+export function MissionControlSidePanel({
+    activity,
+    plan: initialPlan,
+    messages,
+    phase = "idle",
+    phaseLabel,
+    agentLabel,
+    onPlanDecision,
+    className,
+}: MissionControlSidePanelProps) {
+    const allProposals = useMemo(() => {
+        return messages
+            .map((m) => m.proposal)
+            .filter((p): p is Plan => Boolean(p))
+            .filter((p, idx, self) => self.findIndex((x) => x.proposalId === p.proposalId && x.version === p.version) === idx)
+            .sort((a, b) => a.version - b.version);
+    }, [messages]);
 
-        <div className="mt-2 w-full">
-          <PlanVersionCarousel
-            currentVersion={activePlan.version}
-            totalVersions={allProposals.length}
-            onPrev={() => setActivePlanIdx((prev) => Math.max(0, prev - 1))}
-            onNext={() => setActivePlanIdx((prev) => Math.min(allProposals.length - 1, prev + 1))}
-          />
-
-          <MissionPocket
-            title={`Proposed Work Plan (v${activePlan.version})`}
-            summary={activePlan.error ? activePlan.error : activePlan.reason || "Review the step checklist below."}
-            status={decided ? "completed" : "running"}
-            metadata={versionMetadata}
-          >
-            {/* Task list section */}
-            {tasks.length > 0 ? (
-              <div className="flex flex-col gap-2 mt-2">
-                {tasks.map((task, idx) => (
-                  <PlanTask
-                    key={idx}
-                    index={idx}
-                    title={task.title}
-                    status={task.status}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="cm-plan-review__body text-xs text-muted-foreground mt-2 border-t border-border/10 pt-2">
-                <Suspense fallback={<p className="whitespace-pre-wrap">{activePlan.markdown}</p>}>
-                  <LazyMarkdownRenderer content={activePlan.markdown || "No checklist provided."} />
-                </Suspense>
-              </div>
-            )}
-
-            {/* Actions / HITL Gates */}
-            {canAct && (
-              <div className="mt-3 flex flex-col gap-2 border-t border-border/10 pt-3">
-                {feedbackOpen && (
-                  <Textarea
-                    value={feedbackText}
-                    onChange={(e) => setFeedbackText(e.target.value)}
-                    placeholder="Provide specific guidelines or requests for this plan..."
-                    className="min-h-16 w-full resize-none border-amber-500/30 bg-background/40 text-xs"
-                  />
-                )}
-                <PlanActions
-                  state={undefined}
-                  hasFeedbackInput={feedbackOpen}
-                  disabled={activePlan.pending}
-                  onApprove={() => onPlanDecision?.(activeMessageId, activePlan, "approved")}
-                  onReject={() => onPlanDecision?.(activeMessageId, activePlan, "rejected")}
-                  onRequestChanges={() => {
-                    if (!feedbackOpen) {
-                      setFeedbackOpen(true);
-                      return;
-                    }
-                    onPlanDecision?.(activeMessageId, activePlan, "changes_requested", feedbackText.trim() || undefined);
-                  }}
-                />
-              </div>
-            )}
-
-            {decided && (
-              <div className="mt-2 border-t border-border/10 pt-2 flex justify-end">
-                <PlanActions state={activePlan.decision || activePlan.state} onApprove={() => {}} onReject={() => {}} onRequestChanges={() => {}} />
-              </div>
-            )}
-          </MissionPocket>
-        </div>
-      </details>
+    const currentPlanIndex = allProposals.findIndex(
+        (p) => p.version === (initialPlan?.version ?? 0),
     );
-  };
 
-  // Render Real-time Activity Timeline Swarm Section
-  const renderActivitySection = () => {
-    if (!activity) return null;
+    const [activePlanIdx, setActivePlanIdx] = useState<number>(
+        currentPlanIndex !== -1 ? currentPlanIndex : Math.max(0, allProposals.length - 1),
+    );
 
-    // Get the tree nodes
-    const roots = nodeId
-      ? [activity.nodes[nodeId]].filter(Boolean)
-      : activity.roots.map((id) => activity.nodes[id]).filter(Boolean);
+    const prevProposalsLength = useRef(allProposals.length);
+    useEffect(() => {
+        if (allProposals.length > prevProposalsLength.current) {
+            setActivePlanIdx(allProposals.length - 1);
+        }
+        prevProposalsLength.current = allProposals.length;
+    }, [allProposals.length]);
 
-    // Fractal Swarm Recursive Node Renderer (Maximum depth-3 Cap)
-    const renderSwarmNode = (node: ActivityNode, depth: number = 0) => {
-      if (!isVisibleNode(node)) return null;
+    useEffect(() => {
+        if (currentPlanIndex !== -1) {
+            setActivePlanIdx(currentPlanIndex);
+        }
+    }, [currentPlanIndex]);
 
-      const childrenNodes = node.children
-        .map((childId) => activity.nodes[childId])
-        .filter(Boolean);
+    const activePlan = allProposals[activePlanIdx] ?? initialPlan;
+    const activePlanMessage = messages.find(
+        (m) => m.proposal?.proposalId === activePlan?.proposalId && m.proposal?.version === activePlan?.version,
+    );
+    const activeMessageId = activePlanMessage?.id ?? "";
 
-      const status = mapStatus(node.status);
-      const isFailed = status === "failed";
-      const isRunning = status === "running";
-      const isAgent = node.kind === "agent" || node.kind === "thinking" || node.kind === "run";
+    const [feedbackOpen, setFeedbackOpen] = useState(false);
+    const [feedbackText, setFeedbackText] = useState("");
 
-      // Build titles & descriptors
-      const nodeName = cleanLabel(node.target?.name || node.name || node.target?.target);
-      let title = nodeName || node.text || "Execution Unit";
-      if (node.kind === "thinking") title = "Analyzing & Thinking";
-      else if (node.kind === "error") title = "Action Failed";
+    if (!activity && !activePlan) return null;
 
-      const summaryText = node.text || node.target?.summary || (node.payload?.message as string) || (node.payload?.error as string);
+    const visited = new Set<string>();
+    const roots = activity
+        ? activity.roots.map((id) => activity.nodes[id]).filter((n): n is ActivityNode => Boolean(n))
+        : [];
+    const orphanRoots = activity
+        ? Object.values(activity.nodes).filter((n) => {
+            if (visited.has(n.id) || !isVisibleNode(n)) return false;
+            const parent = n.parentId ? activity.nodes[n.parentId] : undefined;
+            return !parent || !isVisibleNode(parent);
+        })
+        : [];
+    const allRoots = [...roots, ...orphanRoots];
+    const groupedRoots = groupRoots(allRoots);
 
-      // Tool kind badges
-      const toolType = node.target?.kind || (node.kind === "tool" ? "tool" : null);
+    const activeNodesCount = activity ? Object.values(activity.nodes).filter((n) => n.status === "running").length : 0;
+    const completedNodesCount = activity ? Object.values(activity.nodes).filter((n) => n.status === "completed").length : 0;
+    const totalNodes = activity ? Object.keys(activity.nodes).filter((id) => {
+        const n = activity.nodes[id];
+        return n && isVisibleNode(n);
+    }).length : 0;
 
-      if (isAgent) {
-        return (
-          <AgentNode
-            key={node.id}
-            title={title}
-            status={status}
-            depth={Math.min(depth, 3)}
-            modelName={node.target?.details?.model as string || node.target?.details?.provider as string}
-            summary={summaryText && cleanLabel(summaryText)}
-            defaultOpen={depth === 0 || isRunning || isFailed}
-          >
-            {childrenNodes.length > 0 && (
-              <div className="cm-stream-node__children">
-                {childrenNodes.map((child) => renderSwarmNode(child, depth + 1))}
-              </div>
-            )}
-          </AgentNode>
-        );
-      }
-
-      // Renders standard actions/tools in the swarm
-      return (
-        <StreamNode
-          key={node.id}
-          title={
-            <span className="flex items-center gap-1.5 min-w-0">
-              <span className="font-medium truncate">{title}</span>
-              {toolType && (
-                <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-accent/10 border border-accent/15 text-accent font-bold truncate">
-                  {toolType}
-                </span>
-              )}
-            </span>
-          }
-          kind={node.kind}
-          status={status}
-          summary={summaryText && cleanLabel(summaryText)}
-          defaultOpen={isFailed || isRunning}
-          depth={Math.min(depth, 3)}
-        >
-          {childrenNodes.length > 0 && (
-            <div className="cm-stream-node__children">
-              {childrenNodes.map((child) => renderSwarmNode(child, depth + 1))}
-            </div>
-          )}
-        </StreamNode>
-      );
-    };
-
-    const activeNodesCount = Object.values(activity.nodes).filter(n => n.status === "running").length;
-    const completedNodesCount = Object.values(activity.nodes).filter(n => n.status === "completed").length;
-
-    return (
-      <MissionPocket
-        title="Mission Control Room"
-        summary={activeNodesCount > 0 ? `${activeNodesCount} sub-tasks executing...` : "Warm execution standby."}
-        status={activeNodesCount > 0 ? "running" : "completed"}
-        metadata={
-          <>
-            <span>{completedNodesCount} tasks completed</span>
+    const panelStatus = activeNodesCount > 0 ? "running" : completedNodesCount > 0 ? "completed" : phase === "error" ? "failed" : "running";
+    const panelSummary = activeNodesCount > 0
+        ? `${activeNodesCount} active task${activeNodesCount > 1 ? "s" : ""} executing`
+        : completedNodesCount > 0
+            ? `${completedNodesCount} task${completedNodesCount > 1 ? "s" : ""} completed`
+            : phaseLabel || "Standing by";
+    const panelMetadata = (
+        <>
+            {totalNodes > 0 && <span>{totalNodes} nodes</span>}
             {roots[0]?.runId && <span>run {shortId(roots[0].runId)}</span>}
-          </>
-        }
-      >
-        <div className="flex flex-col gap-2 mt-1">
-          {roots.map((root) => renderSwarmNode(root, 0))}
-        </div>
-      </MissionPocket>
+        </>
     );
-  };
 
-  return (
-    <div className="flex flex-col gap-3 w-full max-w-full">
-      {renderPlanSection()}
-      {renderActivitySection()}
-    </div>
-  );
+    const renderPlanSection = () => {
+        if (!activePlan) return null;
+
+        const decided = activePlan.decision || activePlan.state === "approved" || activePlan.state === "rejected" || activePlan.state === "changes_requested";
+        const canAct = Boolean(onPlanDecision) && !activePlan.pending && !decided;
+        const tasks = parseTasksFromMarkdown(activePlan.markdown);
+        const versionMetadata = (
+            <>
+                <span>v{activePlan.version}</span>
+                {activePlan.proposalId && <span>{shortId(activePlan.proposalId)}</span>}
+                {activePlan.runId && <span>{shortId(activePlan.runId)}</span>}
+            </>
+        );
+
+        return (
+            <PlanGate
+                title={decided ? "Plan Decided" : "Plan Review"}
+                state={activePlan.decision || activePlan.state}
+                subtitle={activePlan.error ? activePlan.error : decided ? undefined : "Review the proposed work plan and choose an out-of-band decision."}
+                metadata={versionMetadata}
+                actions={
+                    canAct ? (
+                        <PlanActions
+                            onApprove={() => onPlanDecision?.(activeMessageId, activePlan, "approved")}
+                            onReject={() => onPlanDecision?.(activeMessageId, activePlan, "rejected", feedbackText.trim() || undefined)}
+                            onRequestChanges={() => {
+                                if (!feedbackOpen) {
+                                    setFeedbackOpen(true);
+                                    return;
+                                }
+                                onPlanDecision?.(activeMessageId, activePlan, "changes_requested", feedbackText.trim() || undefined);
+                            }}
+                            disabled={activePlan.pending}
+                            hasFeedbackInput={feedbackOpen}
+                        />
+                    ) : decided ? (
+                        <PlanActions state={activePlan.decision || activePlan.state} />
+                    ) : undefined
+                }
+            >
+                {allProposals.length > 1 && (
+                    <PlanVersionCarousel
+                        currentVersion={activePlan.version}
+                        totalVersions={allProposals.length}
+                        onPrev={() => setActivePlanIdx((prev) => Math.max(0, prev - 1))}
+                        onNext={() => setActivePlanIdx((prev) => Math.min(allProposals.length - 1, prev + 1))}
+                    />
+                )}
+                {feedbackOpen && canAct && (
+                    <textarea
+                        value={feedbackText}
+                        onChange={(e) => setFeedbackText(e.target.value)}
+                        placeholder="Provide specific guidelines or requests for this plan..."
+                        className="cm-plan-feedback-input"
+                        rows={3}
+                    />
+                )}
+                {tasks.length > 0 ? (
+                    <div className="cm-plan-task-list">
+                        {tasks.map((task, idx) => (
+                            <PlanTask
+                                key={idx}
+                                index={idx}
+                                title={task.title}
+                                status={task.status}
+                            />
+                        ))}
+                    </div>
+                ) : (
+                    <Suspense fallback={<p className="cm-plan-gate__fallback">{activePlan.markdown || "No checklist provided."}</p>}>
+                        <LazyMarkdownRenderer content={activePlan.markdown || "No checklist provided."} />
+                    </Suspense>
+                )}
+            </PlanGate>
+        );
+    };
+
+    const renderActivitySection = () => {
+        if (!activity || groupedRoots.length === 0) return null;
+
+        return (
+            <MissionPocket
+                title="Agent Swarm Timeline"
+                summary={activeNodesCount > 0 ? `${activeNodesCount} sub-tasks executing` : "Execution standby"}
+                status={activeNodesCount > 0 ? "running" : "completed"}
+                metadata={
+                    <>
+                        <span>{completedNodesCount} done</span>
+                    </>
+                }
+            >
+                {groupedRoots.map((item) => {
+                    if ("nodes" in item) {
+                        return <GroupedSwarmNode key={item.kind} group={item} activity={activity} />;
+                    }
+                    return (
+                        <SwarmNode
+                            key={item.id}
+                            node={item}
+                            activity={activity}
+                            depth={0}
+                            visited={visited}
+                        />
+                    );
+                })}
+            </MissionPocket>
+        );
+    };
+
+    return (
+        <MissionControlPanel
+            title="Mission Control"
+            status={panelStatus}
+            summary={panelSummary}
+            metadata={panelMetadata}
+            className={className}
+        >
+            {renderPlanSection()}
+            {renderActivitySection()}
+        </MissionControlPanel>
+    );
 }

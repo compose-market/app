@@ -8,15 +8,16 @@
  * 
  * Used by: agent.tsx, workflow.tsx, playground.tsx
  */
-import React, { Suspense, lazy, useState, memo, useCallback, useEffect, useRef } from "react";
+import React, { Suspense, lazy, useState, memo, useCallback, useEffect, useRef, useMemo } from "react";
 import {
     StreamMedia as SharedStreamMedia,
     StreamNode as SharedStreamNode,
     StreamNotice as SharedStreamNotice,
-    StreamPocket as SharedStreamPocket,
+    PlanGate as SharedPlanGate,
+    PlanActions as SharedPlanActions,
+    ActivityChip as SharedActivityChip,
 } from "@compose-market/theme";
 import { cn } from "@/lib/utils";
-import { MissionControl } from "./mission-control";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -57,7 +58,15 @@ import {
     Download,
 } from "lucide-react";
 import type { ActivityNode, ActivityState } from "@compose-market/sdk";
-import { SlashCommandPopover, type SlashCommand } from "@/components/slash-commands";
+import {
+    SlashCommandPopover,
+    SelectedSlashCommandBadges,
+    clearSlashCommandToken,
+    isSelectableSlashCommandName,
+    nextSelectedSlashCommands,
+    slashCommandMatches,
+    withoutSelectedSlashCommand,
+} from "@/components/slash-commands";
 import type { Artifact, AttachedFile, ChatActivityState, Message, MessageBlock, Plan } from "@/hooks/use-chat";
 
 // Re-export for convenience
@@ -131,7 +140,118 @@ function formatBytes(value?: number): string | null {
     return `${(value / 1024 / 1024).toFixed(1)} MB`;
 }
 
-// PlanReview was removed and refactored into the new MissionControl component
+// Inline Plan Gate — compact decision bar in chat.
+// Shows title + state + action buttons only. No markdown body, no task list.
+// Full plan content (markdown, tasks, version carousel) lives in side-panel Mission Control.
+
+function planSummary(plan: Plan): string {
+    const state = plan.decision || plan.state;
+    if (state === "approved") return `Plan approved \u00B7 v${plan.version}`;
+    if (state === "rejected") return `Plan rejected \u00B7 v${plan.version}`;
+    if (state === "changes_requested") return `Plan changes requested \u00B7 v${plan.version}`;
+    return `Plan proposed \u00B7 v${plan.version}`;
+}
+
+function InlinePlanGate({
+    messageId,
+    plan,
+    onPlanDecision,
+}: {
+    messageId: string;
+    plan: Plan;
+    onPlanDecision?: MessageItemProps["onPlanDecision"];
+}) {
+    const [feedbackOpen, setFeedbackOpen] = useState(false);
+    const [feedback, setFeedback] = useState("");
+    const decided = plan.decision || plan.state === "approved" || plan.state === "rejected" || plan.state === "changes_requested";
+    const canAct = Boolean(onPlanDecision) && !plan.pending && !decided;
+
+    const actions = canAct ? (
+        <SharedPlanActions
+            onApprove={() => onPlanDecision?.(messageId, plan, "approved")}
+            onReject={() => onPlanDecision?.(messageId, plan, "rejected", feedback.trim() || undefined)}
+            onRequestChanges={() => {
+                if (!feedbackOpen) {
+                    setFeedbackOpen(true);
+                    return;
+                }
+                onPlanDecision?.(messageId, plan, "changes_requested", feedback.trim());
+            }}
+            disabled={plan.pending}
+            hasFeedbackInput={feedbackOpen}
+        />
+    ) : decided ? (
+        <SharedPlanActions state={plan.decision || plan.state} />
+    ) : undefined;
+
+    return (
+        <SharedPlanGate
+            title={planSummary(plan)}
+            state={plan.decision || plan.state}
+            subtitle={plan.error ? plan.error : decided ? undefined : "Review full plan in Mission Control \u2192"}
+            metadata={
+                <>
+                    <span>v{plan.version}</span>
+                    {plan.proposalId && <span>{shortId(plan.proposalId)}</span>}
+                </>
+            }
+            actions={actions}
+            defaultOpen={!decided}
+        >
+            {feedbackOpen && canAct && (
+                <textarea
+                    value={feedback}
+                    onChange={(e) => setFeedback(e.target.value)}
+                    placeholder="Feedback for the revised plan"
+                    className="cm-plan-feedback-input"
+                    rows={3}
+                />
+            )}
+        </SharedPlanGate>
+    );
+}
+
+// Inline Activity Chip — compact summary that points to the side panel
+
+function InlineActivityChip({
+    activity,
+    onFocusMissionControl,
+}: {
+    activity?: import("@compose-market/sdk").ActivityState;
+    onFocusMissionControl?: () => void;
+}) {
+    if (!activity) return null;
+    const nodes = Object.values(activity.nodes);
+    const visible = nodes.filter((n) => {
+        if (n.kind === "trace" || n.kind === "plan") return false;
+        if (n.kind === "message" && !n.parentId) return false;
+        return true;
+    });
+    if (visible.length === 0) return null;
+
+    const running = visible.filter((n) => n.status === "running").length;
+    const completed = visible.filter((n) => n.status === "completed").length;
+    const failed = visible.filter((n) => n.status === "failed").length;
+    const tools = visible.filter((n) => n.kind === "tool").length;
+    const agents = visible.filter((n) => n.kind === "agent").length;
+
+    const status = running > 0 ? "running" : failed > 0 ? "failed" : completed > 0 ? "completed" : "pending";
+    const parts: string[] = [];
+    if (tools > 0) parts.push(`${tools} tool${tools > 1 ? "s" : ""}`);
+    if (agents > 0) parts.push(`${agents} agent${agents > 1 ? "s" : ""}`);
+    if (running > 0) parts.push(`${running} running`);
+    else if (completed > 0) parts.push(`${completed} done`);
+    const summary = parts.join(" \u00B7 ") || `${visible.length} activities`;
+
+    return (
+        <SharedActivityChip
+            status={status}
+            summary={summary}
+            metadata={`${visible.length} updates`}
+            onClick={onFocusMissionControl}
+        />
+    );
+}
 
 function StreamMeta({ values }: { values: Array<string | undefined> }) {
     const items = values.filter((value): value is string => Boolean(value));
@@ -709,13 +829,13 @@ class MessageBoundary extends React.Component<
     render() {
         if (!this.state.error) return this.props.children;
         return (
-            <SharedStreamPocket summary="A message renderer failed, but the page stayed mounted.">
+            <div className="cm-chat__error-boundary">
                 <SharedStreamNode title="Render error" kind="error" status="failed">
                     <SharedStreamNotice tone="error" title="Render error">
                         {this.state.error}
                     </SharedStreamNotice>
                 </SharedStreamNode>
-            </SharedStreamPocket>
+            </div>
         );
     }
 }
@@ -735,6 +855,7 @@ export interface MessageItemProps {
     onDelete?: (id: string) => void;
     onPlanDecision?: (messageId: string, plan: Plan, decision: NonNullable<Plan["decision"]>, feedback?: string) => void;
     onStopRealtime?: () => void;
+    onFocusMissionControl?: () => void;
     assistantAvatar?: React.ReactNode;
 }
 
@@ -769,6 +890,7 @@ function MessageItemInner({
     onDelete,
     onPlanDecision,
     onStopRealtime,
+    onFocusMissionControl,
     assistantAvatar,
 }: MessageItemProps) {
     const styles = messageVariantStyles[variant];
@@ -829,17 +951,16 @@ function MessageItemInner({
         if (block.type === "plan") {
             if (!message.proposal || message.proposal.proposalId !== block.planId) return null;
             return (
-                <MissionControl
+                <InlinePlanGate
                     key={block.id}
                     messageId={message.id}
-                    messages={messages}
                     plan={message.proposal}
                     onPlanDecision={onPlanDecision}
                 />
             );
         }
         if (block.type === "activity") {
-            return <MissionControl key={block.id} messageId={message.id} messages={messages} activity={message.activity} nodeId={block.nodeId} onStopRealtime={onStopRealtime} />;
+            return <InlineActivityChip key={block.id} activity={message.activity} onFocusMissionControl={onFocusMissionControl} />;
         }
         if (block.type === "asset") {
             const artifact = message.artifacts?.find((item) => item.id === block.artifactId);
@@ -898,9 +1019,8 @@ function MessageItemInner({
                 )}
 
                 {!hasBlocks && message.proposal && (
-                    <MissionControl
+                    <InlinePlanGate
                         messageId={message.id}
-                        messages={messages}
                         plan={message.proposal}
                         onPlanDecision={onPlanDecision}
                     />
@@ -953,7 +1073,7 @@ export interface MultimodalCanvasProps {
     messages: Message[];
     inputValue: string;
     onInputChange: (value: string) => void;
-    onSend: () => void;
+    onSend: (selectedSlashCommands?: string[]) => boolean | void | Promise<boolean | void>;
     sending: boolean;
     continuous?: boolean;
     variant?: "agent" | "workflow" | "playground";
@@ -986,6 +1106,7 @@ export interface MultimodalCanvasProps {
     onPlanDecision?: (messageId: string, plan: Plan, decision: NonNullable<Plan["decision"]>, feedback?: string) => void;
     onClearChat?: () => void;
     onKnowledgeUpload?: () => void;
+    onFocusMissionControl?: () => void;
     scrollContainerRef?: React.RefObject<HTMLDivElement | null>;
     messagesEndRef?: React.RefObject<HTMLDivElement | null>;
     height?: string;
@@ -1052,29 +1173,89 @@ export function MultimodalCanvas({
     onPlanDecision,
     onClearChat,
     onKnowledgeUpload,
+    onFocusMissionControl,
     scrollContainerRef,
     messagesEndRef,
     height = "",
 }: MultimodalCanvasProps) {
     const config = canvasVariantConfig[variant];
-    const activeTools = activityState?.tools.slice(-3) || [];
+    const activeTools = activityState?.tools.filter((t) => t.status === "running") || [];
     const shouldShowActivity = status !== "idle" || Boolean(activityState && activityState.phase !== "idle");
     const nearBottomRef = useRef(true);
+    const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const [showJump, setShowJump] = useState(false);
+    const [selectedSlashCommands, setSelectedSlashCommands] = useState<string[]>([]);
+    const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
+    const slashMatches = useMemo(
+        () => variant === "workflow" ? [] : slashCommandMatches(inputValue),
+        [inputValue, variant],
+    );
 
-    const handleSend = useCallback(() => {
-        onSend();
-    }, [onSend]);
-
-    const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-        if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            handleSend();
-        }
-    }, [handleSend]);
+    useEffect(() => {
+        setSlashSelectedIndex(0);
+    }, [inputValue]);
 
     const canSend = (!sending || continuous) && (inputValue.trim() || attachedFiles.length > 0);
     const isUploading = attachedFiles.some(f => f.uploading);
+
+    const focusTextarea = useCallback(() => {
+        requestAnimationFrame(() => textareaRef.current?.focus());
+    }, []);
+
+    const handleSend = useCallback(async () => {
+        if (!canSend || isUploading) return;
+        const result = await onSend(selectedSlashCommands.length > 0 ? selectedSlashCommands : undefined);
+        if (result !== false) {
+            setSelectedSlashCommands([]);
+        }
+    }, [canSend, isUploading, onSend, selectedSlashCommands]);
+
+    const selectSlashCommand = useCallback((cmd: { name: string }) => {
+        if (isSelectableSlashCommandName(cmd.name)) {
+            setSelectedSlashCommands((prev) => nextSelectedSlashCommands(prev, cmd.name));
+            onInputChange(clearSlashCommandToken(inputValue));
+            focusTextarea();
+            return;
+        }
+
+        const nextInput = `/${cmd.name} `;
+        onInputChange(nextInput);
+        focusTextarea();
+    }, [focusTextarea, inputValue, onInputChange]);
+
+    const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+        if (slashMatches.length > 0) {
+            if (e.key === "ArrowDown") {
+                e.preventDefault();
+                e.stopPropagation();
+                setSlashSelectedIndex((prev) => (prev + 1) % slashMatches.length);
+                return;
+            }
+            if (e.key === "ArrowUp") {
+                e.preventDefault();
+                e.stopPropagation();
+                setSlashSelectedIndex((prev) => (prev - 1 + slashMatches.length) % slashMatches.length);
+                return;
+            }
+            if (e.key === "Tab" || e.key === "Enter") {
+                e.preventDefault();
+                e.stopPropagation();
+                selectSlashCommand(slashMatches[slashSelectedIndex] ?? slashMatches[0]);
+                return;
+            }
+            if (e.key === "Escape") {
+                e.preventDefault();
+                e.stopPropagation();
+                onInputChange(inputValue.replace(/^\//, ""));
+                return;
+            }
+        }
+
+        if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            void handleSend();
+        }
+    }, [handleSend, inputValue, onInputChange, selectSlashCommand, slashMatches, slashSelectedIndex]);
 
     const isNearBottom = useCallback(() => {
         const el = scrollContainerRef?.current;
@@ -1153,6 +1334,7 @@ export function MultimodalCanvas({
                                     onDelete={onDeleteMessage}
                                     onPlanDecision={onPlanDecision}
                                     onStopRealtime={onStopRecording}
+                                    onFocusMissionControl={onFocusMissionControl}
                                 />
                             </React.Fragment>
                         ))}
@@ -1186,10 +1368,10 @@ export function MultimodalCanvas({
                                 <span
                                     key={tool.id}
                                     className={cn(
-                                        "rounded-full border px-2 py-0.5 text-[10px] normal-case",
-                                        tool.status === "running" && "border-cyan-500/40 bg-cyan-500/10 text-cyan-200",
-                                        tool.status === "completed" && "border-emerald-500/40 bg-emerald-500/10 text-emerald-200",
-                                        tool.status === "error" && "border-red-500/40 bg-red-500/10 text-red-200",
+                                        "cm-chat__tool-chip",
+                                        tool.status === "running" && "cm-chat__tool-chip--running",
+                                        tool.status === "completed" && "cm-chat__tool-chip--completed",
+                                        tool.status === "error" && "cm-chat__tool-chip--error",
                                     )}
                                     title={tool.summary || tool.displayName || tool.toolName}
                                 >
@@ -1239,6 +1421,11 @@ export function MultimodalCanvas({
                     </div>
                 )}
 
+                <SelectedSlashCommandBadges
+                    selected={selectedSlashCommands}
+                    onRemove={(name) => setSelectedSlashCommands((prev) => withoutSelectedSlashCommand(prev, name))}
+                />
+
                 <div className="cm-chat__composer-row">
                     {onClearChat && (
                         <Button variant="ghost" size="icon" onClick={onClearChat} disabled={sending && !continuous} className="cm-chat__icon-action shrink-0" title="Clear chat">
@@ -1282,11 +1469,13 @@ export function MultimodalCanvas({
                         {variant !== "workflow" && (
                             <SlashCommandPopover
                                 input={inputValue}
-                                onSelect={(cmd) => onInputChange(`/${cmd.name} `)}
-                                onDismiss={() => onInputChange(inputValue.replace(/^\//, ""))}
+                                selectedIndex={slashSelectedIndex}
+                                onSelect={selectSlashCommand}
+                                onHighlight={setSlashSelectedIndex}
                             />
                         )}
                         <Textarea
+                            ref={textareaRef}
                             placeholder={placeholder || (variant === "workflow" ? "Enter workflow parameters or instruction..." : "Type your message or use / for commands...")}
                             value={inputValue}
                             onChange={(e) => onInputChange(e.target.value)}
@@ -1297,7 +1486,7 @@ export function MultimodalCanvas({
                         />
                     </div>
 
-                    <Button onClick={handleSend} disabled={!canSend || isUploading} className={cn("cm-chat__send", config.sendButton)}>
+                    <Button onClick={() => void handleSend()} disabled={!canSend || isUploading} className={cn("cm-chat__send", config.sendButton)}>
                         {sending && !continuous ? <Loader2 className="w-4 h-4 animate-spin" /> : variant === "workflow" ? <Play className="w-4 h-4" /> : <Send className="w-4 h-4" />}
                     </Button>
                 </div>
