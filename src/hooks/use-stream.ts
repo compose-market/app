@@ -11,6 +11,7 @@ import type {
     SessionBudgetSnapshot,
     SessionInvalidReason,
     PlanProposalEvent,
+    AgentStreamControls,
 } from "@compose-market/sdk";
 import { parseToolEvent } from "@compose-market/sdk";
 
@@ -35,7 +36,7 @@ export type StreamCallOptions = Pick<
     "x402MaxAmountWei" | "idempotencyKey" | "runId" | "key" | "userAddress" | "chainId" | "timeoutMs"
 >;
 
-export interface AgentStreamArgs {
+export interface AgentStreamArgs extends AgentStreamControls {
     agentWallet: string;
     message: string;
     threadId: string;
@@ -293,6 +294,13 @@ export function useStream(
                 ...(args.cloudPermissions ? { cloudPermissions: args.cloudPermissions } : {}),
                 ...(args.runId ? { runId: args.runId } : {}),
                 ...(args.attachment ? { attachment: args.attachment } : {}),
+                ...(args.mode ? { mode: args.mode } : {}),
+                ...(args.scope ? { scope: args.scope } : {}),
+                ...(args.action ? { action: args.action } : {}),
+                ...(args.plan !== undefined ? { plan: args.plan } : {}),
+                ...(args.sandbox !== undefined ? { sandbox: args.sandbox } : {}),
+                ...(args.proof !== undefined ? { proof: args.proof } : {}),
+                ...(args.constraints ? { constraints: args.constraints } : {}),
             },
             { ...args.options, signal: args.signal },
         );
@@ -671,7 +679,7 @@ function dispatchActivity(
             proposal: plan,
             content: chat.streamedTextRef.current,
         });
-        chat.upsertAssistantBlock(assistantId, { id: `plan:${plan.proposalId}:${plan.version}`, type: "plan", planId: plan.proposalId });
+        chat.upsertAssistantBlock(assistantId, { id: `plan`, type: "plan", planId: plan.proposalId });
         chat.setActivityPhase("thinking", plan.decision ? `Plan ${plan.decision}` : "Awaiting plan decision");
         return;
     }

@@ -241,6 +241,10 @@ export function noticeId(tone: "error" | "info", message: string): string {
 export interface UseChatReturn {
     // === Messages ===
     messages: Message[];
+    /** Latest assistant message's ActivityState (for side-panel Mission Control) */
+    latestActivity?: ActivityState;
+    /** Latest assistant message's Plan (for side-panel Mission Control) */
+    latestPlan?: Plan;
     setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
     /** Add a user message, returns the message ID */
     addUserMessage: (content: string, options?: {
@@ -496,12 +500,11 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
             const next = [...prev];
             const merge = (message: Message): Message => {
                 const visible = visibleActivity(event);
-                const nodeId = visible ? event.parentId ?? event.id : undefined;
                 return {
                     ...message,
                     activity: reduceActivityState(message.activity ?? createActivityState(), event),
-                    blocks: nodeId
-                        ? blockup(message.blocks, { id: `activity:${nodeId}`, type: "activity", nodeId })
+                    blocks: visible
+                        ? blockup(message.blocks, { id: `activity`, type: "activity" })
                         : message.blocks,
                 };
             };
@@ -1073,6 +1076,12 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     return useMemo(() => ({
         // Messages
         messages,
+        latestActivity: messages.length > 0
+            ? [...messages].reverse().find((m) => m.role === "assistant" && m.activity)?.activity
+            : undefined,
+        latestPlan: messages.length > 0
+            ? [...messages].reverse().find((m) => m.role === "assistant" && m.proposal)?.proposal
+            : undefined,
         setMessages,
         addUserMessage,
         createAssistantPlaceholder,
