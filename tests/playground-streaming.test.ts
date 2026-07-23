@@ -13,6 +13,7 @@ const chatHookSource = readFileSync(new URL("../src/hooks/use-chat.ts", import.m
 const chatSource = readFileSync(new URL("../src/components/chat.tsx", import.meta.url), "utf8");
 const outputSource = readFileSync(new URL("../src/components/output.tsx", import.meta.url), "utf8");
 const receiptSource = readFileSync(new URL("../src/components/receipt-indicator.tsx", import.meta.url), "utf8");
+const missionSource = readFileSync(new URL("../src/components/mission-control.tsx", import.meta.url), "utf8");
 const themeStreamSource = readFileSync(new URL("../../packages/theme/src/stream/index.tsx", import.meta.url), "utf8");
 const themeStreamStyles = readFileSync(new URL("../../packages/theme/src/stream/stream.css", import.meta.url), "utf8");
 
@@ -63,16 +64,13 @@ test("chat renders ordered blocks instead of a fixed stream tree order", () => {
 });
 
 test("activity folds render real activity state and hide traces by default", () => {
-  const activityView = section(chatSource, "function ActivityView", "function DirectMedia");
-  assert.match(activityView, /ActivityState/);
-  assert.match(activityView, /buildActivityRows/);
-  assert.match(activityView, /visibleActivityNode/);
-  assert.match(activityView, /node\.kind === "trace"/);
-  assert.match(activityView, /node\.kind === "plan"/);
-  assert.match(activityView, /node\.kind === "message" && !node\.parentId/);
+  assert.match(missionSource, /ActivityState/);
+  assert.match(missionSource, /isVisibleNode/);
+  assert.match(missionSource, /node\.kind === "trace"/);
+  assert.match(missionSource, /node\.kind === "plan"/);
+  assert.match(missionSource, /node\.kind === "message"/);
   assert.match(streamSource, /if \(event\.type === "activity\.trace"\) return/);
-  assert.doesNotMatch(activityView, /node\.source|isDirectModel|streamKind|Agent planned work|Conclave:/);
-  assert.doesNotMatch(activityView, /kind="debug"|status="info"/);
+  assert.doesNotMatch(missionSource, /kind="debug"|status="info"/);
 });
 
 test("direct model output stays on text, reasoning, and asset surfaces", () => {
@@ -120,9 +118,10 @@ test("embedding artifacts render as foldable vectors without fake artifact statu
 });
 
 test("plan review and failures are product blocks, not backend stream events", () => {
-  const planReview = section(chatSource, "function PlanReview", "function planSummary");
-  assert.match(planReview, /<details className="cm-chat-plan mb-2" open=\{!decided\}>/);
-  assert.match(planReview, /SharedPlanReview/);
+  const planReview = section(chatSource, "function InlinePlanGate", "function ArtifactBlock");
+  assert.match(planReview, /SharedPlanGate/);
+  assert.match(missionSource, /PlanVersionCarousel/);
+  assert.match(missionSource, /planTasks\(activePlan\)/);
   assert.match(streamSource, /function planFromActivityEvent/);
   assert.match(chatHookSource, /type: "notice"/);
   assert.match(chatHookSource, /export function noticeId/);

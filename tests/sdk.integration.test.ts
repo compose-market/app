@@ -11,7 +11,7 @@ test("web consumes @compose-market/sdk as a third-party integrator", async () =>
     channelsUrl: "https://services.example.test",
     defaultHeaders: {
       Authorization: "Bearer compose-test",
-      "x-chain-id": "43113",
+      "x-network-id": "eip155:43113",
       "x-session-active": "true",
       "x-payment-intent-id": "intent-test",
     },
@@ -46,7 +46,6 @@ test("web consumes @compose-market/sdk as a third-party integrator", async () =>
   assert.equal(typeof sdk.x402.payments.meterModel, "function");
   assert.equal(typeof sdk.directory.agents.agentverse, "function");
   assert.equal(typeof sdk.system.health, "function");
-  assert.equal(typeof sdk.local.link.create, "function");
   assert.equal(typeof sdk.permissions.list, "function");
   assert.equal(typeof sdk.accounts.connect, "function");
   assert.equal(typeof sdk.channels.link, "function");
@@ -79,7 +78,7 @@ test("web consumes @compose-market/sdk as a third-party integrator", async () =>
   assert.equal(channelCall?.method, "POST");
   assert.equal(channelCall?.path, "/channels/telegram/link");
   assert.equal(channelCall?.headers.has("authorization"), false);
-  assert.equal(channelCall?.headers.has("x-chain-id"), false);
+  assert.equal(channelCall?.headers.has("x-network-id"), false);
   assert.equal(channelCall?.headers.has("x-session-active"), false);
   assert.equal(channelCall?.headers.has("x-payment-intent-id"), false);
 });

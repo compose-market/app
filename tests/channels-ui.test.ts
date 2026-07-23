@@ -33,5 +33,5 @@ test("channel dialog uses only SDK channel resources for channel routes", () => 
   assert.match(source, /sdk\.channels\.link/);
   assert.match(source, /sdk\.channels\.disconnect/);
   assert.doesNotMatch(source, /fetch\([^)]*\/channels/u);
-  assert.doesNotMatch(source, /Authorization|x-session-|x-payment-|DEPLOYER_KEY|x402/u);
+  assert.doesNotMatch(source, /Authorization|x-session-|x-payment-|FACILITATOR_KEY|x402/u);
 });
