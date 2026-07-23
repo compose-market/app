@@ -4,6 +4,7 @@ import "./styles/index.css";
 import posthog from "posthog-js";
 import { PostHogProvider } from "@posthog/react";
 import { initMixpanel } from "./lib/mixpanel";
+import { inject } from "@vercel/analytics";
 
 function scheduleAnalyticsBootstrap(callback: () => void) {
   if (typeof window === "undefined") {
@@ -30,6 +31,9 @@ scheduleAnalyticsBootstrap(() => {
     defaults: "2026-01-30",
   });
 });
+
+// Initialize Vercel Web Analytics
+inject();
 
 createRoot(document.getElementById("root")!).render(
   <PostHogProvider client={posthog}>
