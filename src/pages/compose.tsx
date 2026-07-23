@@ -42,7 +42,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
-import { useActiveAccount, useActiveWallet, useSendTransaction } from "thirdweb/react";
+import { useActiveAccount, useActiveWallet, useAdminWallet, useSendTransaction } from "thirdweb/react";
 import { prepareContractCall } from "thirdweb";
 import { readContract } from "thirdweb";
 import { saveMintSuccessForShare } from "@/lib/share";
@@ -56,9 +56,9 @@ import {
   fileToDataUrl, isPinataConfigured, fetchFromIpfs,
   type WorkflowMetadata, type AgentCard
 } from "@/lib/pinata";
-import { CHAIN_CONFIG, getUsdcContractForChain } from "@/lib/chains";
-import { useChain } from "@/contexts/ChainContext";
-import { NetworkSelector } from "@/components/ui/network-selector";
+import { CHAIN_CONFIG, getUsdcContractForChain, isEvmNetwork, evmChainId } from "@/lib/chains";
+import { useChain } from "@/contexts/Network";
+import { NetworkSelector } from "@/components/network-selector";
 import { sdk } from "@/lib/sdk";
 import { useAgenticModels } from "@/hooks/use-coordinator";
 import { useSession } from "@/hooks/use-session.tsx";
@@ -82,6 +82,14 @@ import type { WorkflowStep } from "@/lib/services";
 import { WorkflowOutputPanel, type WorkflowExecutionResult } from "@/components/output";
 import { AGENT_REGISTRIES, type Agent } from "@/lib/agents";
 import { RFAComponent } from "@/components/RFAComponent";
+import { useSelectedUserAddress } from "@/hooks/use-address";
+import {
+  buildSolanaMintWorkflowInstruction,
+  fetchSolanaAgentAccount,
+  getManowarSolanaDeployment,
+  getSolanaChainOrThrow,
+  relaySolanaManowarInstructions,
+} from "@/lib/programs";
 
 // Extracted components
 import {
@@ -124,9 +132,19 @@ function MintWorkflowDialog({
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const wallet = useActiveWallet();
+  const adminWallet = useAdminWallet();
   const account = useActiveAccount();
   const { mutateAsync: sendTransaction } = useSendTransaction();
-  const { selectedChainId } = useChain();
+  const { selectedNetwork, solanaChains } = useChain();
+  const {
+    solanaAddress,
+    evmSignerAddress,
+    isResolving: userAddressResolving,
+  } = useSelectedUserAddress();
+  const selectedChainId = isEvmNetwork(selectedNetwork) ? evmChainId(selectedNetwork) : null;
+  const selectedNetworkLabel = selectedChainId
+    ? CHAIN_CONFIG[selectedChainId]?.name || "testnet"
+    : solanaChains.find((chain) => chain.network === selectedNetwork)?.name || "Solana";
 
   const [title, setTitle] = useState(workflowName);
   const [description, setDescription] = useState(workflowDescription);
@@ -261,24 +279,47 @@ function MintWorkflowDialog({
         bannerImageUri = getIpfsUri(bannerCid);
       }
       const mintTimestamp = Math.floor(Date.now() / 1000);
-      const dnaHash = computeWorkflowDnaHash(agentIds, mintTimestamp);
+      const workflowDeploymentAddress = selectedChainId
+        ? getContractAddressForChain("Workflow", selectedChainId)
+        : getManowarSolanaDeployment().marketProgramId;
+      const dnaHash = computeWorkflowDnaHash(agentIds, mintTimestamp, workflowDeploymentAddress);
       const walletAddress = deriveWorkflowWalletAddress(dnaHash, mintTimestamp);
-      const agentFactoryContract = getAgentFactoryContractForChain(selectedChainId);
       const nestedAgentCards: AgentCard[] = [];
-      for (const agentId of agentIds) {
-        try {
-          const agentData = await readContract({
-            contract: agentFactoryContract,
-            method: "function getAgentData(uint256 agentId) view returns ((bytes32 dnaHash, uint256 licenses, uint256 licensesMinted, uint256 licensePrice, uint256 creatorFee, address creator, bool cloneable, bool isClone, uint256 parentAgentId, string agentCardUri))",
-            params: [BigInt(agentId)],
-          }) as { agentCardUri: string };
-          if (agentData.agentCardUri?.startsWith("ipfs://")) {
-            const cid = agentData.agentCardUri.replace("ipfs://", "");
-            const agentCard = await fetchFromIpfs<AgentCard>(cid);
-            nestedAgentCards.push(agentCard);
+      if (selectedChainId) {
+        const agentFactoryContract = getAgentFactoryContractForChain(selectedChainId);
+        for (const agentId of agentIds) {
+          try {
+            const agentData = await readContract({
+              contract: agentFactoryContract,
+              method: "function getAgentData(uint256 agentId) view returns ((bytes32 dnaHash, uint256 licenses, uint256 licensesMinted, uint256 licensePrice, uint256 creatorFee, address creator, bool cloneable, bool isClone, uint256 parentAgentId, string agentCardUri))",
+              params: [BigInt(agentId)],
+            }) as { agentCardUri: string };
+            if (agentData.agentCardUri?.startsWith("ipfs://")) {
+              const cid = agentData.agentCardUri.replace("ipfs://", "");
+              const agentCard = await fetchFromIpfs<AgentCard>(cid);
+              nestedAgentCards.push(agentCard);
+            }
+          } catch (err) {
+            console.warn(`Failed to fetch agentCard for agent ${agentId}:`, err);
           }
-        } catch (err) {
-          console.warn(`Failed to fetch agentCard for agent ${agentId}:`, err);
+        }
+      } else {
+        const solanaChain = getSolanaChainOrThrow(solanaChains, selectedNetwork);
+        for (const agentId of agentIds) {
+          try {
+            const agentData = await fetchSolanaAgentAccount({
+              network: solanaChain.network,
+              rpcUrl: solanaChain.rpcUrl,
+              agentId,
+            });
+            if (agentData.uri?.startsWith("ipfs://")) {
+              const cid = agentData.uri.replace("ipfs://", "");
+              const agentCard = await fetchFromIpfs<AgentCard>(cid);
+              nestedAgentCards.push(agentCard);
+            }
+          } catch (err) {
+            console.warn(`Failed to fetch Solana agentCard for agent ${agentId}:`, err);
+          }
         }
       }
       const metadata: WorkflowMetadata = {
@@ -289,6 +330,7 @@ function MintWorkflowDialog({
         dnaHash,
         walletAddress,
         walletTimestamp: mintTimestamp,
+        network: selectedNetwork,
         agents: nestedAgentCards,
         coordinator: coordinatorModel ? { hasCoordinator: true, model: coordinatorModel } : undefined,
         pricing: { totalAgentPrice: totalAgentPrice.toString() },
@@ -302,15 +344,57 @@ function MintWorkflowDialog({
       };
       const metadataCid = await uploadWorkflowMetadata(metadata);
       const workflowCardUri = getIpfsUri(metadataCid);
-      const workflowAddress = getContractAddressForChain("Workflow", selectedChainId);
 
       if (!account) {
         throw new Error("Wallet account unavailable");
       }
-      const workflowContract = getWorkflowContractForChain(selectedChainId);
-      const usdcContract = getUsdcContractForChain(selectedChainId);
-      const mintTransaction = prepareMintWorkflowCall(workflowContract, {
-        params: {
+
+      let txHash: string;
+      if (selectedChainId) {
+        const workflowAddress = getContractAddressForChain("Workflow", selectedChainId);
+        const workflowContract = getWorkflowContractForChain(selectedChainId);
+        const usdcContract = getUsdcContractForChain(selectedChainId);
+        const mintTransaction = prepareMintWorkflowCall(workflowContract, {
+          params: {
+            title,
+            description,
+            banner: bannerImageUri,
+            workflowCardUri,
+            units: units ? BigInt(parseInt(units)) : BigInt(1),
+            leaseEnabled,
+            leaseDuration: BigInt(parseInt(leaseDuration) || 0),
+            leasePercent: parseInt(leasePercent) || 0,
+            hasCoordinator: !!coordinatorModel,
+            coordinatorModel: coordinatorModel || "",
+          },
+          agentIds: agentIds.map(id => BigInt(id)),
+        });
+        if (totalAgentPrice > BigInt(0)) {
+          const approvalTx = prepareContractCall({
+            contract: usdcContract,
+            method: "function approve(address spender, uint256 amount) returns (bool)",
+            params: [workflowAddress, totalAgentPrice],
+          });
+          await sendTransaction(approvalTx);
+        }
+        const result = await sendTransaction(mintTransaction);
+        txHash = result.transactionHash;
+      } else {
+        if (!solanaAddress || userAddressResolving) {
+          throw new Error("Solana smart account is still resolving");
+        }
+        if (!evmSignerAddress) {
+          throw new Error("EVM signer address not available for Solana smart-account signing");
+        }
+        const signerAccount = adminWallet?.getAccount?.();
+        if (!signerAccount) {
+          throw new Error("EVM signer account not available");
+        }
+        const solanaChain = getSolanaChainOrThrow(solanaChains, selectedNetwork);
+        const built = await buildSolanaMintWorkflowInstruction({
+          network: solanaChain.network,
+          rpcUrl: solanaChain.rpcUrl,
+          owner: solanaAddress,
           title,
           description,
           banner: bannerImageUri,
@@ -321,38 +405,43 @@ function MintWorkflowDialog({
           leasePercent: parseInt(leasePercent) || 0,
           hasCoordinator: !!coordinatorModel,
           coordinatorModel: coordinatorModel || "",
-        },
-        agentIds: agentIds.map(id => BigInt(id)),
-      });
-      if (totalAgentPrice > BigInt(0)) {
-        const approvalTx = prepareContractCall({
-          contract: usdcContract,
-          method: "function approve(address spender, uint256 amount) returns (bool)",
-          params: [workflowAddress, totalAgentPrice],
+          agentIds,
         });
-        await sendTransaction(approvalTx);
+        const result = await relaySolanaManowarInstructions({
+          network: solanaChain.network,
+          rpcUrl: solanaChain.rpcUrl,
+          selectedSolanaAddress: solanaAddress,
+          evmSignerAddress,
+          feePayer: built.rentPayer,
+          instructions: [built.instruction],
+          signMessage: async (message: Uint8Array) => {
+            return signerAccount.signMessage({ message: { raw: message } as any });
+          },
+        });
+        txHash = result.signature;
       }
-      const result = await sendTransaction(mintTransaction);
+
       saveMintSuccessForShare({
         type: 'workflow',
         name: title,
         walletAddress,
-        txHash: result.transactionHash,
-        chainId: selectedChainId,
+        txHash,
+        network: selectedNetwork,
       });
 
       posthog?.capture("workflow_published", {
         workflow_title: title,
         workflow_wallet: walletAddress,
-        chain_id: selectedChainId,
+        network: selectedNetwork,
+        ...(selectedChainId ? { chain_id: selectedChainId } : {}),
         agent_count: agentIds.length,
-        tx_hash: result.transactionHash,
-        path: "thirdweb",
+        tx_hash: txHash,
+        path: selectedChainId ? "thirdweb" : "swig",
       });
 
       mpTrack("Conversion Event", { "Conversion Type": "workflow_published" });
       mpTrack("Purchase", {
-        transaction_id: result.transactionHash,
+        transaction_id: txHash,
         revenue: Number(totalAgentPriceFormatted),
         currency: "USDC",
       });
@@ -385,7 +474,7 @@ function MintWorkflowDialog({
               Mint as Workflow
             </DialogTitle>
             <DialogDescription className="text-xs sm:text-sm">
-              Deploy this workflow as an ERC-7401 nestable NFT on {CHAIN_CONFIG[selectedChainId]?.name || 'testnet'}
+              Deploy this workflow on {selectedNetworkLabel}
             </DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-4">
@@ -661,8 +750,8 @@ function Flow() {
   const [, setLocation] = useLocation();
   const wallet = useActiveWallet();
   const account = useActiveAccount();
-  const { paymentChainId } = useChain();
-  const { sessionActive, budgetRemaining, composeKeyToken, ensureKeyToken } = useSession();
+  const { paymentNetwork } = useChain();
+  const { sessionActive, budgetRemaining, keyToken, ensureKeyToken } = useSession();
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
 
   // UI state - start in fullscreen mode by default
@@ -793,7 +882,7 @@ function Flow() {
         return updated;
       });
 
-      let activeKeyToken = composeKeyToken;
+      let activeKeyToken = keyToken;
       if (sessionActive && budgetRemaining > 0 && !activeKeyToken) {
         activeKeyToken = await ensureKeyToken();
       }
@@ -860,7 +949,7 @@ function Flow() {
     } catch (err) {
       toast({ title: "Execution Error", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
     }
-  }, [currentWorkflow, inputJson, nodes, edges, setNodes, toast, wallet, sessionActive, budgetRemaining, composeKeyToken, ensureKeyToken, paymentChainId]);
+  }, [currentWorkflow, inputJson, nodes, edges, setNodes, toast, wallet, sessionActive, budgetRemaining, keyToken, ensureKeyToken]);
 
   return (
     <div className="cm-compose-workspace">

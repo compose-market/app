@@ -49,6 +49,25 @@ const RFADetails = React.lazy(() =>
   import("@/components/RFADetails").then((module) => ({ default: module.RFADetails })),
 );
 
+function evmChainIdFromNetwork(network: string | undefined): number | null {
+  if (!network?.startsWith("eip155:")) return null;
+  const chainId = Number.parseInt(network.slice("eip155:".length), 10);
+  return Number.isInteger(chainId) && chainId > 0 ? chainId : null;
+}
+
+function networkLabel(network: string | undefined): string | null {
+  if (!network) return null;
+  const chainId = evmChainIdFromNetwork(network);
+  return chainId ? CHAIN_CONFIG[chainId]?.name ?? network : network;
+}
+
+function workflowExplorerUrl(workflow: OnchainWorkflow): string | null {
+  const network = workflow.network ?? workflow.metadata?.network;
+  const chainId = evmChainIdFromNetwork(network);
+  if (!chainId || !CHAIN_CONFIG[chainId]) return null;
+  return `${CHAIN_CONFIG[chainId].explorer}/token/${getContractAddress("Workflow", chainId)}?a=${workflow.id}`;
+}
+
 type MarketTab = "agents" | "workflows" | "rfas";
 type AgentSort = "newest" | "price-low" | "price-high";
 type WorkflowSort = "newest" | "price-low" | "price-high";
@@ -331,12 +350,11 @@ const WorkflowCard = React.memo(function WorkflowCard({ workflow }: { workflow: 
         )}
         badges={(
           <>
-            {workflow.metadata?.agents?.[0]?.chain && (() => {
-              const chainId = workflow.metadata.agents[0].chain;
-              const chainInfo = CHAIN_CONFIG[chainId];
+            {(workflow.network ?? workflow.metadata?.network) && (() => {
+              const network = (workflow.network ?? workflow.metadata?.network)!;
               return (
                 <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/10 text-cyan-400 text-xs">
-                  {chainInfo?.name || `Chain ${chainId}`}
+                  {networkLabel(network)}
                 </Badge>
               );
             })()}
@@ -386,10 +404,8 @@ const WorkflowCard = React.memo(function WorkflowCard({ workflow }: { workflow: 
               className="border-sidebar-border hover:border-cyan-500/50 h-8 sm:h-9 w-8 sm:w-9"
               onClick={(e) => {
                 e.stopPropagation();
-                const metadataChainId = workflow.metadata?.agents?.[0]?.chain;
-                if (metadataChainId && CHAIN_CONFIG[metadataChainId]) {
-                  window.open(`${CHAIN_CONFIG[metadataChainId].explorer}/token/${getContractAddress("Workflow", metadataChainId)}?a=${workflow.id}`, "_blank");
-                }
+                const explorerUrl = workflowExplorerUrl(workflow);
+                if (explorerUrl) window.open(explorerUrl, "_blank");
               }}
             >
               <ExternalLink className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
@@ -648,11 +664,13 @@ function agent(card: DirectoryAgent): OnchainAgent {
   const minted = finite((card as { licensesMinted?: unknown }).licensesMinted) ?? 0;
   const available = finite(card.licensesAvailable) ?? (licenses === 0 ? Infinity : Math.max(0, licenses - minted));
   const creatorFee = finite(card.creatorFee) ?? 1;
+  const network = (card as { network?: OnchainAgent["network"] }).network;
 
   return {
     id: finite(card.agentId) ?? 0,
     dnaHash: card.dnaHash || "",
     walletAddress: card.walletAddress || "",
+    network,
     licenses,
     licensesMinted: minted,
     licensesAvailable: available,
@@ -666,9 +684,10 @@ function agent(card: DirectoryAgent): OnchainAgent {
     agentCardUri: card.cid ? `ipfs://${card.cid}` : "",
     metadata: {
       ...card,
+      ...(network ? { network } : {}),
       creatorFee,
       x402: true,
-    } as OnchainAgent["metadata"],
+    } as unknown as OnchainAgent["metadata"],
     isWarped: false,
   };
 }
@@ -729,7 +748,7 @@ function AgentsTab({
     for (const page of data?.pages || []) {
       for (const card of page.agents || []) {
         if (!card.walletAddress) continue;
-        const key = card.walletAddress.toLowerCase();
+        const key = card.walletAddress;
         if (seen.has(key)) continue;
         seen.add(key);
         out.push(agent(card));

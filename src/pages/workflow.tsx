@@ -13,13 +13,14 @@ import { mpTrack, mpError } from "@/lib/mixpanel";
 import { useParams } from "wouter";
 import { useActiveWallet, useActiveAccount } from "thirdweb/react";
 import { sdk } from "@/lib/sdk";
-import { useChain } from "@/contexts/ChainContext";
+import { useChain } from "@/contexts/Network";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { useSession } from "@/hooks/use-session.tsx";
+import { useSelectedUserAddress } from "@/hooks/use-address";
 import { SessionBudgetDialog } from "@/components/session";
 import { useOnchainWorkflowByIdentifier } from "@/hooks/use-onchain";
 import { MultimodalCanvas } from "@/components/chat";
@@ -56,8 +57,12 @@ export default function ManowarPage() {
     const { toast } = useToast();
     const wallet = useActiveWallet();
     const account = useActiveAccount();
-    const { paymentChainId } = useChain();
-    const { sessionActive, budgetRemaining, composeKeyToken, ensureKeyToken } = useSession();
+    const { paymentNetwork } = useChain();
+    const {
+        userAddress: selectedUserAddress,
+        isResolving: userAddressResolving,
+    } = useSelectedUserAddress();
+    const { sessionActive, budgetRemaining, keyToken, ensureKeyToken } = useSession();
 
     // Chat state from shared hook (includes messages, attachments, and recording)
     const workflowWallet = workflow?.walletAddress;
@@ -104,6 +109,15 @@ export default function ManowarPage() {
             return;
         }
 
+        if (!selectedUserAddress || userAddressResolving) {
+            toast({
+                title: "Account resolving",
+                description: "Wait for the selected network account before executing workflow.",
+                variant: "destructive",
+            });
+            return;
+        }
+
         // Require active session for all chains (enables session bypass for <100ms latency)
         if (!sessionActive || budgetRemaining <= 0) {
             toast({
@@ -135,7 +149,7 @@ export default function ManowarPage() {
             workflow_title: workflow?.title,
             has_attachment: attachedFiles.length > 0,
             continuous: continuousEnabled,
-            chain_id: paymentChainId,
+            network: paymentNetwork,
         });
 
         mpTrack("Launch AI");
@@ -148,7 +162,7 @@ export default function ManowarPage() {
         const replayEventIndex = 0;
 
         try {
-            const activeKeyToken = composeKeyToken || sdk.keys.currentToken() || await ensureKeyToken();
+            const activeKeyToken = keyToken || sdk.keys.currentToken() || await ensureKeyToken();
             if (!activeKeyToken) {
                 toast({
                     title: "Session Sync Required",
@@ -163,7 +177,7 @@ export default function ManowarPage() {
             abortControllerRef.current = new AbortController();
 
             // Persistent thread ID scoped to user + workflow
-            const userAddress = wallet.getAccount()?.address ?? account.address;
+            const userAddress = selectedUserAddress;
             const threadKey = `workflow-thread-${userAddress}-${workflowWallet}`;
             let threadId = sessionStorage.getItem(threadKey);
             if (!threadId) {
@@ -177,7 +191,6 @@ export default function ManowarPage() {
                 workflowWallet,
                 message: prompt,
                 threadId,
-                userAddress,
                 runId,
                 continuous: continuousEnabled,
                 lastEventIndex: replayEventIndex,
@@ -187,7 +200,7 @@ export default function ManowarPage() {
                 options: {
                     key: activeKeyToken,
                     userAddress,
-                    chainId: paymentChainId,
+                    network: paymentNetwork,
                 },
             });
         } catch (err) {
@@ -202,7 +215,7 @@ export default function ManowarPage() {
             setSending(false);
             abortControllerRef.current = null;
         }
-    }, [inputValue, sending, workflow, workflowWallet, wallet, account, toast, attachedFiles, addUserMessage, clearFiles, createAssistantPlaceholder, failAssistant, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureKeyToken, continuousEnabled, streamer, posthog]);
+    }, [inputValue, sending, workflow, workflowWallet, wallet, account, toast, attachedFiles, addUserMessage, clearFiles, createAssistantPlaceholder, failAssistant, paymentNetwork, sessionActive, budgetRemaining, keyToken, ensureKeyToken, continuousEnabled, streamer, posthog, selectedUserAddress, userAddressResolving]);
 
     const handleStopExecution = useCallback(async () => {
         if (!workflow?.walletAddress || !activeThreadId) return;

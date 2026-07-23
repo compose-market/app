@@ -16,13 +16,14 @@ import { useActiveWallet, useActiveAccount } from "thirdweb/react";
 import { sdk } from "@/lib/sdk";
 import { uploadWorkspaceFiles } from "@/lib/workspace";
 import { cn } from "@/lib/utils";
-import { useChain } from "@/contexts/ChainContext";
+import { useChain } from "@/contexts/Network";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Hint, ShellButton } from "@compose-market/theme/shell";
 import { useToast } from "@/hooks/use-toast";
 import { useSession } from "@/hooks/use-session.tsx";
+import { useSelectedUserAddress } from "@/hooks/use-address";
 import { SessionBudgetDialog } from "@/components/session";
 import { BackpackDialog } from "@/components/backpack";
 import { useOnchainAgentByIdentifier } from "@/hooks/use-onchain";
@@ -71,8 +72,12 @@ export default function AgentDetailPage() {
   const { toast } = useToast();
   const wallet = useActiveWallet();
   const account = useActiveAccount();
-  const { paymentChainId } = useChain();
-  const { sessionActive, budgetRemaining, composeKeyToken, ensureKeyToken } = useSession();
+  const { paymentNetwork } = useChain();
+  const {
+    userAddress: selectedUserAddress,
+    isResolving: userAddressResolving,
+  } = useSelectedUserAddress();
+  const { sessionActive, budgetRemaining, keyToken, ensureKeyToken } = useSession();
 
   // Build the A2A-compatible endpoint URL using wallet address (canonical identifier)
   const agentWallet = agent?.walletAddress;
@@ -119,16 +124,15 @@ export default function AgentDetailPage() {
   const showMissionControl = sending || Boolean(latestActivity) || Boolean(latestPlan);
 
   const getConversationThreadKey = useCallback(() => {
-    const userAddress = wallet?.getAccount()?.address;
-    if (!agentWallet || !userAddress) {
+    if (!agentWallet || !selectedUserAddress || userAddressResolving) {
       return null;
     }
-    const backpackUserId = resolveBackpackUserId(userAddress);
+    const backpackUserId = resolveBackpackUserId(selectedUserAddress);
     return {
       backpackUserId,
       key: `agent-thread-${backpackUserId}-${agentWallet}`,
     };
-  }, [agentWallet, wallet]);
+  }, [agentWallet, selectedUserAddress, userAddressResolving]);
 
   // Auto-switch to mission tab when streaming starts
   const prevSending = useRef(sending);
@@ -194,16 +198,16 @@ export default function AgentDetailPage() {
       });
       return;
     }
-    if (!account?.address) {
+    if (!selectedUserAddress || userAddressResolving) {
       toast({
         title: "Connect wallet",
-        description: "Connect your wallet to access your backpack.",
+        description: "Wait for the selected network account before opening your backpack.",
         variant: "destructive",
       });
       return;
     }
     setBackpackOpen(true);
-  }, [account?.address, agentWallet, toast]);
+  }, [agentWallet, selectedUserAddress, toast, userAddressResolving]);
 
   const openWorkspaceDialog = useCallback(() => {
     if (!sessionActive || budgetRemaining <= 0) {
@@ -260,6 +264,15 @@ export default function AgentDetailPage() {
       return;
     }
 
+    if (!selectedUserAddress || userAddressResolving) {
+      toast({
+        title: "Account resolving",
+        description: "Wait for the selected network account before uploading workspace knowledge.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (workspaceFiles.length === 0) {
       toast({
         title: "No files selected",
@@ -271,7 +284,7 @@ export default function AgentDetailPage() {
 
     let activeKeyToken = await ensureKeyToken();
     if (!activeKeyToken) {
-      activeKeyToken = composeKeyToken;
+      activeKeyToken = keyToken;
     }
 
     if (!activeKeyToken) {
@@ -288,7 +301,7 @@ export default function AgentDetailPage() {
     try {
       const result = await uploadWorkspaceFiles(workspaceFiles, {
         agentWallet,
-        userAddress: account.address,
+        userAddress: selectedUserAddress,
       });
 
       toast({
@@ -306,7 +319,7 @@ export default function AgentDetailPage() {
     } finally {
       setWorkspaceUploading(false);
     }
-  }, [account, agentWallet, budgetRemaining, composeKeyToken, ensureKeyToken, paymentChainId, toast, workspaceFiles]);
+  }, [account, agentWallet, keyToken, ensureKeyToken, selectedUserAddress, toast, userAddressResolving, workspaceFiles]);
 
   // Send chat message with x402 payment
   const handleSendMessage = useCallback(async (selectedSlashCommands: string[] = []) => {
@@ -315,6 +328,15 @@ export default function AgentDetailPage() {
 
     if (!wallet || !account) {
       toast({ title: "Connect wallet", description: "Please connect your wallet to chat", variant: "destructive" });
+      return false;
+    }
+
+    if (!selectedUserAddress || userAddressResolving) {
+      toast({
+        title: "Account resolving",
+        description: "Wait for the selected network account before chatting.",
+        variant: "destructive",
+      });
       return false;
     }
 
@@ -330,7 +352,7 @@ export default function AgentDetailPage() {
     }
 
     const attached = attachedFiles[0];
-    const userAddress = wallet.getAccount()?.address ?? account.address;
+    const userAddress = selectedUserAddress;
     const backpackUserId = resolveBackpackUserId(userAddress);
     const prompt = inputValue.trim();
     const selected = new Set(selectedSlashCommands);
@@ -365,7 +387,7 @@ export default function AgentDetailPage() {
       agent_name: agent?.metadata?.name,
       has_attachment: attachedFiles.length > 0,
       attachment_type: attachedFiles[0]?.type ?? null,
-      chain_id: paymentChainId,
+      network: paymentNetwork,
     });
 
     mpTrack("Launch AI");
@@ -378,7 +400,7 @@ export default function AgentDetailPage() {
 
     try {
       if (!agent) throw new Error("Agent not loaded");
-      const activeKeyToken = composeKeyToken || sdk.keys.currentToken() || await ensureKeyToken();
+      const activeKeyToken = keyToken || sdk.keys.currentToken() || await ensureKeyToken();
       if (!activeKeyToken) {
         toast({
           title: "Session Sync Required",
@@ -398,7 +420,6 @@ export default function AgentDetailPage() {
         message: prompt,
         threadId,
         userAddress: backpackUserId,
-        ...(agent.metadata ? { agentCard: agent.metadata } : {}),
         runId: runId,
         cloudPermissions: getCachedBackpackPermissions(agentWallet),
         ...(attachmentPart ? { attachment: attachmentPart } : {}),
@@ -407,7 +428,7 @@ export default function AgentDetailPage() {
         options: {
           key: activeKeyToken,
           userAddress,
-          chainId: paymentChainId,
+          network: paymentNetwork,
         },
       });
     } catch (err) {
@@ -421,7 +442,7 @@ export default function AgentDetailPage() {
       setSending(false);
     }
     return accepted;
-  }, [inputValue, sending, agentWallet, wallet, account, toast, agent, attachedFiles, addUserMessage, clearFiles, createAssistantPlaceholder, failAssistant, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureKeyToken, ensureConversationThread, streamer, posthog]);
+  }, [inputValue, sending, agentWallet, wallet, account, toast, agent, attachedFiles, addUserMessage, clearFiles, createAssistantPlaceholder, failAssistant, paymentNetwork, sessionActive, budgetRemaining, keyToken, ensureKeyToken, ensureConversationThread, streamer, posthog, selectedUserAddress, userAddressResolving]);
 
   const handlePlanDecision = useCallback(async (
     messageId: string,
@@ -439,15 +460,15 @@ export default function AgentDetailPage() {
     }
     updateAssistantMessage(messageId, { proposal: { ...plan, pending: true, error: undefined } });
     try {
-      const activeKeyToken = composeKeyToken || sdk.keys.currentToken() || await ensureKeyToken();
+      const activeKeyToken = keyToken || sdk.keys.currentToken() || await ensureKeyToken();
       if (activeKeyToken) sdk.keys.use(activeKeyToken);
       await sdk.agent.decide({
         agentWallet,
         runId,
         proposalId: plan.proposalId,
-        version: plan.version,
+        proposalVersion: plan.version,
         decision,
-        approver: account?.address,
+        approver: selectedUserAddress ?? undefined,
         ...(feedback ? { feedback, reason: feedback } : {}),
       });
       updateAssistantMessage(messageId, {
@@ -474,7 +495,7 @@ export default function AgentDetailPage() {
         variant: "destructive",
       });
     }
-  }, [account?.address, agentWallet, composeKeyToken, ensureKeyToken, toast, updateAssistantMessage]);
+  }, [agentWallet, keyToken, ensureKeyToken, selectedUserAddress, toast, updateAssistantMessage]);
 
   const copyEndpoint = () => {
     toast({
@@ -629,30 +650,30 @@ export default function AgentDetailPage() {
         {/* Side Panel: Tabbed — AgentCard and Mission Control both always accessible */}
         <div className="cm-split__side">
           <div className="cm-side-panel-tabs" data-tab={activeSideTab}>
-            <div className="cm-mirror-pane__toolbar">
+            <div className="cm-model-card__toolbar">
               <button
                 type="button"
                 className={cn(
-                  "cm-mirror-pane__toolbar-btn",
-                  activeSideTab === "agent" && "cm-mirror-pane__toolbar-btn--active-cyan",
+                  "cm-model-card__toolbar-btn",
+                  activeSideTab === "agent" && "cm-model-card__toolbar-btn--active-cyan",
                 )}
                 onClick={() => setActiveSideTab("agent")}
                 aria-pressed={activeSideTab === "agent"}
               >
                 <IdCard className="w-3.5 h-3.5" />
-                <span className="cm-mirror-pane__toolbar-label">Agent</span>
+                <span className="cm-model-card__toolbar-label">Agent</span>
               </button>
               <button
                 type="button"
                 className={cn(
-                  "cm-mirror-pane__toolbar-btn",
-                  activeSideTab === "mission" && "cm-mirror-pane__toolbar-btn--active-fuchsia",
+                  "cm-model-card__toolbar-btn",
+                  activeSideTab === "mission" && "cm-model-card__toolbar-btn--active-fuchsia",
                 )}
                 onClick={() => setActiveSideTab("mission")}
                 aria-pressed={activeSideTab === "mission"}
               >
                 <Activity className="w-3.5 h-3.5" />
-                <span className="cm-mirror-pane__toolbar-label">Mission</span>
+                <span className="cm-model-card__toolbar-label">Mission</span>
                 {showMissionControl && activeSideTab !== "mission" && (
                   <span className="cm-side-panel-tabs__badge" />
                 )}
@@ -687,11 +708,11 @@ export default function AgentDetailPage() {
 
       {/* Session Budget Dialog */}
       <SessionBudgetDialog open={showSessionDialog} onOpenChange={setShowSessionDialog} showTrigger={false} />
-      {account?.address && agentWallet ? (
+      {selectedUserAddress && agentWallet ? (
         <BackpackDialog
           open={backpackOpen}
           onOpenChange={setBackpackOpen}
-          userAddress={account.address}
+          userAddress={selectedUserAddress}
           agentWallet={agentWallet}
           agentName={agentLabel}
           showTrigger={false}
@@ -768,30 +789,30 @@ export default function AgentDetailPage() {
           </SheetHeader>
           <div className="cm-sheet-body cm-sheet-body--inspect">
             <div className="cm-side-panel-tabs" data-tab={activeSideTab}>
-              <div className="cm-mirror-pane__toolbar">
+              <div className="cm-model-card__toolbar">
                 <button
                   type="button"
                   className={cn(
-                    "cm-mirror-pane__toolbar-btn",
-                    activeSideTab === "agent" && "cm-mirror-pane__toolbar-btn--active-cyan",
+                    "cm-model-card__toolbar-btn",
+                    activeSideTab === "agent" && "cm-model-card__toolbar-btn--active-cyan",
                   )}
                   onClick={() => setActiveSideTab("agent")}
                   aria-pressed={activeSideTab === "agent"}
                 >
                   <IdCard className="w-3.5 h-3.5" />
-                  <span className="cm-mirror-pane__toolbar-label">Agent</span>
+                  <span className="cm-model-card__toolbar-label">Agent</span>
                 </button>
                 <button
                   type="button"
                   className={cn(
-                    "cm-mirror-pane__toolbar-btn",
-                    activeSideTab === "mission" && "cm-mirror-pane__toolbar-btn--active-fuchsia",
+                    "cm-model-card__toolbar-btn",
+                    activeSideTab === "mission" && "cm-model-card__toolbar-btn--active-fuchsia",
                   )}
                   onClick={() => setActiveSideTab("mission")}
                   aria-pressed={activeSideTab === "mission"}
                 >
                   <Activity className="w-3.5 h-3.5" />
-                  <span className="cm-mirror-pane__toolbar-label">Mission</span>
+                  <span className="cm-model-card__toolbar-label">Mission</span>
                 </button>
               </div>
               <div className="cm-side-panel-tabs__body">

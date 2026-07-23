@@ -41,7 +41,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { WarpAgentForm, type WarpAgentData } from "@/components/warp-form";
-import { ModelSelector } from "@/components/model-selector";
+import { ModelSelector } from "@/components/models/selector";
 import { ShellModelBadge } from "@compose-market/theme/shell";
 import {
   clearSelectedCatalogModel,
@@ -49,7 +49,7 @@ import {
   type SelectedCatalogModel,
 } from "@/lib/models";
 import { type RegistryServer, type ServerOrigin } from "@/hooks/use-registry";
-import { ConnectorCommandBar } from "@/components/connector-command-bar";
+import { ConnectorCommandBar } from "@/components/connectors/command-bar";
 import {
   uploadAgentAvatar,
   uploadAgentCard,
@@ -64,11 +64,17 @@ import {
   deriveAgentWalletAddress,
   usdcToWei,
 } from "@/lib/contracts";
-import { CHAIN_CONFIG } from "@/lib/chains";
-import { useChain } from "@/contexts/ChainContext";
-import { useActiveAccount, useSendTransaction } from "thirdweb/react";
+import { CHAIN_CONFIG, isEvmNetwork, evmChainId } from "@/lib/chains";
+import { useChain } from "@/contexts/Network";
+import { useActiveAccount, useAdminWallet, useSendTransaction } from "thirdweb/react";
 import { getAgentFactoryContractForChain, prepareMintAgentCall } from "@/lib/contracts";
 import { saveMintSuccessForShare } from "@/lib/share";
+import { useSelectedUserAddress } from "@/hooks/use-address";
+import {
+  buildSolanaMintAgentInstruction,
+  getSolanaChainOrThrow,
+  relaySolanaManowarInstructions,
+} from "@/lib/programs";
 
 interface SelectedConnector {
   id: string;
@@ -101,8 +107,19 @@ export default function CreateAgent() {
   const [, setLocation] = useLocation();
   const searchString = useSearch();
   const account = useActiveAccount();
+  const adminWallet = useAdminWallet();
   const { mutateAsync: sendTransaction } = useSendTransaction();
-  const { selectedChainId } = useChain();
+  const { selectedNetwork, solanaChains } = useChain();
+  const {
+    userAddress,
+    solanaAddress,
+    evmSignerAddress,
+    isResolving: userAddressResolving,
+  } = useSelectedUserAddress();
+  const selectedChainId = isEvmNetwork(selectedNetwork) ? evmChainId(selectedNetwork) : null;
+  const selectedNetworkLabel = selectedChainId
+    ? CHAIN_CONFIG[selectedChainId]?.name || "Unknown"
+    : solanaChains.find((chain) => chain.network === selectedNetwork)?.name || "Solana";
 
   // Parse URL params
   const urlParams = new URLSearchParams(searchString);
@@ -386,7 +403,8 @@ export default function CreateAgent() {
   // Handle form validation and IPFS upload before minting
   // Returns prepared transaction data or null if failed
   const prepareForMint = async (values: FormValues): Promise<{
-    chainId: number;
+    network: typeof selectedNetwork;
+    chainId?: number;
     dnaHash: `0x${string}`;
     walletAddress: `0x${string}`;
     walletTimestamp: number;
@@ -414,14 +432,14 @@ export default function CreateAgent() {
         avatarUri = getIpfsUri(avatarCid);
       }
 
-      // 2. Compute DNA hash (skills, chainId, model) - matches contract expectation
-      const chainId = selectedChainId; // Use selected chain from context
+      // 2. Compute DNA hash (skills, selected deployment, model) - matches contract/program expectation
+      const chainId = selectedChainId ?? undefined;
       const modelId = selectedCatalogModel?.modelId || values.model;
       const skills = selectedConnectors.map(p => p.id);
       const timestamp = Date.now();
 
-      // dnaHash = hash(skills, chainId, model) - NO timestamp (contract expects this)
-      const dnaHash = computeDnaHash(skills, chainId, modelId);
+      // dnaHash = hash(skills, selected network, model) - NO timestamp (contract/program expects this)
+      const dnaHash = computeDnaHash(skills, chainId ?? selectedNetwork, modelId);
 
       // Derive wallet from dnaHash + timestamp (timestamp makes each wallet unique)
       const walletAddress = deriveAgentWalletAddress(dnaHash, timestamp);
@@ -444,7 +462,7 @@ export default function CreateAgent() {
         dnaHash,
         walletAddress,
         walletTimestamp: timestamp,
-        chain: chainId,
+        network: selectedNetwork,
         model: modelId,
         framework: "manowar",
         licensePrice: usdcToWei(parseFloat(values.licensePrice)).toString(),
@@ -470,6 +488,7 @@ export default function CreateAgent() {
       const licenses = values.licenses ? BigInt(values.licenses) : BigInt(0);
 
       const txData = {
+        network: selectedNetwork,
         chainId,
         dnaHash,
         walletAddress,
@@ -514,10 +533,10 @@ export default function CreateAgent() {
 
     const walletAddress = txData.walletAddress || null;
 
-    if (!walletAddress || !Number.isInteger(chainId) || !CHAIN_CONFIG[chainId]) {
+    if (!walletAddress) {
       toast({
         title: "Minting Error",
-        description: "Missing or invalid mint chain metadata",
+        description: "Missing mint identity metadata",
         variant: "destructive",
       });
       return;
@@ -528,13 +547,14 @@ export default function CreateAgent() {
       name: values.name,
       walletAddress,
       txHash: result.transactionHash,
-      chainId,
+      network: txData.network,
     });
 
     posthog?.capture("agent_created", {
       agent_name: values.name,
       agent_wallet: walletAddress,
-      chain_id: chainId,
+      network: txData.network,
+      ...(chainId ? { chain_id: chainId } : {}),
       tx_hash: result.transactionHash,
     });
 
@@ -579,14 +599,54 @@ export default function CreateAgent() {
 
     // Step 2: Immediately trigger on-chain transaction (no second click needed)
     try {
-      const contract = getAgentFactoryContractForChain(selectedChainId);
       if (!account) {
         throw new Error("Wallet account unavailable");
       }
 
-      const transaction = prepareMintAgentCall(contract, txData);
-      const result = await sendTransaction(transaction);
-      await handleMintSuccess(txData, { transactionHash: result.transactionHash });
+      if (isEvmNetwork(selectedNetwork)) {
+        if (!selectedChainId) throw new Error("EVM chain unavailable");
+        const contract = getAgentFactoryContractForChain(selectedChainId);
+        const transaction = prepareMintAgentCall(contract, txData);
+        const result = await sendTransaction(transaction);
+        await handleMintSuccess(txData, { transactionHash: result.transactionHash });
+        return;
+      }
+
+      if (!solanaAddress || !userAddress || userAddressResolving) {
+        throw new Error("Solana smart account is still resolving");
+      }
+      if (!evmSignerAddress) {
+        throw new Error("EVM signer address not available for Solana smart-account signing");
+      }
+      const signerAccount = adminWallet?.getAccount?.();
+      if (!signerAccount) {
+        throw new Error("EVM signer account not available");
+      }
+
+      const solanaChain = getSolanaChainOrThrow(solanaChains, selectedNetwork);
+      const built = await buildSolanaMintAgentInstruction({
+        network: solanaChain.network,
+        rpcUrl: solanaChain.rpcUrl,
+        owner: solanaAddress,
+        dnaHash: txData.dnaHash,
+        licenses: txData.licenses,
+        licensePrice: txData.licensePrice,
+        creatorFee: txData.creatorFee,
+        cloneable: txData.cloneable,
+        agentCardUri: txData.agentCardUri,
+      });
+      const relayed = await relaySolanaManowarInstructions({
+        network: solanaChain.network,
+        rpcUrl: solanaChain.rpcUrl,
+        selectedSolanaAddress: solanaAddress,
+        evmSignerAddress,
+        feePayer: built.rentPayer,
+        instructions: [built.instruction],
+        signMessage: async (message: Uint8Array) => {
+          return signerAccount.signMessage({ message: { raw: message } as any });
+        },
+      });
+      await handleMintSuccess(txData, { transactionHash: relayed.signature });
     } catch (error) {
       handleMintError(error instanceof Error ? error : new Error(String(error)));
     }
@@ -958,183 +1018,183 @@ export default function CreateAgent() {
                     <ChevronDown className={cn("w-4 h-4 transition-transform", activeSection === "connectors" && "rotate-180")} />
                   </div>
                   {activeSection === "connectors" && (
-                      <>
-                        {selectedConnectors.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5 mt-2">
-                            {selectedConnectors.map(connector => (
-                              <Badge
-                                key={connector.id}
-                                variant="outline"
-                                className={`${getOriginColor(connector.origin)} pl-2 pr-1 py-0.5 text-[10px] font-mono`}
-                              >
-                                {connector.name}
-                                <button
-                                  type="button"
-                                  onClick={() => removeConnector(connector.id)}
-                                  className="ml-1 p-0.5 rounded hover:bg-white/10"
-                                >
-                                  <X className="w-2.5 h-2.5" />
-                                </button>
-                              </Badge>
-                            ))}
-                          </div>
-                        )}
-                        <div className="mt-3">
-                          <ShellModelBadge
-                            placeholder
-                            label="Add connector..."
-                            shortcut="Search"
-                            onClick={() => setShowConnectorPicker(true)}
-                          />
-                          <ConnectorCommandBar
-                            open={showConnectorPicker}
-                            onOpenChange={setShowConnectorPicker}
-                            onSelect={addConnector}
-                            selectedIds={selectedIds}
-                          />
-                        </div>
-                        <div className="cm-setting-row cm-knowledge-row">
-                          <div className="cm-setting-row__icon">
-                            <BookOpen className="w-4 h-4" />
-                          </div>
-                          <div className="cm-setting-row__copy">
-                            <div className="cm-setting-row__label">Knowledge</div>
-                            <div className="cm-setting-row__description">
-                              Optional Filecoin-backed <code className="text-cyan-500/70">ipfs://</code> files attached to the minted agent card.
-                            </div>
-                            {identityFiles.length > 0 ? (
-                              <div className="cm-knowledge-row__files">
-                                {identityFiles.map((file) => (
-                                  <span
-                                    key={`${file.name}:${file.size}:${file.lastModified}`}
-                                    className="cm-knowledge-row__file"
-                                  >
-                                    <span className="truncate">{file.name}</span>
-                                    <button
-                                      type="button"
-                                      onClick={() => removeIdentityFile(file)}
-                                      className="rounded-full px-1 text-muted-foreground hover:text-foreground"
-                                      aria-label={`Remove ${file.name}`}
-                                    >
-                                      <X className="w-2.5 h-2.5" />
-                                    </button>
-                                  </span>
-                                ))}
-                              </div>
-                            ) : null}
-                          </div>
-                          <div className="cm-setting-row__control">
-                            <Button
-                              type="button"
+                    <>
+                      {selectedConnectors.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                          {selectedConnectors.map(connector => (
+                            <Badge
+                              key={connector.id}
                               variant="outline"
-                              size="sm"
-                              onClick={() => identityInputRef.current?.click()}
-                              className="border-cyan-500/40 text-cyan-300 hover:text-cyan-200 shrink-0 h-8 text-xs"
+                              className={`${getOriginColor(connector.origin)} pl-2 pr-1 py-0.5 text-[10px] font-mono`}
                             >
-                              <Upload className="w-3 h-3 mr-1.5" />
-                              Attach
-                            </Button>
-                          </div>
+                              {connector.name}
+                              <button
+                                type="button"
+                                onClick={() => removeConnector(connector.id)}
+                                className="ml-1 p-0.5 rounded hover:bg-white/10"
+                              >
+                                <X className="w-2.5 h-2.5" />
+                              </button>
+                            </Badge>
+                          ))}
                         </div>
-                      </>
-                    )}
-                  </div>
-
-                  {/* Financial */}
-                  <div className={cn("cm-builder-panel cm-create-builder__section", activeSection === "financials" && "cm-active-panel")} data-tone="fuchsia">
-                    <div
-                      onClick={() => setActiveSection(activeSection === "financials" ? null : "financials")}
-                      className="cm-builder-panel__title cursor-pointer flex justify-between items-center select-none"
-                    >
-                      <div className="flex items-center gap-2">
-                        <Coins className="w-4 h-4" />
-                        Financials
+                      )}
+                      <div className="mt-3">
+                        <ShellModelBadge
+                          placeholder
+                          label="Add connector..."
+                          shortcut="Search"
+                          onClick={() => setShowConnectorPicker(true)}
+                        />
+                        <ConnectorCommandBar
+                          open={showConnectorPicker}
+                          onOpenChange={setShowConnectorPicker}
+                          onSelect={addConnector}
+                          selectedIds={selectedIds}
+                        />
                       </div>
-                      <ChevronDown className={cn("w-4 h-4 transition-transform", activeSection === "financials" && "rotate-180")} />
-                    </div>
-                    {activeSection === "financials" && (
-                      <>
-                        <div className="cm-financial-grid">
-                          <FormField
-                            control={form.control}
-                            name="licensePrice"
-                            render={({ field }: { field: ControllerRenderProps<FormValues, "licensePrice"> }) => (
-                              <FormItem className="cm-field">
-                                <FormLabel className="font-mono text-foreground text-sm">Price</FormLabel>
-                                <FormControl>
-                                  <Input type="number" step="0.001" {...field} className="bg-background/50 font-mono border-primary/20 focus:border-fuchsia-500" />
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-                          <FormField
-                            control={form.control}
-                            name="creatorFee"
-                            render={({ field }: { field: ControllerRenderProps<FormValues, "creatorFee"> }) => (
-                              <FormItem className="cm-field">
-                                <FormLabel className="font-mono text-foreground text-sm">Fee</FormLabel>
-                                <FormControl>
-                                  <Input type="number" min="0" step="1" {...field} className="bg-background/50 font-mono border-primary/20 focus:border-fuchsia-500" />
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-                          <FormField
-                            control={form.control}
-                            name="licenses"
-                            render={({ field }: { field: ControllerRenderProps<FormValues, "licenses"> }) => (
-                              <FormItem className="cm-field">
-                                <FormLabel className="font-mono text-foreground text-sm">Supply</FormLabel>
-                                <FormControl>
-                                  <Input type="number" placeholder="∞" {...field} className="bg-background/50 font-mono border-primary/20 focus:border-fuchsia-500" />
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
+                      <div className="cm-setting-row cm-knowledge-row">
+                        <div className="cm-setting-row__icon">
+                          <BookOpen className="w-4 h-4" />
                         </div>
+                        <div className="cm-setting-row__copy">
+                          <div className="cm-setting-row__label">Knowledge</div>
+                          <div className="cm-setting-row__description">
+                            Optional Filecoin-backed <code className="text-cyan-500/70">ipfs://</code> files attached to the minted agent card.
+                          </div>
+                          {identityFiles.length > 0 ? (
+                            <div className="cm-knowledge-row__files">
+                              {identityFiles.map((file) => (
+                                <span
+                                  key={`${file.name}:${file.size}:${file.lastModified}`}
+                                  className="cm-knowledge-row__file"
+                                >
+                                  <span className="truncate">{file.name}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => removeIdentityFile(file)}
+                                    className="rounded-full px-1 text-muted-foreground hover:text-foreground"
+                                    aria-label={`Remove ${file.name}`}
+                                  >
+                                    <X className="w-2.5 h-2.5" />
+                                  </button>
+                                </span>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                        <div className="cm-setting-row__control">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => identityInputRef.current?.click()}
+                            className="border-cyan-500/40 text-cyan-300 hover:text-cyan-200 shrink-0 h-8 text-xs"
+                          >
+                            <Upload className="w-3 h-3 mr-1.5" />
+                            Attach
+                          </Button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Financial */}
+                <div className={cn("cm-builder-panel cm-create-builder__section", activeSection === "financials" && "cm-active-panel")} data-tone="fuchsia">
+                  <div
+                    onClick={() => setActiveSection(activeSection === "financials" ? null : "financials")}
+                    className="cm-builder-panel__title cursor-pointer flex justify-between items-center select-none"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Coins className="w-4 h-4" />
+                      Financials
+                    </div>
+                    <ChevronDown className={cn("w-4 h-4 transition-transform", activeSection === "financials" && "rotate-180")} />
+                  </div>
+                  {activeSection === "financials" && (
+                    <>
+                      <div className="cm-financial-grid">
                         <FormField
                           control={form.control}
-                          name="isCloneable"
-                          render={({ field }: { field: ControllerRenderProps<FormValues, "isCloneable"> }) => (
-                            <FormItem className="cm-setting-row">
-                              <div className="cm-setting-row__copy">
-                                <FormLabel className="text-sm font-mono text-foreground cursor-pointer">Allow Cloning</FormLabel>
-                                <FormDescription>Let other builders mint derivative agents with attribution.</FormDescription>
-                              </div>
-                              <div className="cm-setting-row__control">
-                                <FormControl>
-                                  <Switch
-                                    checked={field.value}
-                                    onCheckedChange={field.onChange}
-                                  />
-                                </FormControl>
-                              </div>
+                          name="licensePrice"
+                          render={({ field }: { field: ControllerRenderProps<FormValues, "licensePrice"> }) => (
+                            <FormItem className="cm-field">
+                              <FormLabel className="font-mono text-foreground text-sm">Price</FormLabel>
+                              <FormControl>
+                                <Input type="number" step="0.001" {...field} className="bg-background/50 font-mono border-primary/20 focus:border-fuchsia-500" />
+                              </FormControl>
+                              <FormMessage />
                             </FormItem>
                           )}
                         />
-                        {/* Mint Info metadata inside Financial */}
-                        <div className="border-t border-primary/10 pt-3 mt-3 space-y-2 text-xs font-mono">
-                          <div className="flex justify-between gap-3">
-                            <span className="text-muted-foreground">Network</span>
-                            <span className="text-cyan-400 truncate">
-                              {CHAIN_CONFIG[selectedChainId]?.name || "Unknown"}
-                            </span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-muted-foreground">Contract</span>
-                            <span className="text-cyan-400">ERC8004</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-muted-foreground">Gas</span>
-                            <span className="text-green-400">Sponsored</span>
-                          </div>
+                        <FormField
+                          control={form.control}
+                          name="creatorFee"
+                          render={({ field }: { field: ControllerRenderProps<FormValues, "creatorFee"> }) => (
+                            <FormItem className="cm-field">
+                              <FormLabel className="font-mono text-foreground text-sm">Fee</FormLabel>
+                              <FormControl>
+                                <Input type="number" min="0" step="1" {...field} className="bg-background/50 font-mono border-primary/20 focus:border-fuchsia-500" />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name="licenses"
+                          render={({ field }: { field: ControllerRenderProps<FormValues, "licenses"> }) => (
+                            <FormItem className="cm-field">
+                              <FormLabel className="font-mono text-foreground text-sm">Supply</FormLabel>
+                              <FormControl>
+                                <Input type="number" placeholder="∞" {...field} className="bg-background/50 font-mono border-primary/20 focus:border-fuchsia-500" />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+                      <FormField
+                        control={form.control}
+                        name="isCloneable"
+                        render={({ field }: { field: ControllerRenderProps<FormValues, "isCloneable"> }) => (
+                          <FormItem className="cm-setting-row">
+                            <div className="cm-setting-row__copy">
+                              <FormLabel className="text-sm font-mono text-foreground cursor-pointer">Allow Cloning</FormLabel>
+                              <FormDescription>Let other builders mint derivative agents with attribution.</FormDescription>
+                            </div>
+                            <div className="cm-setting-row__control">
+                              <FormControl>
+                                <Switch
+                                  checked={field.value}
+                                  onCheckedChange={field.onChange}
+                                />
+                              </FormControl>
+                            </div>
+                          </FormItem>
+                        )}
+                      />
+                      {/* Mint Info metadata inside Financial */}
+                      <div className="border-t border-primary/10 pt-3 mt-3 space-y-2 text-xs font-mono">
+                        <div className="flex justify-between gap-3">
+                          <span className="text-muted-foreground">Network</span>
+                          <span className="text-cyan-400 truncate">
+                            {selectedNetworkLabel}
+                          </span>
                         </div>
-                      </>
-                    )}
-                  </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Contract</span>
+                          <span className="text-cyan-400">ERC8004</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Gas</span>
+                          <span className="text-green-400">Sponsored</span>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
 
 
                 {/* Mint Progress */}
@@ -1216,7 +1276,7 @@ export default function CreateAgent() {
                   )}
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Network</span>
-                    <span className="font-mono text-cyan-400">{CHAIN_CONFIG[selectedChainId]?.name || "Unknown"}</span>
+                    <span className="font-mono text-cyan-400">{selectedNetworkLabel}</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Gas</span>

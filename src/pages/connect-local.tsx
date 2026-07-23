@@ -7,7 +7,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { AlertTriangle, Check, Monitor, Loader2, Shield, X, Download } from "lucide-react";
 import { sdk } from "@/lib/sdk";
 import { resolveAgentCardCid } from "@/lib/local-install";
-import { useChain } from "@/contexts/ChainContext";
+import { useChain } from "@/contexts/Network";
+import { useSelectedUserAddress } from "@/hooks/use-address";
 
 const WEB_APP_URL = "https://compose.market";
 const FALLBACK_INSTALL_PATH = "/install-local";
@@ -50,8 +51,9 @@ function parseQueryParams(): {
 }
 
 export default function ConnectLocalPage() {
-  const { isConnected, address } = useWalletAccount();
-  const { paymentChainId } = useChain();
+  const { isConnected } = useWalletAccount();
+  const { userAddress, isResolving: userAddressResolving } = useSelectedUserAddress();
+  const { paymentNetwork } = useChain();
   const [deviceId, setDeviceId] = useState<string | null>(null);
   const [mode, setMode] = useState<ConnectMode>("web-first");
   const [agentWallet, setAgentWallet] = useState<string | null>(null);
@@ -79,7 +81,7 @@ export default function ConnectLocalPage() {
   }, []);
 
   const handleAuthorize = useCallback(async () => {
-    if (!address) {
+    if (!userAddress || userAddressResolving) {
       setError("Wallet is not connected");
       return;
     }
@@ -103,8 +105,8 @@ export default function ConnectLocalPage() {
           deviceId: mode === "local-first" ? deviceId : undefined,
           agentWallet: agentWallet || undefined,
           agentCardCid: linkedAgentWallet ? await resolveAgentCardCid(linkedAgentWallet) : undefined,
-          userAddress: address,
-          chainId: paymentChainId,
+          userAddress,
+          network: paymentNetwork,
         }),
       });
 
@@ -133,11 +135,11 @@ export default function ConnectLocalPage() {
       setError(err instanceof Error ? err.message : "Authorization failed");
       setIsAuthorizing(false);
     }
-  }, [address, agentWallet, deviceId, mode, paymentChainId]);
+  }, [agentWallet, deviceId, mode, paymentNetwork, userAddress, userAddressResolving]);
 
   const shortAddress = useMemo(() => (
-    address ? `${address.slice(0, 6)}...${address.slice(-4)}` : ""
-  ), [address]);
+    userAddress ? `${userAddress.slice(0, 6)}...${userAddress.slice(-4)}` : ""
+  ), [userAddress]);
 
   const subtitle = mode === "local-first"
     ? "Authorize this already-running local app."

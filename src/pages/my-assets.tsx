@@ -37,7 +37,7 @@ import { useActiveAccount, useSendTransaction } from "thirdweb/react";
 import { prepareContractCall } from "thirdweb";
 import { useWorkflowsByCreator, useRFAsByPublisher, type OnchainAgent, type OnchainWorkflow, type OnchainRFA } from "@/hooks/use-onchain";
 import { getIpfsUrl } from "@/lib/pinata";
-import { CHAIN_CONFIG } from "@/lib/chains";
+import { evmChainId, getChainByNetwork, isEvmNetwork } from "@/lib/chains";
 import { formatUsdcPrice, getContractAddress, getRFAContract, weiToUsdc } from "@/lib/contracts";
 import { useTabs } from "@/hooks/use-tabs";
 import { RFADetails } from "@/components/RFADetails";
@@ -98,11 +98,13 @@ function agent(card: DirectoryAgent): OnchainAgent {
   const minted = finite((card as { licensesMinted?: unknown }).licensesMinted) ?? 0;
   const available = finite(card.licensesAvailable) ?? (licenses === 0 ? Infinity : Math.max(0, licenses - minted));
   const creatorFee = finite(card.creatorFee) ?? 1;
+  const network = (card as { network?: OnchainAgent["network"] }).network;
 
   return {
     id: finite(card.agentId) ?? 0,
     dnaHash: card.dnaHash || "",
     walletAddress: card.walletAddress || "",
+    network,
     licenses,
     licensesMinted: minted,
     licensesAvailable: available,
@@ -116,9 +118,10 @@ function agent(card: DirectoryAgent): OnchainAgent {
     agentCardUri: card.cid ? `ipfs://${card.cid}` : "",
     metadata: {
       ...card,
+      ...(network ? { network } : {}),
       creatorFee,
       x402: true,
-    } as OnchainAgent["metadata"],
+    } as unknown as OnchainAgent["metadata"],
     isWarped: false,
   };
 }
@@ -178,7 +181,7 @@ export default function MyAssetsPage() {
     refetch: refetchAgents,
     fetchNextPage,
   } = useInfiniteQuery({
-    queryKey: ["agents", "my-assets", owner?.toLowerCase() || "", q, q ? "relevance" : sort],
+    queryKey: ["agents", "my-assets", owner || "", q, q ? "relevance" : sort],
     queryFn: async ({ pageParam, signal }) => {
       const cursor = typeof pageParam === "string" ? pageParam : undefined;
       return await page({ creator: owner, cursor, q: q || undefined, sort: q ? undefined : sort, signal });
@@ -197,7 +200,7 @@ export default function MyAssetsPage() {
     for (const current of agentData?.pages || []) {
       for (const card of current.agents || []) {
         if (!card.walletAddress) continue;
-        const key = card.walletAddress.toLowerCase();
+        const key = card.walletAddress;
         if (seen.has(key)) continue;
         seen.add(key);
         out.push(agent(card));
@@ -711,10 +714,10 @@ function WorkflowAssetCard({ workflow }: { workflow: OnchainWorkflow }) {
     bannerUrl = getIpfsUrl(workflow.image.replace("ipfs://", ""));
   }
 
-  // Use chainId from workflow's first agent metadata (source of truth)
-  const workflowChainId = workflow.metadata?.agents?.[0]?.chain;
-  const explorerUrl = workflowChainId && CHAIN_CONFIG[workflowChainId]
-    ? `${CHAIN_CONFIG[workflowChainId].explorer}/token/${getContractAddress("Workflow", workflowChainId)}?a=${workflow.id}`
+  const workflowNetwork = workflow.network ?? workflow.metadata?.network;
+  const workflowChain = workflowNetwork ? getChainByNetwork(workflowNetwork) : undefined;
+  const explorerUrl = workflowNetwork && workflowChain?.explorer && isEvmNetwork(workflowNetwork)
+    ? `${workflowChain.explorer}/token/${getContractAddress("Workflow", evmChainId(workflowNetwork))}?a=${workflow.id}`
     : null;
 
   // Use wallet address for navigation (primary), fallback to numeric ID

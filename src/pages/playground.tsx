@@ -6,7 +6,7 @@
  * - ModelBadge for active model display
  * - CommandBar (⌘K) for model selection
  * - MultimodalCanvas for chat
- * - MirrorPane for settings
+ * - ModelCard for settings
  *
  * Shared hooks: useChat, useModels, useSession
  */
@@ -17,9 +17,8 @@ import { useActiveWallet, useActiveAccount } from "thirdweb/react";
 import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
 import { sdk } from "@/lib/sdk";
-import { toAttachment, toMessage } from "@/hooks/use-chat";
-import type { Message as Message } from "@compose-market/sdk";
-import { useChain } from "@/contexts/ChainContext";
+import { toAttachment, toMessage, type ResponseMessage } from "@/hooks/use-chat";
+import { useChain } from "@/contexts/Network";
 import { Button } from "@/components/ui/button";
 import { Tabs } from "@/components/ui/tabs";
 import {
@@ -42,9 +41,9 @@ import {
   Video,
 } from "lucide-react";
 import { MultimodalCanvas } from "@/components/chat";
-import { MirrorPane, type ModelParamsSchema } from "@/components/mirror-pane";
-import { ModelSelector } from "@/components/model-selector";
-import { CapabilityChips } from "@/components/capability-chips";
+import { ModelCard, type ModelParamsSchema } from "@/components/models/card";
+import { ModelSelector } from "@/components/models/selector";
+import { CapabilityChips } from "@/components/models/capabilities";
 import { useChat } from "@/hooks/use-chat";
 import { useModels } from "@/hooks/use-model";
 import { CostReceiptIndicator } from "@/components/receipt-indicator";
@@ -52,6 +51,7 @@ import { Switcher, type Option } from "@/components/control";
 import { useToast } from "@/hooks/use-toast";
 import { useStream, type StreamCallOptions } from "@/hooks/use-stream";
 import { useRegistryMeta } from "@/hooks/use-registry";
+import { useSelectedUserAddress } from "@/hooks/use-address";
 import {
   buildFamilyCategories,
   buildTypeCategories,
@@ -71,7 +71,7 @@ const tabs: Option<PlaygroundTab>[] = [
 ];
 
 const LazyConnectorTester = lazy(() =>
-  import("@/components/connector-tester").then((module) => ({ default: module.ConnectorTester }))
+  import("@/components/connectors/tester").then((module) => ({ default: module.ConnectorTester }))
 );
 
 function getDefaultParamValues(schema: ModelParamsSchema | null): Record<string, unknown> {
@@ -118,8 +118,9 @@ export default function PlaygroundPage() {
   const posthog = usePostHog();
   const wallet = useActiveWallet();
   const account = useActiveAccount();
-  const { sessionActive, budgetRemaining, formatBudget, composeKeyToken, ensureKeyToken } = useSession();
-  const { paymentChainId } = useChain();
+  const { userAddress, isResolving: userAddressResolving } = useSelectedUserAddress();
+  const { sessionActive, budgetRemaining, formatBudget, keyToken, ensureKeyToken } = useSession();
+  const { paymentNetwork } = useChain();
   const { toast } = useToast();
 
   // Tab state
@@ -372,7 +373,7 @@ export default function PlaygroundPage() {
       model_id: currentSelectedModel,
       has_attachment: currentAttachedFiles.length > 0,
       attachment_type: currentAttachedFiles[0]?.type ?? null,
-      chain_id: paymentChainId,
+      network: paymentNetwork,
     });
 
     mpTrack("Launch AI");
@@ -398,10 +399,11 @@ export default function PlaygroundPage() {
 
     try {
       if (!wallet || !account) throw new Error("Connect wallet to use inference");
+      if (!userAddress || userAddressResolving) throw new Error("Selected network account is still resolving");
 
       // Make sure the SDK has the freshly-minted Compose Key JWT cached
       // in-memory before any billable call fires.
-      const activeKeyToken = composeKeyToken || sdk.keys.currentToken() || await ensureKeyToken();
+      const activeKeyToken = keyToken || sdk.keys.currentToken() || await ensureKeyToken();
       if (sessionActive && budgetRemaining > 0 && !activeKeyToken) {
         throw new Error("Compose session key unavailable. Re-open your session and try again.");
       }
@@ -410,13 +412,13 @@ export default function PlaygroundPage() {
       }
 
       const history = [...currentMessages.slice(currentConversationStartIndex), userMessage];
-      const input: Message[] = history.map(toMessage);
+      const input: ResponseMessage[] = history.map(toMessage);
       if (currentSystemPrompt.trim()) input.unshift({ role: "system", content: currentSystemPrompt.trim() });
 
       const callOptions: StreamCallOptions = {
         ...(activeKeyToken ? { key: activeKeyToken } : {}),
-        userAddress: account.address,
-        chainId: paymentChainId,
+        userAddress,
+        network: paymentNetwork,
       };
       await streamer.runResponses({
         params: {
@@ -438,7 +440,7 @@ export default function PlaygroundPage() {
     } finally {
       setStreaming(false);
     }
-  }, [wallet, account, budgetRemaining, clearFiles, sessionActive, composeKeyToken, ensureKeyToken, paymentChainId, toast, posthog, chat, setMessages, streamer]);
+  }, [wallet, account, budgetRemaining, clearFiles, sessionActive, keyToken, ensureKeyToken, paymentNetwork, toast, posthog, chat, setMessages, streamer, userAddress, userAddressResolving]);
   const handleClearChat = useCallback(() => {
     clearMessages();
     setInferenceError(null);
@@ -483,7 +485,7 @@ export default function PlaygroundPage() {
         </div>
       </div>
 
-      {/* ── Chat + MirrorPane — equi-heighted sibling grid ─────── */}
+      {/* ── Chat + ModelCard — equi-heighted sibling grid ─────── */}
       {activeTab === "model" && (
         <div className={`cm-split${paneCollapsed ? " cm-split--collapsed" : ""}`}>
           {/* Chat cell — contains its own filter toolbar + caps + canvas */}
@@ -585,7 +587,7 @@ export default function PlaygroundPage() {
             />
           </div>
 
-          {/* MirrorPane — independent equi-heighted sibling cell */}
+          {/* ModelCard — independent equi-heighted sibling cell */}
           {!paneCollapsed && (
             <div className="cm-split__side cm-playground__pane-cell">
               <button
@@ -595,7 +597,7 @@ export default function PlaygroundPage() {
               >
                 <ChevronRight className="w-3.5 h-3.5" />
               </button>
-              <MirrorPane
+              <ModelCard
                 selectedModel={selectedModel}
                 modelInfo={selectedModelInfo || null}
                 systemPrompt={systemPrompt}
@@ -609,7 +611,7 @@ export default function PlaygroundPage() {
         </div>
       )}
 
-      {/* Expand button when MirrorPane collapsed */}
+      {/* Expand button when ModelCard collapsed */}
       {activeTab === "model" && paneCollapsed && (
         <button
           onClick={() => setPaneCollapsed(false)}
@@ -647,7 +649,7 @@ export default function PlaygroundPage() {
         showTrigger={false}
       />
 
-      {/* ── Mobile MirrorPane Sheet ───────────────────────────────── */}
+      {/* ── Mobile ModelCard Sheet ───────────────────────────────── */}
       <Sheet open={mobilePaneOpen} onOpenChange={setMobilePaneOpen}>
         <SheetContent side="right" className="cm-shell-panel cm-sheet-panel cm-sheet-panel--inspect p-0">
           <SheetHeader className="border-b border-primary/15 p-4">
@@ -657,7 +659,7 @@ export default function PlaygroundPage() {
             </SheetTitle>
           </SheetHeader>
           <div className="cm-sheet-body cm-sheet-body--inspect">
-            <MirrorPane
+            <ModelCard
               selectedModel={selectedModel}
               modelInfo={selectedModelInfo || null}
               systemPrompt={systemPrompt}
