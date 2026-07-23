@@ -3,7 +3,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Redirect, Route, Switch, useLocation } from "wouter";
 import { ThirdwebProvider } from "thirdweb/react";
 import { Layout } from "@/components/layout/Layout";
-import { ChainProvider } from "@/contexts/ChainContext";
+import { ChainProvider, useChain } from "@/contexts/Network";
 import { SessionProvider } from "@/hooks/use-session";
 import { queryClient } from "@/lib/queryClient";
 import { isStandaloneAppRoute } from "@/lib/utils";
@@ -76,17 +76,49 @@ function AppRouter() {
   );
 }
 
+function AppInner() {
+  const { isLoading, error } = useChain();
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <div className="space-y-3 text-center">
+          <div className="mx-auto h-10 w-10 animate-spin rounded-full border-2 border-cyan-500/30 border-t-cyan-400" />
+          <p className="font-mono text-xs uppercase tracking-[0.35em] text-muted-foreground">
+            Initializing
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <div className="space-y-3 text-center">
+          <p className="font-mono text-sm text-red-400">Failed to load chain configuration</p>
+          <p className="font-mono text-xs text-muted-foreground">{error.message}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <SessionProvider>
+      <TooltipProvider>
+        <Toaster />
+        <AppRouter />
+      </TooltipProvider>
+    </SessionProvider>
+  );
+}
+
 function App() {
   return (
     <ThirdwebProvider>
       <QueryClientProvider client={queryClient}>
         <ChainProvider>
-          <SessionProvider>
-            <TooltipProvider>
-              <Toaster />
-              <AppRouter />
-            </TooltipProvider>
-          </SessionProvider>
+          <AppInner />
         </ChainProvider>
       </QueryClientProvider>
     </ThirdwebProvider>
