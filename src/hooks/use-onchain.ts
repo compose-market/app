@@ -5,6 +5,7 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { readContract } from "thirdweb";
+import { isAddress as isSolanaAddress } from "@solana/kit";
 import {
   getAgentFactoryContract,
   getWorkflowContract,
@@ -18,8 +19,9 @@ import {
   type AgentData,
   type WorkflowData,
 } from "@/lib/contracts";
-import { SUPPORTED_CHAINS } from "@/lib/chains";
+import { networkFromChainId, SUPPORTED_CHAINS } from "@/lib/chains";
 import { getIpfsUrl } from "@/lib/pinata";
+import type { NetworkId } from "@compose-market/sdk/chains";
 import type { AgentCard, WorkflowMetadata } from "@/lib/pinata";
 
 const AGENTS_URL = (import.meta.env.VITE_AGENTS_URL || "https://agents.compose.market").replace(/\/+$/, "");
@@ -32,6 +34,7 @@ export interface OnchainAgent {
   id: number;
   dnaHash: string;
   walletAddress: string; // Derived wallet address (primary identifier)
+  network?: NetworkId;
   licenses: number;
   licensesMinted: number;
   licensesAvailable: number;
@@ -73,7 +76,9 @@ export interface OnchainWorkflow {
   metadata?: WorkflowMetadata;
   agentIds?: number[];
   agentWallets?: number[];
-  // Chain where this workflow was minted
+  // Network where this workflow was minted
+  network?: NetworkId;
+  // Internal EVM read-loop chain id, used only for EVM contract reads.
   chainId?: number;
 }
 
@@ -127,11 +132,11 @@ async function fetchAgentData(agentWallet: number, chainId?: number): Promise<On
     }
 
     // walletAddress will be populated from IPFS metadata in fetchAgentMetadata
-    // chainId comes from metadata.chain field (see AgentCard type)
     return {
       id: agentWallet,
       dnaHash: data.dnaHash,
       walletAddress: "", // Populated from metadata
+      ...(chainId ? { network: networkFromChainId(chainId) } : {}),
       licenses,
       licensesMinted,
       licensesAvailable: licenses === 0 ? Infinity : licenses - licensesMinted,
@@ -176,6 +181,7 @@ function fromCard(card: DirectoryAgentCard): OnchainAgent {
     id: 0,
     dnaHash: card.dnaHash || "",
     walletAddress: card.walletAddress || "",
+    network: card.network as NetworkId,
     licenses,
     licensesMinted: minted,
     licensesAvailable: available,
@@ -217,7 +223,7 @@ async function fetchCatalogAgents(input: { creator?: string } = {}): Promise<Onc
     cursor = data.nextCursor;
   }
   return cards
-    .filter((card): card is DirectoryAgentCard => typeof card.walletAddress === "string" && card.walletAddress.startsWith("0x"))
+    .filter((card): card is DirectoryAgentCard => typeof card.walletAddress === "string" && card.walletAddress.length > 0)
     .map(fromCard);
 }
 
@@ -225,13 +231,13 @@ async function fetchCatalogAgentByWallet(walletAddress: string): Promise<Onchain
   const controller = new AbortController();
   const timeout = globalThis.setTimeout(() => controller.abort(), 5_000);
   try {
-    const response = await fetch(`${AGENTS_URL}/agent/${encodeURIComponent(walletAddress.toLowerCase())}`, {
+    const response = await fetch(`${AGENTS_URL}/agent/${encodeURIComponent(walletAddress)}`, {
       headers: { Accept: "application/json" },
       signal: controller.signal,
     });
     if (!response.ok) return null;
     const card = await response.json() as DirectoryAgentCard;
-    return typeof card.walletAddress === "string" && card.walletAddress.startsWith("0x")
+    return typeof card.walletAddress === "string" && card.walletAddress.length > 0
       ? fromCard(card)
       : null;
   } finally {
@@ -414,6 +420,7 @@ async function fetchWorkflowData(workflowId: number, chainId?: number): Promise<
       rfaId: Number(data.rfaId),
       agentIds: agents,
       agentWallets: agents,
+      ...(chainId ? { network: networkFromChainId(chainId) } : {}),
       chainId,
     };
   } catch (error) {
@@ -451,12 +458,12 @@ async function fetchWorkflowMetadata(workflow: OnchainWorkflow, chainId?: number
     const metadata = await response.json() as WorkflowMetadata;
 
     // walletAddress and dnaHash come from IPFS metadata - this is the SINGLE SOURCE OF TRUTH
-    // Chain info comes from nested agents[0].chain
     return {
       ...workflow,
       metadata,
       dnaHash: metadata.dnaHash,
       walletAddress: metadata.walletAddress,
+      network: (metadata.network ?? workflow.network) as NetworkId | undefined,
     };
   } catch (error) {
     console.error(`Failed to fetch metadata for workflow ${workflow.id}:`, error);
@@ -470,7 +477,7 @@ async function fetchWorkflowMetadata(workflow: OnchainWorkflow, chainId?: number
 
 /**
  * Fetch all on-chain agents from ALL supported chains
- * Each agent's chainId comes from its metadata.chain field
+ * Each workflow carries a CAIP-2 network id for deployment identity.
  */
 export function useOnchainAgents(options?: { includeMetadata?: boolean }) {
   const { includeMetadata = true } = options || {};
@@ -519,7 +526,7 @@ export function useOnchainAgent(agentWallet: number | null) {
  */
 export function useOnchainAgentByWallet(walletAddress: string | null) {
   return useQuery({
-    queryKey: ["agent-wallet", walletAddress?.toLowerCase()],
+    queryKey: ["agent-wallet", walletAddress],
     queryFn: async () => {
       if (!walletAddress) return null;
       return fetchCatalogAgentByWallet(walletAddress);
@@ -537,7 +544,7 @@ export function useOnchainAgentByWallet(walletAddress: string | null) {
  */
 export function useOnchainAgentByIdentifier(identifier: string | null) {
   const value = identifier ? decodeURIComponent(identifier).trim() : "";
-  const walletAddress = /^0x[a-fA-F0-9]{40}$/.test(value) ? value : null;
+  const walletAddress = /^0x[a-fA-F0-9]{40}$/.test(value) || isSolanaAddress(value) ? value : null;
 
   return useOnchainAgentByWallet(walletAddress);
 }
@@ -557,8 +564,7 @@ export function useAgentsByCreator(creator: string | undefined) {
 }
 
 /**
- * Fetch all on-chain workflows from ALL supported chains
- * Chain info comes from nested agents[0].chain in metadata
+ * Fetch all on-chain workflows from ALL supported networks.
  */
 export async function fetchOnchainWorkflows(options?: {
   includeRFA?: boolean;

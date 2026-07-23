@@ -1,19 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import type {
-    AttachmentInput,
-    ChatCompletionsCreateParams,
+    Attachment,
     CallOptions,
     Receipt,
     ResponsesCreateParams,
     ActivityEvent,
     ModelEvent,
     RunEvent,
+    RunProjection,
+    StreamResult,
     SessionBudgetSnapshot,
     SessionInvalidReason,
-    PlanProposalEvent,
     AgentStreamControls,
+    ProposalTask,
 } from "@compose-market/sdk";
-import { parseToolEvent } from "@compose-market/sdk";
+import { createRunProjection, reduceRunProjection } from "@compose-market/sdk";
 
 import { sdk } from "@/lib/sdk";
 import { noticeId, type Artifact, type Plan, type UseChatReturn } from "@/hooks/use-chat";
@@ -28,12 +29,11 @@ export interface StreamCallbacks {
     onVideoStatus?: (status: { jobId: string; status: "queued" | "processing" | "completed" | "failed"; progress?: number; url?: string; error?: string }) => void;
     onDone?: () => void;
     onFinal?: (final: { text: string; requestId: string | null; structuredOutput?: unknown }) => void;
-    onPlanEvent?: (event: PlanProposalEvent) => void;
 }
 
 export type StreamCallOptions = Pick<
     CallOptions,
-    "x402MaxAmountWei" | "idempotencyKey" | "runId" | "key" | "userAddress" | "chainId" | "timeoutMs"
+    "x402MaxAmountWei" | "idempotencyKey" | "runId" | "key" | "userAddress" | "network" | "timeoutMs"
 >;
 
 export interface AgentStreamArgs extends AgentStreamControls {
@@ -41,10 +41,9 @@ export interface AgentStreamArgs extends AgentStreamControls {
     message: string;
     threadId: string;
     userAddress: string;
-    agentCard?: unknown;
     cloudPermissions?: string[];
     runId?: string;
-    attachment?: AttachmentInput;
+    attachment?: Attachment;
     assistantId: string;
     signal?: AbortSignal;
     options?: StreamCallOptions;
@@ -54,18 +53,10 @@ export interface WorkflowStreamArgs {
     workflowWallet: string;
     message: string;
     threadId: string;
-    userAddress: string;
     runId?: string;
     continuous?: boolean;
     lastEventIndex?: number;
-    attachment?: AttachmentInput;
-    assistantId: string;
-    signal?: AbortSignal;
-    options?: StreamCallOptions;
-}
-
-export interface ChatStreamArgs {
-    params: ChatCompletionsCreateParams;
+    attachment?: Attachment;
     assistantId: string;
     signal?: AbortSignal;
     options?: StreamCallOptions;
@@ -89,7 +80,6 @@ export interface ResponsesAppendArgs {
 export interface UseStream {
     runAgent: (args: AgentStreamArgs) => Promise<void>;
     runWorkflow: (args: WorkflowStreamArgs) => Promise<void>;
-    runChat: (args: ChatStreamArgs) => Promise<void>;
     runResponses: (args: ResponsesStreamArgs) => Promise<void>;
     appendResponses: (args: ResponsesAppendArgs) => Promise<void>;
 }
@@ -222,46 +212,6 @@ export function useStream(
             sdk.events.on("receipt", (event) => callbacksRef.current.onReceipt?.(event.receipt)),
             sdk.events.on("budget", (event) => callbacksRef.current.onBudget?.(event.snapshot)),
             sdk.events.on("sessionInvalid", (event) => callbacksRef.current.onSessionInvalid?.(event.reason)),
-            sdk.events.on("planProposed", (event) => {
-                callbacksRef.current.onPlanEvent?.(event);
-            }),
-            sdk.events.on("approvalRequested", (event) => {
-                callbacksRef.current.onPlanEvent?.(event);
-            }),
-            sdk.events.on("approvalDecided", (event) => {
-                callbacksRef.current.onPlanEvent?.(event);
-            }),
-            sdk.events.on("planFeedbackRequested", (event) => {
-                callbacksRef.current.onPlanEvent?.(event);
-            }),
-            sdk.events.on("toolCallStart", (event) => {
-                if (event.source === "agent" || event.source === "workflow") {
-                    chatRef.current.startToolActivity(event.toolName, event.summary, event.displayName);
-                }
-            }),
-            sdk.events.on("toolCallEnd", (event) => {
-                if (event.source === "agent" || event.source === "workflow") {
-                    chatRef.current.finishToolActivity(event.toolName, event.summary, event.failed, event.displayName);
-                }
-            }),
-            sdk.events.on("agentArtifact", (event) => {
-                const assistantId = chatRef.current.currentAssistantIdRef.current;
-                if (!assistantId) return;
-                chatRef.current.upsertAssistantArtifact(assistantId, {
-                    id: `${event.responseId ?? event.runKey ?? "artifact"}:${Date.now()}`,
-                    artifactType: event.artifactType,
-                    url: event.url,
-                    inline: event.inline,
-                    mimeType: event.mimeType,
-                    bytes: event.bytes,
-                    responseId: event.responseId,
-                    status: event.status,
-                    jobId: event.jobId,
-                    sourceTool: event.sourceTool,
-                    source: event.source,
-                    runKey: event.runKey,
-                } as any);
-            }),
         ];
         return () => {
             for (const unsub of unsubs) unsub();
@@ -290,7 +240,6 @@ export function useStream(
                 message: args.message,
                 threadId: args.threadId,
                 userAddress: args.userAddress,
-                ...(args.agentCard ? { agentCard: args.agentCard } : {}),
                 ...(args.cloudPermissions ? { cloudPermissions: args.cloudPermissions } : {}),
                 ...(args.runId ? { runId: args.runId } : {}),
                 ...(args.attachment ? { attachment: args.attachment } : {}),
@@ -306,14 +255,11 @@ export function useStream(
         );
 
         try {
-            for await (const event of stream) {
+            const { result, projection } = await consume(stream, (event) => {
                 route(event, chatRef.current, callbacksRef, textBlockRef, blockSeqRef);
-                if (event.domain === "activity" && event.type === "activity.run" && event.status === "completed") {
-                    complete(chatRef.current, args.assistantId, callbacksRef);
-                }
-            }
-            const final = await stream.final();
-            finish(chatRef.current, args.assistantId, final.text, final.requestId, callbacksRef);
+            });
+            finish(chatRef.current, args.assistantId, projection.text, null, callbacksRef, projection.structuredOutput);
+            if (result.receipt) callbacksRef.current.onReceipt?.(result.receipt);
         } catch (err) {
             fail(err, chatRef.current, args.assistantId, callbacksRef);
         }
@@ -331,7 +277,6 @@ export function useStream(
                 workflowWallet: args.workflowWallet,
                 message: args.message,
                 threadId: args.threadId,
-                userAddress: args.userAddress,
                 ...(args.runId ? { runId: args.runId } : {}),
                 ...(typeof args.continuous === "boolean" ? { continuous: args.continuous } : {}),
                 ...(typeof args.lastEventIndex === "number" ? { lastEventIndex: args.lastEventIndex } : {}),
@@ -341,37 +286,11 @@ export function useStream(
         );
 
         try {
-            for await (const event of stream) {
+            const { result, projection } = await consume(stream, (event) => {
                 route(event, chatRef.current, callbacksRef, textBlockRef, blockSeqRef);
-                if (event.domain === "activity" && event.type === "activity.run" && event.status === "completed") {
-                    complete(chatRef.current, args.assistantId, callbacksRef);
-                }
-            }
-            const final = await stream.final();
-            finish(chatRef.current, args.assistantId, final.text, final.requestId, callbacksRef, final.structuredOutput);
-        } catch (err) {
-            fail(err, chatRef.current, args.assistantId, callbacksRef);
-        }
-    }, []);
-
-    const runChat = useCallback(async (args: ChatStreamArgs): Promise<void> => {
-        const c = chatRef.current;
-        c.currentAssistantIdRef.current = args.assistantId;
-        c.streamedTextRef.current = "";
-        textBlockRef.current = null;
-
-        const stream = sdk.inference.chat.completions.stream(args.params, {
-            signal: args.signal,
-            ...(args.options ?? {}),
-        });
-
-        try {
-            for await (const event of stream) {
-                dispatchModel(event, chatRef.current, callbacksRef, textBlockRef, blockSeqRef);
-            }
-            const final = await stream.final();
-            const text = final.chatCompletion.choices[0]?.message.content ?? chatRef.current.streamedTextRef.current;
-            finish(chatRef.current, args.assistantId, text, final.requestId, callbacksRef);
+            });
+            finish(chatRef.current, args.assistantId, projection.text, null, callbacksRef, projection.structuredOutput);
+            if (result.receipt) callbacksRef.current.onReceipt?.(result.receipt);
         } catch (err) {
             fail(err, chatRef.current, args.assistantId, callbacksRef);
         }
@@ -411,8 +330,8 @@ export function useStream(
 
         void (async () => {
             try {
-                for await (const event of stream) {
-                    if (event.responseId && !responseId) {
+                const { result } = await consume(stream, (event) => {
+                    if (event.domain === "model" && event.responseId && !responseId) {
                         const id = event.responseId;
                         responseId = id;
                         const active: LiveResponse = {
@@ -444,9 +363,8 @@ export function useStream(
                             settle.resolve?.(active);
                         }
                     }
-                    dispatchModel(event, chatRef.current, callbacksRef, textBlockRef, blockSeqRef);
-                }
-                const final = await stream.final();
+                    route(event, chatRef.current, callbacksRef, textBlockRef, blockSeqRef);
+                });
                 if (!ready) {
                     ready = true;
                     if (openingRef.current.get(model) === opening) {
@@ -459,7 +377,8 @@ export function useStream(
                 liveRef.current.delete(model);
                 cleanup();
                 chatRef.current.setRealtimeSession(null);
-                finish(chatRef.current, args.assistantId, chatRef.current.streamedTextRef.current, final.requestId, callbacksRef);
+                finish(chatRef.current, args.assistantId, chatRef.current.streamedTextRef.current, null, callbacksRef);
+                if (result.receipt) callbacksRef.current.onReceipt?.(result.receipt);
             } catch (err) {
                 if (openingRef.current.get(model) === opening) {
                     openingRef.current.delete(model);
@@ -537,14 +456,14 @@ export function useStream(
         });
 
         try {
-            for await (const event of stream) {
-                if (event.responseId) {
+            const { result, projection } = await consume(stream, (event) => {
+                if (event.domain === "model" && event.responseId) {
                     callbacksRef.current.onResponseId?.(event.responseId);
                 }
-                dispatchModel(event, chatRef.current, callbacksRef, textBlockRef, blockSeqRef);
-            }
-            const final = await stream.final();
-            finish(chatRef.current, args.assistantId, chatRef.current.streamedTextRef.current, final.requestId, callbacksRef);
+                route(event, chatRef.current, callbacksRef, textBlockRef, blockSeqRef);
+            });
+            finish(chatRef.current, args.assistantId, projection.text, null, callbacksRef, projection.structuredOutput);
+            if (result.receipt) callbacksRef.current.onReceipt?.(result.receipt);
         } catch (err) {
             fail(err, chatRef.current, args.assistantId, callbacksRef);
         }
@@ -560,7 +479,21 @@ export function useStream(
         });
     }, []);
 
-    return useMemo(() => ({ runAgent, runWorkflow, runChat, runResponses, appendResponses }), [runAgent, runWorkflow, runChat, runResponses, appendResponses]);
+    return useMemo(() => ({ runAgent, runWorkflow, runResponses, appendResponses }), [runAgent, runWorkflow, runResponses, appendResponses]);
+}
+
+async function consume(
+    stream: AsyncGenerator<RunEvent, StreamResult, void>,
+    handle: (event: RunEvent) => void,
+): Promise<{ result: StreamResult; projection: RunProjection }> {
+    let projection = createRunProjection();
+    let next = await stream.next();
+    while (!next.done) {
+        projection = reduceRunProjection(projection, next.value);
+        handle(next.value);
+        next = await stream.next();
+    }
+    return { result: next.value, projection };
 }
 
 function route(
@@ -662,6 +595,19 @@ function dispatchActivity(
 
     chat.applyAssistantActivityEvent(assistantId, event);
 
+    if (event.type === "activity.tool") {
+        const toolName = event.name || "tool";
+        const summary = event.target?.summary || str(event.payload?.message);
+        const displayName = event.target?.name;
+        if (event.status === "running") {
+            chat.startToolActivity(toolName, summary, displayName);
+        } else {
+            chat.finishToolActivity(toolName, summary, event.status === "failed", displayName);
+        }
+        const artifact = artifactFromActivityEvent(event);
+        if (artifact) chat.upsertAssistantArtifact(assistantId, artifact);
+    }
+
     if (event.type === "activity.message" && event.delta && !event.parentId) {
         const blockId = textBlockRef.current ?? nextBlock("text", blockSeqRef);
         textBlockRef.current = blockId;
@@ -675,13 +621,14 @@ function dispatchActivity(
 
     if (event.type === "activity.plan") {
         const plan = planFromActivityEvent(event);
-        chat.updateAssistantMessage(assistantId, {
-            proposal: plan,
-            content: chat.streamedTextRef.current,
-        });
+        mergePlan(chat, assistantId, plan, chat.streamedTextRef.current);
         chat.upsertAssistantBlock(assistantId, { id: `plan`, type: "plan", planId: plan.proposalId });
         chat.setActivityPhase("thinking", plan.decision ? `Plan ${plan.decision}` : "Awaiting plan decision");
         return;
+    }
+
+    if (isTaskEvent(event)) {
+        mergePlanTasks(chat, assistantId, event);
     }
 
     if (event.type === "activity.error") {
@@ -710,18 +657,6 @@ function nextBlock(type: "text" | "reasoning", ref: React.MutableRefObject<numbe
     return `${type}:${ref.current}`;
 }
 
-function complete(
-    chat: UseChatReturn,
-    assistantId: string,
-    cbRef: React.MutableRefObject<StreamCallbacks>,
-): void {
-    chat.flushStreamContent(assistantId, chat.streamedTextRef.current);
-    if (chat.currentAssistantIdRef.current === assistantId) {
-        chat.clearActivityState();
-    }
-    cbRef.current.onDone?.();
-}
-
 function finish(
     chat: UseChatReturn,
     assistantId: string,
@@ -748,8 +683,8 @@ function fail(
     assistantId: string,
     cbRef: React.MutableRefObject<StreamCallbacks>,
 ): void {
-    if (err instanceof DOMException && err.name === "AbortError") return;
-    if (err instanceof Error && err.name === "AbortError") return;
+    if (err instanceof DOMException && err.name === "AbortError" && !(err as any).timeout) return;
+    if (err instanceof Error && err.name === "AbortError" && !(err as any).timeout) return;
     const message = err instanceof Error ? err.message : String(err);
     chat.setActivityPhase("error", message);
     chat.failAssistant(assistantId, message);
@@ -776,7 +711,8 @@ function planFromActivityEvent(event: ActivityEvent): Plan {
         decision: decision(payload.decision),
         rootRunId: event.rootId,
         runId: event.runId,
-        proposal: payload.proposal,
+        proposal: proposalSnapshot(payload.proposal),
+        tasks: proposalTasks(payload.proposal),
         markdown: str(payload.markdown),
         approver: str(payload.approver),
         reason: str(payload.reason),
@@ -784,6 +720,93 @@ function planFromActivityEvent(event: ActivityEvent): Plan {
         ts: event.ts,
         updatedAt: event.ts,
     };
+}
+
+function mergePlan(chat: UseChatReturn, assistantId: string, plan: Plan, content: string): void {
+    chat.setMessages((messages) => messages.map((message) => {
+        if (message.id !== assistantId) return message;
+        const current = message.proposal;
+        const same = current?.proposalId === plan.proposalId && current.version === plan.version;
+        return {
+            ...message,
+            content,
+            proposal: {
+                ...(same ? current : {}),
+                ...plan,
+                tasks: plan.tasks?.length ? plan.tasks : same ? current?.tasks : undefined,
+            },
+        };
+    }));
+}
+
+function isTaskEvent(event: ActivityEvent): boolean {
+    const type = rawType(event);
+    return type === "task.completed" || type === "task.blocked" || type === "task.failed" || type === "task.heartbeat";
+}
+
+function mergePlanTasks(chat: UseChatReturn, assistantId: string, event: ActivityEvent): void {
+    const result = isRecord(event.payload?.result) ? event.payload.result : undefined;
+    const planState = result && isRecord(result.plan) ? result.plan : undefined;
+    const tasks = proposalTasks(planState?.tasks);
+    if (!tasks.length) return;
+    chat.setMessages((messages) => messages.map((message) => {
+        if (message.id !== assistantId || !message.proposal) return message;
+        const proposalId = str(planState?.proposalId);
+        const version = num(planState?.proposalVersion);
+        if (proposalId && proposalId !== message.proposal.proposalId) return message;
+        if (version !== undefined && version !== message.proposal.version) return message;
+        return { ...message, proposal: { ...message.proposal, tasks } };
+    }));
+}
+
+function proposalTasks(value: unknown): ProposalTask[] {
+    const source = Array.isArray(value)
+        ? value
+        : isRecord(value) && Array.isArray(value.tasks)
+            ? value.tasks
+            : [];
+    return source.filter((task): task is ProposalTask => {
+        if (!isRecord(task)) return false;
+        return typeof task.id === "string"
+            && typeof task.title === "string"
+            && ["todo", "doing", "blocked", "done", "failed"].includes(String(task.status));
+    });
+}
+
+function proposalSnapshot(value: unknown): Plan["proposal"] | undefined {
+    if (!isRecord(value) || !Array.isArray(value.tasks) || !Array.isArray(value.participants)) return undefined;
+    if (typeof value.goal !== "string" || typeof value.request !== "string") return undefined;
+    if (value.mode !== "solo" && value.mode !== "swarm") return undefined;
+    return value as unknown as NonNullable<Plan["proposal"]>;
+}
+
+function artifactFromActivityEvent(event: ActivityEvent): Artifact | null {
+    if (rawType(event) !== "artifact.created") return null;
+    const raw = isRecord(event.payload?.artifact) ? event.payload.artifact : undefined;
+    if (!raw) return null;
+    return {
+        id: str(raw.id) ?? str(event.payload?.artifactId) ?? event.id,
+        artifactType: artifactKind(raw.type),
+        url: str(raw.url),
+        inline: raw.inline === true,
+        mimeType: str(raw.mimeType),
+        bytes: num(raw.bytes),
+        responseId: str(raw.responseId),
+        status: str(raw.status),
+        jobId: str(raw.jobId),
+        sourceTool: event.target?.name,
+        source: "agent",
+        runKey: str(raw.runId) ?? event.runId,
+        raw,
+    };
+}
+
+function rawType(event: ActivityEvent): string {
+    return isRecord(event.raw) && typeof event.raw.type === "string" ? event.raw.type : "";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function decision(value: unknown): Plan["decision"] | undefined {

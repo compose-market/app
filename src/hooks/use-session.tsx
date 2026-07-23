@@ -8,7 +8,8 @@ import {
     type ReactNode,
 } from "react";
 import { usePostHog } from "@posthog/react";
-import { useActiveAccount } from "thirdweb/react";
+import { useActiveAccount, useAdminWallet } from "thirdweb/react";
+import { useSelectedUserAddress } from "@/hooks/use-address";
 import {
     Error,
     type BudgetEvent,
@@ -16,18 +17,26 @@ import {
     type SessionExpiredEvent,
     type SessionInvalidEvent,
 } from "@compose-market/sdk";
+import type { EvmNetworkId, NetworkId } from "@compose-market/sdk/chains";
 
-import { useChain } from "@/contexts/ChainContext";
+import { useChain } from "@/contexts/Network";
 import { mpError, mpTrack } from "@/lib/mixpanel";
 import {
-    CHAIN_OBJECTS,
     SESSION_BUDGET_PRESETS,
     TREASURY_WALLET,
-    USDC_ADDRESSES,
+    evmChainId,
+    getEvmChainObject,
+    getUsdcAddressForNetwork,
     inferencePriceWei,
+    isEvmNetwork,
+    requireEvmNetwork,
     thirdwebClient,
 } from "@/lib/chains";
 import { sdk } from "@/lib/sdk";
+import { buildSwigApproveTransaction } from "@/lib/svm/swig";
+import { deriveSwigConfigAddress } from "@/lib/svm/account";
+import { fetchSolanaUsdcBalance } from "@/hooks/use-multichain";
+import type { SolanaNetworkId } from "@compose-market/sdk/chains";
 
 type SessionThirdwebDeps = {
     getContract: typeof import("thirdweb").getContract;
@@ -46,8 +55,8 @@ export interface SessionState {
     budgetLocked: number;
     budgetRemaining: number;
     expiresAt: number | null;
-    chainId: number | null;
-    composeKeyToken: string | null;
+    network: NetworkId | null;
+    keyToken: string | null;
 }
 
 interface SessionContextValue {
@@ -63,7 +72,7 @@ interface SessionContextValue {
     sessionActive: boolean;
     budgetRemaining: number;
     budgetLimit: number;
-    composeKeyToken: string | null;
+    keyToken: string | null;
 }
 
 const defaultSession: SessionState = {
@@ -73,8 +82,8 @@ const defaultSession: SessionState = {
     budgetLocked: 0,
     budgetRemaining: 0,
     expiresAt: null,
-    chainId: null,
-    composeKeyToken: null,
+    network: null,
+    keyToken: null,
 };
 
 const SessionContext = createContext<SessionContextValue | undefined>(undefined);
@@ -117,25 +126,45 @@ async function loadSessionThirdwebDeps(): Promise<SessionThirdwebDeps> {
 
 export function SessionProvider({ children }: { children: ReactNode }) {
     const account = useActiveAccount();
-    const { paymentChainId } = useChain();
+    const adminWallet = useAdminWallet();
+    const { paymentNetwork, solanaChains } = useChain();
+    const { userAddress, isResolving: userAddressResolving, evmSignerAddress, solanaAddress } = useSelectedUserAddress();
     const posthog = usePostHog();
     const [session, setSession] = useState<SessionState>(defaultSession);
     const [isCreating, setIsCreating] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const sessionRef = useRef<SessionState>(defaultSession);
+    const attachedWalletKeyRef = useRef<string | null>(null);
 
-    // Keep the SDK's wallet context aligned with the Thirdweb-connected account
-    // at all times. The SDK handles token persistence via its storage adapter,
-    // so whenever `wallets.attach` runs on a fresh (address, chainId) tuple it
-    // automatically re-hydrates any persisted Compose Key JWT.
+    // Keep the SDK wallet context aligned with the selected payment network.
+    // On Solana, wait for the deterministic smart account instead of falling
+    // back to the EVM smart account.
     useEffect(() => {
-        if (account?.address) {
-            sdk.wallets.attach({ address: account.address, chainId: paymentChainId });
-        } else {
+        if (!account?.address) {
+            attachedWalletKeyRef.current = null;
             sdk.wallets.clear();
             setSession(defaultSession);
+            return;
         }
-    }, [account?.address, paymentChainId]);
+
+        if (!userAddress) {
+            attachedWalletKeyRef.current = null;
+            sdk.wallets.clear();
+            setSession(defaultSession);
+            return;
+        }
+
+        const walletKey = `${userAddress}:${paymentNetwork}`;
+        if (attachedWalletKeyRef.current !== walletKey) {
+            attachedWalletKeyRef.current = walletKey;
+            setSession(defaultSession);
+        }
+
+        sdk.wallets.attach({
+            address: userAddress,
+            network: paymentNetwork,
+        });
+    }, [account?.address, paymentNetwork, userAddress]);
 
     useEffect(() => {
         sessionRef.current = session;
@@ -147,7 +176,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }, [account?.address, posthog]);
 
     const syncSessionFromBackend = useCallback(async (): Promise<SessionState | null> => {
-        if (!account?.address) return null;
+        if (!userAddress || userAddressResolving) return null;
 
         try {
             const status = await sdk.keys.getActive();
@@ -163,8 +192,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 budgetLocked: toNumberSafe(status.budgetLocked),
                 budgetRemaining: toNumberSafe(status.budgetRemaining),
                 expiresAt: typeof status.expiresAt === "number" ? status.expiresAt : null,
-                chainId: status.chainId ?? paymentChainId,
-                composeKeyToken: sdk.keys.currentToken(),
+                network: status.network ?? paymentNetwork,
+                keyToken: sdk.keys.currentToken(),
             };
             setSession(next);
             return next;
@@ -172,40 +201,40 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             console.warn("[session] sdk.keys.getActive failed", syncError);
             return null;
         }
-    }, [account?.address, paymentChainId]);
+    }, [paymentNetwork, userAddress, userAddressResolving]);
 
     // On wallet connect: hydrate session metadata from the server (the SDK
     // already re-attached any persisted token via its storage adapter).
     useEffect(() => {
-        if (!account?.address) return;
+        if (!userAddress || userAddressResolving) return;
         void syncSessionFromBackend();
-    }, [account?.address, paymentChainId, syncSessionFromBackend]);
+    }, [paymentNetwork, syncSessionFromBackend, userAddress, userAddressResolving]);
 
     const ensureKeyToken = useCallback(async (): Promise<string | null> => {
-        if (!account?.address) return null;
+        if (!userAddress || userAddressResolving) return null;
         const cached = sdk.keys.currentToken();
         if (cached) return cached;
-        const stateToken = sessionRef.current.composeKeyToken;
+        const stateToken = sessionRef.current.keyToken;
         if (stateToken) {
             sdk.keys.use(stateToken);
             return stateToken;
         }
         await syncSessionFromBackend();
-        const refreshed = sdk.keys.currentToken() ?? sessionRef.current.composeKeyToken;
+        const refreshed = sdk.keys.currentToken() ?? sessionRef.current.keyToken;
         if (refreshed) sdk.keys.use(refreshed);
         return refreshed;
-    }, [account?.address, syncSessionFromBackend]);
+    }, [syncSessionFromBackend, userAddress, userAddressResolving]);
 
     // Subscribe to the SDK event bus for live budget / invalid / active /
     // expired signals. No window events — the SDK is the only emitter.
     useEffect(() => {
-        if (!account?.address) return;
+        if (!userAddress || userAddressResolving) return;
 
         const disposers: Array<() => void> = [];
 
         disposers.push(sdk.events.on("budget", (event: BudgetEvent) => {
             setSession((previous) => {
-                if (!previous.chainId) return previous;
+                if (!previous.network) return previous;
                 return {
                     ...previous,
                     budgetLimit: toNumberSafe(event.snapshot.limitWei, previous.budgetLimit),
@@ -234,7 +263,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 budgetLocked: toNumberSafe(event.budgetLocked, previous.budgetLocked),
                 budgetRemaining: toNumberSafe(event.budgetRemaining, previous.budgetRemaining),
                 expiresAt: typeof event.expiresAt === "number" ? event.expiresAt : previous.expiresAt,
-                chainId: event.chainId ?? previous.chainId,
+                network: event.network ?? previous.network,
             }));
         }));
 
@@ -246,20 +275,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         return () => {
             for (const dispose of disposers) dispose();
         };
-    }, [account?.address, syncSessionFromBackend]);
+    }, [syncSessionFromBackend, userAddress, userAddressResolving]);
 
     // Subscribe to the live `/api/session/events` SSE stream. The SDK drives
     // reconnection; we just own the lifetime.
     useEffect(() => {
-        const chainId = session.chainId ?? paymentChainId;
-        if (!account?.address || !session.isActive || !chainId) return;
+        const network = session.network ?? paymentNetwork;
+        if (!userAddress || userAddressResolving || !session.isActive || !network) return;
 
         const controller = new AbortController();
         (async () => {
             try {
                 const iter = sdk.session.subscribe({
-                    userAddress: account.address,
-                    chainId,
+                    userAddress,
+                    network,
                     signal: controller.signal,
                 });
                 for await (const _event of iter) {
@@ -274,20 +303,25 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         })();
 
         return () => controller.abort();
-    }, [account?.address, paymentChainId, session.chainId, session.isActive]);
+    }, [paymentNetwork, session.network, session.isActive, userAddress, userAddressResolving]);
 
     useEffect(() => {
-        if (!account?.address || !session.isActive) return;
+        if (!userAddress || userAddressResolving || !session.isActive) return;
         const onVisible = () => {
             if (!document.hidden) void syncSessionFromBackend();
         };
         document.addEventListener("visibilitychange", onVisible);
         return () => document.removeEventListener("visibilitychange", onVisible);
-    }, [account?.address, session.isActive, syncSessionFromBackend]);
+    }, [session.isActive, syncSessionFromBackend, userAddress, userAddressResolving]);
 
     const createSession = useCallback(async (budgetUSDC: number, durationHours: number = 24) => {
         if (!account) {
             setError("Wallet not connected");
+            return false;
+        }
+
+        if (!userAddress || userAddressResolving) {
+            setError("Solana account is still resolving");
             return false;
         }
 
@@ -296,50 +330,116 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
         try {
             const budgetWei = Math.floor(budgetUSDC * 1_000_000);
-            const activeChain = CHAIN_OBJECTS[paymentChainId as keyof typeof CHAIN_OBJECTS];
-            const usdcAddress = USDC_ADDRESSES[paymentChainId];
-            if (!activeChain || !usdcAddress) {
-                throw new globalThis.Error(`Session payments are not configured for chain ${paymentChainId}`);
-            }
+            let evmNetwork: EvmNetworkId | null = null;
+            if (isEvmNetwork(paymentNetwork)) {
+                evmNetwork = requireEvmNetwork(paymentNetwork, "Session payment approval");
+                const activeChain = getEvmChainObject(evmNetwork);
+                const usdcAddress = getUsdcAddressForNetwork(evmNetwork);
+                if (!activeChain || !usdcAddress) {
+                    throw new globalThis.Error(`Session payments are not configured for ${paymentNetwork}`);
+                }
 
-            const { getContract, sendTransaction, allowance, approve, balanceOf } = await loadSessionThirdwebDeps();
-            const usdcContract = getContract({
-                address: usdcAddress,
-                chain: activeChain,
-                client: thirdwebClient,
-            });
+                const { getContract, sendTransaction, allowance, approve, balanceOf } = await loadSessionThirdwebDeps();
+                const usdcContract = getContract({
+                    address: usdcAddress,
+                    chain: activeChain,
+                    client: thirdwebClient,
+                });
 
-            const [currentBalance, currentAllowance] = await Promise.all([
-                balanceOf({ contract: usdcContract, address: account.address }),
-                allowance({ contract: usdcContract, owner: account.address, spender: TREASURY_WALLET }),
-            ]);
+                const [currentBalance, currentAllowance] = await Promise.all([
+                    balanceOf({ contract: usdcContract, address: account.address }),
+                    allowance({ contract: usdcContract, owner: account.address, spender: TREASURY_WALLET }),
+                ]);
 
-            if (currentBalance < BigInt(budgetWei)) {
-                const balanceUSDC = Number(currentBalance) / 1_000_000;
-                throw new globalThis.Error(
-                    `Insufficient USDC balance. You have $${balanceUSDC.toFixed(2)} but want to budget $${budgetUSDC.toFixed(2)}`,
+                if (currentBalance < BigInt(budgetWei)) {
+                    const balanceUSDC = Number(currentBalance) / 1_000_000;
+                    throw new globalThis.Error(
+                        `Insufficient USDC balance. You have $${balanceUSDC.toFixed(2)} but want to budget $${budgetUSDC.toFixed(2)}`,
+                    );
+                }
+
+                if (currentAllowance < BigInt(budgetWei)) {
+                    await sendTransaction({
+                        transaction: approve({
+                            contract: usdcContract,
+                            spender: TREASURY_WALLET,
+                            amountWei: BigInt(budgetWei),
+                        }),
+                        account,
+                    });
+                }
+            } else {
+                // Solana path: build + relay a Swig-signed SPL approve that
+                // delegates USDC spending from the Swig wallet to the
+                // facilitator (SVM_TREASURY_SERVER_WALLET_PUBLIC).
+                // This is the SVM equivalent of EVM's approve(treasury, budget).
+                if (!solanaAddress) {
+                    throw new globalThis.Error("Solana smart account is being created, please wait...");
+                }
+                if (!evmSignerAddress) {
+                    throw new globalThis.Error("EVM signer address not available for Swig signing");
+                }
+
+                const solanaChain = solanaChains.find((c) => c.network === paymentNetwork);
+                if (!solanaChain) {
+                    throw new globalThis.Error(`No Solana chain configured for ${paymentNetwork}`);
+                }
+
+                const solanaBalance = await fetchSolanaUsdcBalance(
+                    solanaAddress,
+                    solanaChain.assetAddress,
+                    paymentNetwork as SolanaNetworkId,
+                    solanaChain.rpcUrl,
                 );
-            }
 
-            if (currentAllowance < BigInt(budgetWei)) {
-                await sendTransaction({
-                    transaction: approve({
-                        contract: usdcContract,
-                        spender: TREASURY_WALLET,
-                        amountWei: BigInt(budgetWei),
-                    }),
-                    account,
+                if (solanaBalance < BigInt(budgetWei)) {
+                    const balanceUSDC = Number(solanaBalance) / 1_000_000;
+                    throw new globalThis.Error(
+                        `Insufficient USDC balance. You have $${balanceUSDC.toFixed(2)} but want to budget $${budgetUSDC.toFixed(2)}`,
+                    );
+                }
+
+                const { feePayer } = await sdk.svm.feePayer();
+
+                const signerAccount = adminWallet?.getAccount?.();
+                if (!signerAccount) {
+                    throw new globalThis.Error("EVM signer account not available");
+                }
+
+                const swigConfigAddress = await deriveSwigConfigAddress(evmSignerAddress);
+
+                const unsignedApproveTxB64 = await buildSwigApproveTransaction({
+                    swigConfigAddress: swigConfigAddress as any,
+                    expectedWalletAddress: solanaAddress,
+                    evmSignerAddress,
+                    usdcMint: solanaChain.assetAddress,
+                    amount: BigInt(budgetWei),
+                    feePayer: feePayer as any,
+                    network: paymentNetwork,
+                    rpcUrl: solanaChain.rpcUrl,
+                    signMessage: async (message: Uint8Array) => {
+                        return signerAccount.signMessage({ message: { raw: message } as any });
+                    },
+                });
+
+                await sdk.svm.relay({
+                    unsignedTransaction: unsignedApproveTxB64,
+                    network: paymentNetwork,
                 });
             }
 
             // Guarantee the SDK has the right wallet context in case the user
             // flipped chains mid-flight between the effect above and here.
-            sdk.wallets.attach({ address: account.address, chainId: paymentChainId });
+            sdk.wallets.attach({
+                address: userAddress,
+                network: paymentNetwork,
+            });
 
             const created = await sdk.keys.create({
                 purpose: "session",
                 budgetUsd: toBudgetUsdString(budgetUSDC),
                 durationHours,
+                network: paymentNetwork,
                 name: getSessionName(),
             });
 
@@ -350,13 +450,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 budgetLocked: 0,
                 budgetRemaining: toNumberSafe(created.budgetRemaining, budgetWei),
                 expiresAt: created.expiresAt,
-                chainId: created.chainId,
-                composeKeyToken: created.token,
+                network: created.network,
+                keyToken: created.token,
             };
             setSession(next);
 
             posthog?.capture("session_created", {
-                chain_id: paymentChainId,
+                network: paymentNetwork,
+                ...(evmNetwork ? { evm_chain_id: evmChainId(evmNetwork) } : {}),
                 budget_usdc: budgetUSDC,
                 duration_hours: durationHours,
                 path: "thirdweb",
@@ -371,14 +472,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         } catch (createError) {
             const errorMessage = createError instanceof Error
                 ? createError.message
-                : createError instanceof Error
-                    ? createError.message
-                    : "Failed to create session";
+                : typeof createError === "string"
+                    ? createError
+                    : createError && typeof createError === "object" && "message" in createError
+                        ? String((createError as { message: unknown }).message)
+                        : "Failed to create session";
             posthog?.captureException(
                 createError instanceof Error ? createError : new globalThis.Error(String(createError)),
                 {
                     $exception_message: "session_create_failed",
-                    chain_id: paymentChainId,
+                    network: paymentNetwork,
                     budget_usdc: budgetUSDC,
                 },
             );
@@ -388,17 +491,27 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         } finally {
             setIsCreating(false);
         }
-    }, [account, paymentChainId, posthog]);
+    }, [
+        account,
+        adminWallet,
+        paymentNetwork,
+        posthog,
+        userAddress,
+        userAddressResolving,
+        evmSignerAddress,
+        solanaAddress,
+        solanaChains,
+    ]);
 
     const endSession = useCallback(() => {
         posthog?.capture("session_ended", {
-            chain_id: session.chainId,
+            network: session.network,
             budget_remaining: session.budgetRemaining,
             budget_used: session.budgetUsed,
         });
         sdk.keys.clearToken();
         setSession(defaultSession);
-    }, [posthog, session.budgetRemaining, session.budgetUsed, session.chainId]);
+    }, [posthog, session.budgetRemaining, session.budgetUsed, session.network]);
 
     const hasBudget = useCallback((requiredWei: number = inferencePriceWei) => (
         session.isActive && session.budgetRemaining >= requiredWei
@@ -419,7 +532,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         sessionActive: session.isActive,
         budgetRemaining: session.budgetRemaining,
         budgetLimit: session.budgetLimit,
-        composeKeyToken: session.composeKeyToken,
+        keyToken: session.keyToken,
     };
 
     return (

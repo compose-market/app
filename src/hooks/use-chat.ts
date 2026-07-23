@@ -10,13 +10,13 @@
  */
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import type {
-    Message as ComposeMessage,
-    MessageContentPart,
-    AttachmentInput,
+    Attachment,
     ActivityEvent,
     ActivityState,
     ModelEvent,
     PlanDecision,
+    ProposalSnapshot,
+    ProposalTask,
 } from "@compose-market/sdk";
 import { createActivityState, reduceActivityState, decodeActivityEvent } from "@compose-market/sdk";
 import { uploadConversationFile, cleanupConversationFiles } from "@/lib/pinata";
@@ -41,7 +41,8 @@ export interface Plan {
     rootRunId?: string;
     runId?: string;
     requestedBy?: string;
-    proposal?: unknown;
+    proposal?: ProposalSnapshot;
+    tasks?: ProposalTask[];
     markdown?: string;
     ts?: number;
     updatedAt?: number;
@@ -166,7 +167,7 @@ function wav(samples: Float32Array, sampleRate: number): string {
     return `data:audio/wav;base64,${b64(new Uint8Array(buffer))}`;
 }
 
-export function toAttachment(attached: Pick<AttachedFile, "type" | "url" | "file"> | undefined): AttachmentInput | undefined {
+export function toAttachment(attached: Pick<AttachedFile, "type" | "url" | "file"> | undefined): Attachment | undefined {
     if (!attached?.url) {
         return undefined;
     }
@@ -179,16 +180,27 @@ export function toAttachment(attached: Pick<AttachedFile, "type" | "url" | "file
     };
 }
 
-export function toMessage(message: Message): ComposeMessage {
-    const parts: MessageContentPart[] = [];
+type ResponseMessagePart =
+    | { type: "input_text"; text: string }
+    | { type: "input_image"; image_url: string }
+    | { type: "input_audio"; audio_url: string }
+    | { type: "input_video"; video_url: string };
+
+export interface ResponseMessage {
+    role: "user" | "assistant" | "system";
+    content: string | ResponseMessagePart[];
+}
+
+export function toMessage(message: Message): ResponseMessage {
+    const parts: ResponseMessagePart[] = [];
     if (message.content.trim().length > 0) {
-        parts.push({ type: "text", text: message.content });
+        parts.push({ type: "input_text", text: message.content });
     }
-    if (message.imageUrl) parts.push({ type: "image_url", image_url: { url: message.imageUrl } });
-    if (message.audioUrl) parts.push({ type: "input_audio", input_audio: { url: message.audioUrl } });
-    if (message.videoUrl) parts.push({ type: "video_url", video_url: { url: message.videoUrl } });
+    if (message.imageUrl) parts.push({ type: "input_image", image_url: message.imageUrl });
+    if (message.audioUrl) parts.push({ type: "input_audio", audio_url: message.audioUrl });
+    if (message.videoUrl) parts.push({ type: "input_video", video_url: message.videoUrl });
     if (parts.length === 0) return { role: message.role, content: "" };
-    if (parts.length === 1 && parts[0].type === "text") return { role: message.role, content: message.content };
+    if (parts.length === 1 && parts[0].type === "input_text") return { role: message.role, content: message.content };
     return { role: message.role, content: parts };
 }
 

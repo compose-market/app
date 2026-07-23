@@ -1,15 +1,22 @@
 /**
  * Multi-Chain Balance Hook
  *
- * Fetches USDC balances from ALL supported chains in parallel.
- * Used for cross-chain liquidity detection for x402 payments.
+ * Fetches USDC balances from ALL supported chains in parallel —
+ * both EVM (via Thirdweb ERC-20 reads) and Solana (via SPL token
+ * account reads on the real Solana RPC).
+ *
+ * Used for cross-chain liquidity detection for x402 payments and
+ * for the network-selector balance display.
  */
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { SUPPORTED_CHAINS, getUsdcContractForChain, CHAIN_CONFIG } from "@/lib/chains";
+import type { EvmNetworkId, NetworkId, SolanaNetworkId, FacilitatorChain } from "@compose-market/sdk/chains";
+import { evmChainId, getUsdcContractForNetwork, isEvmNetwork } from "@/lib/chains";
+import { useChain } from "@/contexts/Network";
+import { createSolanaRpcFromNetwork } from "@/lib/svm/swig";
 
 export interface ChainBalance {
-    chainId: number;
+    network: NetworkId;
     chainName: string;
     balance: bigint;
     formatted: string;
@@ -21,6 +28,11 @@ interface MultiChainBalanceOptions {
     deferUntilIdle?: boolean;
     staleTime?: number;
     refetchInterval?: number | false;
+}
+
+interface MultiChainBalanceAccounts {
+    evmAddress?: string | null;
+    solanaAddress?: string | null;
 }
 
 function useDeferredQueryEnabled(enabled: boolean, deferUntilIdle: boolean): boolean {
@@ -67,10 +79,10 @@ function useDeferredQueryEnabled(enabled: boolean, deferUntilIdle: boolean): boo
     return enabled && idleReady;
 }
 
-async function fetchUsdcBalance(address: string, chainId: number): Promise<bigint> {
+async function fetchEvmUsdcBalance(address: string, network: EvmNetworkId): Promise<bigint> {
     try {
         const { readContract } = await import("thirdweb");
-        const contract = getUsdcContractForChain(chainId);
+        const contract = getUsdcContractForNetwork(network);
         const balance = await readContract({
             contract,
             method: "function balanceOf(address account) view returns (uint256)",
@@ -78,7 +90,71 @@ async function fetchUsdcBalance(address: string, chainId: number): Promise<bigin
         }) as bigint;
         return balance;
     } catch (error) {
-        console.warn(`Failed to fetch USDC balance on chain ${chainId}:`, error);
+        console.warn(`Failed to fetch USDC balance on ${network}:`, error);
+        return BigInt(0);
+    }
+}
+
+const SPL_TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+const SPL_TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+const ASSOCIATED_TOKEN_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
+
+function decodeBase64(value: string): Uint8Array {
+    const binary = globalThis.atob(value);
+    return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+}
+
+function readBigUInt64LE(data: Uint8Array, offset: number): bigint {
+    let value = BigInt(0);
+    for (let index = 0; index < 8; index += 1) {
+        value |= BigInt(data[offset + index] ?? 0) << BigInt(index * 8);
+    }
+    return value;
+}
+
+async function readSolanaTokenProgram(
+    rpc: ReturnType<typeof createSolanaRpcFromNetwork>,
+    usdcMint: string,
+): Promise<string> {
+    const { address } = await import("@solana/kit");
+    const info = await rpc.getAccountInfo(address(usdcMint)).send();
+    const owner = info.value?.owner;
+    if (owner === SPL_TOKEN_PROGRAM || owner === SPL_TOKEN_2022_PROGRAM) {
+        return owner;
+    }
+    throw new Error(owner ? `Unsupported Solana token program: ${owner}` : `Solana mint not found: ${usdcMint}`);
+}
+
+export async function fetchSolanaUsdcBalance(
+    ownerAddress: string,
+    usdcMint: string,
+    network: SolanaNetworkId,
+    rpcUrl: string,
+): Promise<bigint> {
+    try {
+        const { getProgramDerivedAddress, getAddressEncoder, address } = await import("@solana/kit");
+        const rpc = createSolanaRpcFromNetwork(network, rpcUrl);
+        const tokenProgram = await readSolanaTokenProgram(rpc, usdcMint);
+        const encoder = getAddressEncoder();
+        const [ata] = await getProgramDerivedAddress({
+            programAddress: address(ASSOCIATED_TOKEN_PROGRAM),
+            seeds: [
+                encoder.encode(address(ownerAddress)),
+                encoder.encode(address(tokenProgram)),
+                encoder.encode(address(usdcMint)),
+            ],
+        });
+
+        const info = await rpc.getAccountInfo(ata, { encoding: "base64" }).send();
+
+        if (!info.value) return BigInt(0);
+
+        const data = decodeBase64(info.value.data[0] as string);
+        if (data.length < 72) return BigInt(0);
+
+        return readBigUInt64LE(data, 64);
+    } catch (error) {
+        console.warn(`Failed to fetch Solana USDC balance on ${network}:`, error);
         return BigInt(0);
     }
 }
@@ -88,29 +164,55 @@ function formatUsdcBalance(balance: bigint): string {
     return num.toFixed(2);
 }
 
-export function useMultiChainBalance(address: string | undefined, options: MultiChainBalanceOptions = {}) {
+export function useMultiChainBalance(accounts: MultiChainBalanceAccounts, options: MultiChainBalanceOptions = {}) {
+    const evmAddress = accounts.evmAddress ?? null;
+    const solanaAddress = accounts.solanaAddress ?? null;
     const queryEnabled = useDeferredQueryEnabled(
-        Boolean(address) && (options.enabled ?? true),
+        Boolean(evmAddress || solanaAddress) && (options.enabled ?? true),
         options.deferUntilIdle ?? false,
     );
 
+    const { chains } = useChain();
+
     return useQuery({
-        queryKey: ["multichain-balance", address],
+        queryKey: ["multichain-balance", evmAddress, solanaAddress, chains],
         queryFn: async (): Promise<ChainBalance[]> => {
-            if (!address) {
+            if (!evmAddress && !solanaAddress) {
                 return [];
             }
 
             const balances = await Promise.all(
-                SUPPORTED_CHAINS.map(async ({ id: chainId }) => {
-                    const balance = await fetchUsdcBalance(address, chainId);
-                    const chainConfig = CHAIN_CONFIG[chainId];
+                chains.map(async (chain: FacilitatorChain): Promise<ChainBalance> => {
+                    const network = chain.network;
+
+                    if (isEvmNetwork(network)) {
+                        const balance = evmAddress
+                            ? await fetchEvmUsdcBalance(evmAddress, network)
+                            : BigInt(0);
+                        return {
+                            network,
+                            chainName: chain.name || `Chain ${evmChainId(network)}`,
+                            balance,
+                            formatted: formatUsdcBalance(balance),
+                            color: chain.isTestnet ? "red" : "cyan",
+                        };
+                    }
+
+                    const balance = solanaAddress
+                        ? await fetchSolanaUsdcBalance(
+                            solanaAddress,
+                            chain.assetAddress,
+                            network as SolanaNetworkId,
+                            chain.rpcUrl,
+                        )
+                        : BigInt(0);
+
                     return {
-                        chainId,
-                        chainName: chainConfig?.name || `Chain ${chainId}`,
+                        network,
+                        chainName: chain.name || network,
                         balance,
                         formatted: formatUsdcBalance(balance),
-                        color: chainConfig?.color || "gray",
+                        color: chain.isTestnet ? "red" : "cyan",
                     };
                 }),
             );
@@ -128,34 +230,35 @@ export function useMultiChainBalance(address: string | undefined, options: Multi
 }
 
 export function useBestLiquidityChain(
-    address: string | undefined,
+    accounts: MultiChainBalanceAccounts,
     minAmount: bigint,
-    preferredChainId?: number
+    preferredNetwork?: NetworkId,
+    options: MultiChainBalanceOptions = {},
 ) {
-    const { data: balances, isLoading, error } = useMultiChainBalance(address);
+    const { data: balances, isLoading, error } = useMultiChainBalance(accounts, options);
 
-    let bestChainId: number | null = null;
+    let bestNetwork: NetworkId | null = null;
     let isPreferredChainUsed = false;
 
     if (balances && balances.length > 0) {
-        if (preferredChainId) {
-            const preferred = balances.find((balance) => balance.chainId === preferredChainId);
+        if (preferredNetwork) {
+            const preferred = balances.find((balance) => balance.network === preferredNetwork);
             if (preferred && preferred.balance >= minAmount) {
-                bestChainId = preferredChainId;
+                bestNetwork = preferred.network;
                 isPreferredChainUsed = true;
             }
         }
 
-        if (!bestChainId) {
+        if (!bestNetwork) {
             const chainWithBalance = balances.find((balance) => balance.balance >= minAmount);
             if (chainWithBalance) {
-                bestChainId = chainWithBalance.chainId;
+                bestNetwork = chainWithBalance.network;
             }
         }
     }
 
     return {
-        bestChainId,
+        bestNetwork,
         isPreferredChainUsed,
         balances,
         isLoading,
@@ -163,8 +266,8 @@ export function useBestLiquidityChain(
     };
 }
 
-export function useTotalBalance(address: string | undefined, options: MultiChainBalanceOptions = {}) {
-    const { data: balances, isLoading, error } = useMultiChainBalance(address, options);
+export function useTotalBalance(accounts: MultiChainBalanceAccounts, options: MultiChainBalanceOptions = {}) {
+    const { data: balances, isLoading, error } = useMultiChainBalance(accounts, options);
 
     const total = balances?.reduce((sum, balance) => sum + balance.balance, BigInt(0)) || BigInt(0);
 

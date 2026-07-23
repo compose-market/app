@@ -10,7 +10,8 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CHAIN_CONFIG } from "@/lib/chains";
+import type { EvmNetworkId, NetworkId } from "@compose-market/sdk/chains";
+import { getChainConfigByNetwork, getExplorerTxUrl as explorerTxUrl } from "@/lib/chains";
 import { sdk } from "@/lib/sdk";
 
 // =============================================================================
@@ -18,8 +19,8 @@ import { sdk } from "@/lib/sdk";
 // =============================================================================
 
 export interface DispenserStatus {
-    chainId: number;
-    chainName: string;
+    network: NetworkId;
+    networkName: string;
     totalClaims: number;
     maxClaims: number;
     remainingClaims: number;
@@ -44,8 +45,8 @@ export interface ClaimResult {
     error?: string;
     alreadyClaimed?: boolean;
     globalClaimStatus?: {
-        claimedOnChain?: number;
-        claimedOnChainName?: string;
+        claimedOnNetwork?: NetworkId;
+        claimedOnNetworkName?: string;
         claimedAt?: number;
     };
 }
@@ -53,8 +54,8 @@ export interface ClaimResult {
 export interface ClaimCheckResult {
     address: string;
     hasClaimed: boolean;
-    claimedOnChain?: number;
-    claimedOnChainName?: string;
+    claimedOnNetwork?: NetworkId;
+    claimedOnNetworkName?: string;
     claimedAt?: number;
 }
 
@@ -70,8 +71,8 @@ async function fetchDispenserCheck(address: string): Promise<ClaimCheckResult> {
     return sdk.dispenser.check({ address });
 }
 
-async function claimDispenserUSDC(address: string, chainId: number): Promise<ClaimResult> {
-    return sdk.dispenser.claim({ address, chainId });
+async function claimDispenserUSDC(address: string, network: NetworkId): Promise<ClaimResult> {
+    return sdk.dispenser.claim({ address, network });
 }
 
 // =============================================================================
@@ -119,8 +120,8 @@ export function useDispenserClaim() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: ({ address, chainId }: { address: string; chainId: number }) =>
-            claimDispenserUSDC(address, chainId),
+        mutationFn: ({ address, network }: { address: string; network: NetworkId }) =>
+            claimDispenserUSDC(address, network),
         onSuccess: (data, variables) => {
             if (data.success) {
                 queryClient.invalidateQueries({
@@ -137,20 +138,20 @@ export function useDispenserClaim() {
 /**
  * Get explorer URL for a transaction
  */
-export function getExplorerTxUrl(txHash: string, chainId: number): string {
-    const baseUrl = CHAIN_CONFIG[chainId]?.explorer;
-    return baseUrl ? `${baseUrl}/tx/${txHash}` : "#";
+export function getExplorerTxUrl(txHash: string, network: NetworkId): string {
+    return network.startsWith("eip155:") ? explorerTxUrl(network as EvmNetworkId, txHash) : "#";
 }
 
 /**
  * Get chain color for UI
  */
-export function getChainColor(chainId: number): string {
+export function getChainColor(network: NetworkId): string {
     const colors: Record<string, string> = {
         red: "text-red-400",
         cyan: "text-cyan-400",
         yellow: "text-yellow-400",
     };
-    const colorKey = CHAIN_CONFIG[chainId]?.color;
+    const chain = getChainConfigByNetwork(network);
+    const colorKey = chain?.isTestnet ? "red" : "cyan";
     return colorKey ? colors[colorKey] || "text-cyan-400" : "text-cyan-400";
 }
