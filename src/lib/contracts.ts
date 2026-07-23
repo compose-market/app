@@ -698,12 +698,21 @@ export function prepareMintWorkflowCall(
  */
 export function computeDnaHash(
   skills: string[],
-  chainId: number,
+  chainId: number | string,
   model: string
 ): `0x${string}` {
   // Sort skills for deterministic hashing
   const sortedSkills = [...skills].sort();
   const skillsStr = sortedSkills.join(",");
+
+  if (typeof chainId === "string") {
+    return keccak256(
+      encodePacked(
+        ["string", "string", "string"],
+        [skillsStr, chainId, model]
+      )
+    );
+  }
 
   return keccak256(
     encodePacked(
@@ -787,16 +796,25 @@ export function computeExternalAgentHash(registry: string, address: string): `0x
  */
 export function computeWorkflowDnaHash(
   agentIds: number[],
-  timestamp: number
+  timestamp: number,
+  deploymentAddress: string = getContractAddress("Workflow"),
 ): `0x${string}` {
-  const workflowContractAddress = getContractAddress("Workflow");
   const sortedAgentIds = [...agentIds].sort((a, b) => a - b);
   const agentIdsStr = sortedAgentIds.join(",");
+
+  if (!deploymentAddress.startsWith("0x")) {
+    return keccak256(
+      encodePacked(
+        ["string", "string", "uint256", "string"],
+        [deploymentAddress, agentIdsStr, BigInt(timestamp), ":workflow:dna"]
+      )
+    );
+  }
 
   return keccak256(
     encodePacked(
       ["address", "string", "uint256", "string"],
-      [workflowContractAddress, agentIdsStr, BigInt(timestamp), ":workflow:dna"]
+      [deploymentAddress as `0x${string}`, agentIdsStr, BigInt(timestamp), ":workflow:dna"]
     )
   );
 }

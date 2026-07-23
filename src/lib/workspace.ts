@@ -72,7 +72,7 @@ export async function uploadWorkspaceFiles(files: File[], params: {
 
   // Runtime/ service expects the same Compose Key JWT contract the gateway
   // uses. `sdk.fetch` attaches Authorization / x-session-user-address /
-  // x-chain-id automatically from the SDK singleton's current wallet context.
+  // x-network-id automatically from the SDK singleton's current wallet context.
   const response = await sdk.fetch(`${RUNTIME_URL}/api/workspace/index`, {
     method: "POST",
     headers: {

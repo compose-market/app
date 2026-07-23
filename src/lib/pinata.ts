@@ -9,6 +9,8 @@ const PINATA_GATEWAY = env.VITE_PINATA_GATEWAY || "compose.mypinata.cloud";
 
 const PINATA_API_URL = "https://api.pinata.cloud";
 
+type NetworkId = string;
+
 interface PinataUploadResponse {
   IpfsHash: string;
   PinSize: number;
@@ -183,12 +185,12 @@ export interface AgentCard {
   x402: true;
   x402Support: boolean;
   image?: string; // Standard NFT metadata field (gateway URL for display and explorer compatibility)
-  avatar?: string; // Legacy field for backward compatibility with explorers
+  avatar?: string; // Explorer display field
   avatarUrl?: string;
   dnaHash: string;
   walletAddress: string; // Agent's derived wallet address - SINGLE SOURCE OF TRUTH
   walletTimestamp?: number; // Timestamp used in wallet derivation (backend needs this)
-  chain: number;
+  network: NetworkId;
   model: string;
   framework?: string; // Agent runtime framework
   licensePrice: string; // USDC in smallest unit (6 decimals) - cost to nest into Workflow
@@ -228,7 +230,7 @@ export async function uploadAgentCard(card: AgentCard): Promise<string> {
     keyvalues: {
       type: "agent-card",
       agent: card.name,
-      chain: card.chain.toString(),
+      network: card.network,
     },
   });
 }
@@ -246,6 +248,7 @@ export interface WorkflowMetadata {
   dnaHash: string;
   walletAddress: string; // Derived wallet for x402 payments
   walletTimestamp: number; // Timestamp used in derivation
+  network: NetworkId;
   // Nested agentCards - full agent metadata embedded
   agents: AgentCard[];
   // Workflow graph edges (source -> target connections)

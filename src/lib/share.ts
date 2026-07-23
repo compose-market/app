@@ -3,7 +3,7 @@ export interface MintShareData {
   name: string;
   walletAddress: string;
   txHash: string;
-  chainId: number;
+  network: string;
 }
 
 const STORAGE_KEY = 'compose_mint_share';
