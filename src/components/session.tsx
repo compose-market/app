@@ -215,8 +215,8 @@ function SessionManageDialog({ open, onOpenChange }: SessionManageDialogProps) {
 
     setLoading(true);
     try {
-      const composeKeyToken = await ensureKeyToken();
-      if (!composeKeyToken) {
+      const keyToken = await ensureKeyToken();
+      if (!keyToken) {
         throw new Error("Compose Key token unavailable");
       }
       const keys = await sdk.keys.list();
@@ -241,8 +241,8 @@ function SessionManageDialog({ open, onOpenChange }: SessionManageDialogProps) {
     }
 
     try {
-      const composeKeyToken = await ensureKeyToken();
-      if (!composeKeyToken) {
+      const keyToken = await ensureKeyToken();
+      if (!keyToken) {
         throw new Error("Compose Key token unavailable");
       }
       await sdk.keys.revoke(keyId);
@@ -343,8 +343,8 @@ function KeyDialog({ open, onOpenChange }: KeyDialogProps) {
 
     setIsGenerating(true);
     try {
-      const composeKeyToken = await ensureKeyToken();
-      if (!composeKeyToken) {
+      const keyToken = await ensureKeyToken();
+      if (!keyToken) {
         throw new Error("Compose Key token unavailable");
       }
 
@@ -358,7 +358,7 @@ function KeyDialog({ open, onOpenChange }: KeyDialogProps) {
         purpose: "api",
         budgetWei: toBudgetWeiString(session.budgetRemaining),
         expiresAt: session.expiresAt ?? Date.now() + 24 * 60 * 60 * 1000,
-        chainId: session.chainId ?? undefined,
+        network: session.network ?? undefined,
         name: keyName,
       });
 

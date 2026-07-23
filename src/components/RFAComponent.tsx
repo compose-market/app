@@ -56,7 +56,8 @@ import {
     CheckCircle2,
     Info,
 } from "lucide-react";
-import { useChain } from "@/contexts/ChainContext";
+import { useChain } from "@/contexts/Network";
+import { getUsdcContractForNetwork, requireEvmNetwork } from "@/lib/chains";
 
 // =============================================================================
 // Form Schema
@@ -103,7 +104,7 @@ export function RFAComponent({
     const wallet = useActiveWallet();
     const account = useActiveAccount();
     const { mutateAsync: sendTransaction, isPending } = useSendTransaction();
-    const { paymentChainId } = useChain();
+    const { paymentNetwork } = useChain();
 
     const [step, setStep] = useState<"form" | "approving" | "creating">("form");
 
@@ -152,8 +153,9 @@ export function RFAComponent({
         }
 
         try {
+            const evmNetwork = requireEvmNetwork(paymentNetwork, "RFA creation");
             const rfaContract = getRFAContract();
-            const usdcContract = getUsdcContractForChain(paymentChainId);
+            const usdcContract = getUsdcContractForNetwork(evmNetwork);
             const rfaAddress = getContractAddress("RFA");
 
             // Convert offer amount to USDC wei (6 decimals)

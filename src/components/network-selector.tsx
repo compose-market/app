@@ -1,13 +1,13 @@
 /**
  * Network Selector - Chain selection dropdown
- * 
+ *
  * Used in sidebar and factory forms to select deployment/payment chain.
  */
 import { cn } from "@/lib/utils";
-import { SUPPORTED_CHAINS, CHAIN_CONFIG } from "@/lib/chains";
-import { useChain } from "@/contexts/ChainContext";
+import { useChain } from "@/contexts/Network";
+import type { NetworkId } from "@compose-market/sdk/chains";
 import { useMultiChainBalance } from "@/hooks/use-multichain";
-import { useActiveAccount } from "thirdweb/react";
+import { useSelectedUserAddress } from "@/hooks/use-address";
 import {
     Select,
     SelectContent,
@@ -16,60 +16,37 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 
-// =============================================================================
-// Types
-// =============================================================================
-
 interface NetworkSelectorProps {
-    /** Compact mode for sidebar */
     compact?: boolean;
-    /** Show USDC balance per chain */
     showBalance?: boolean;
-    /** Custom className */
     className?: string;
-    /** Override value (for form-controlled usage) */
-    value?: number;
-    /** Override onChange (for form-controlled usage) */
-    onChange?: (chainId: number) => void;
 }
-
-// =============================================================================
-// Component
-// =============================================================================
 
 export function NetworkSelector({
     compact = false,
     showBalance = true,
     className,
-    value,
-    onChange,
 }: NetworkSelectorProps) {
-    const account = useActiveAccount();
-    const { selectedChainId, setSelectedChainId } = useChain();
-    const { data: balances } = useMultiChainBalance(account?.address, {
+    const { evmAddress, solanaAddress } = useSelectedUserAddress();
+    const { selectedNetwork, setSelectedNetwork, chains, getChainByNetworkId } = useChain();
+    const { data: balances } = useMultiChainBalance({
+        evmAddress,
+        solanaAddress,
+    }, {
         enabled: showBalance,
         deferUntilIdle: true,
     });
 
-    // Use controlled value if provided, otherwise use context
-    const currentChainId = value ?? selectedChainId;
-    const handleChange = (chainIdStr: string) => {
-        const chainId = parseInt(chainIdStr);
-        if (onChange) {
-            onChange(chainId);
-        } else {
-            setSelectedChainId(chainId);
-        }
-    };
+    const handleChange = (network: string) => setSelectedNetwork(network as NetworkId);
 
-    const currentChain = CHAIN_CONFIG[currentChainId];
-    const colorClass = currentChain?.color === "red"
+    const currentChain = getChainByNetworkId(selectedNetwork);
+    const colorClass = currentChain?.isTestnet
         ? "border-red-500/50 text-red-400"
         : "border-blue-500/50 text-blue-400";
 
     if (compact) {
         return (
-            <Select value={currentChainId.toString()} onValueChange={handleChange}>
+            <Select value={selectedNetwork} onValueChange={handleChange}>
                 <SelectTrigger
                     className={cn(
                         "cm-hud-button font-mono text-xs",
@@ -80,27 +57,26 @@ export function NetworkSelector({
                     <div className="flex min-w-0 items-center gap-2 truncate">
                         <span
                             className="cm-hud-status"
-                            data-tone={currentChain?.color === "red" ? "red" : "blue"}
+                            data-tone={currentChain?.isTestnet ? "red" : "blue"}
                             aria-hidden="true"
                         />
                         <span className="cm-hud-value">{currentChain?.name || "Select"}</span>
                     </div>
                 </SelectTrigger>
                 <SelectContent className="cm-hud-menu">
-                    {SUPPORTED_CHAINS.map(({ id }) => {
-                        const config = CHAIN_CONFIG[id];
-                        const balance = balances?.find(b => b.chainId === id);
+                    {chains.map((network) => {
+                        const balance = balances?.find(b => b.network === network.network);
                         return (
-                            <SelectItem key={id} value={id.toString()} className="font-mono text-xs">
+                            <SelectItem key={network.network} value={network.network} className="font-mono text-xs">
                                 <div className="flex items-center justify-between gap-3 w-full">
                                     <div className="flex items-center gap-2">
                                         <span
                                             className={cn(
                                                 "w-2 h-2 rounded-full",
-                                                config?.color === "red" ? "bg-red-400" : "bg-blue-400"
+                                                network.isTestnet ? "bg-red-400" : "bg-blue-400"
                                             )}
                                         />
-                                        <span>{config?.name}</span>
+                                        <span>{network.name}</span>
                                     </div>
                                     {showBalance && balance && (
                                         <span className="text-muted-foreground">${balance.formatted}</span>
@@ -114,9 +90,8 @@ export function NetworkSelector({
         );
     }
 
-    // Full-size version for forms
     return (
-        <Select value={currentChainId.toString()} onValueChange={handleChange}>
+        <Select value={selectedNetwork} onValueChange={handleChange}>
             <SelectTrigger
                 className={cn(
                     "w-full border bg-background/50 font-mono text-sm",
@@ -128,27 +103,26 @@ export function NetworkSelector({
                     <span
                         className={cn(
                             "w-2.5 h-2.5 rounded-full animate-pulse",
-                            currentChain?.color === "red" ? "bg-red-400" : "bg-blue-400"
+                            currentChain?.isTestnet ? "bg-red-400" : "bg-blue-400"
                         )}
                     />
                     <SelectValue placeholder="Select network" />
                 </div>
             </SelectTrigger>
             <SelectContent>
-                {SUPPORTED_CHAINS.map(({ id }) => {
-                    const config = CHAIN_CONFIG[id];
-                    const balance = balances?.find(b => b.chainId === id);
+                {chains.map((network) => {
+                    const balance = balances?.find(b => b.network === network.network);
                     return (
-                        <SelectItem key={id} value={id.toString()} className="font-mono">
+                        <SelectItem key={network.network} value={network.network} className="font-mono">
                             <div className="flex items-center justify-between gap-4 w-full min-w-[200px]">
                                 <div className="flex items-center gap-2">
                                     <span
                                         className={cn(
                                             "w-2.5 h-2.5 rounded-full",
-                                            config?.color === "red" ? "bg-red-400" : "bg-blue-400"
+                                            network.isTestnet ? "bg-red-400" : "bg-blue-400"
                                         )}
                                     />
-                                    <span>{config?.name}</span>
+                                    <span>{network.name}</span>
                                 </div>
                                 {showBalance && balance && (
                                     <span className="text-muted-foreground text-xs">
@@ -164,12 +138,10 @@ export function NetworkSelector({
     );
 }
 
-/**
- * Simple network indicator badge (read-only display)
- */
-export function NetworkBadge({ chainId, className }: { chainId: number; className?: string }) {
-    const config = CHAIN_CONFIG[chainId];
-    const colorClass = config?.color === "red"
+export function NetworkBadge({ network, className }: { network: NetworkId; className?: string }) {
+    const { getChainByNetworkId } = useChain();
+    const config = getChainByNetworkId(network);
+    const colorClass = config?.isTestnet
         ? "border-red-500/30 text-red-400 bg-red-500/10"
         : "border-blue-500/30 text-blue-400 bg-blue-500/10";
 
@@ -184,10 +156,10 @@ export function NetworkBadge({ chainId, className }: { chainId: number; classNam
             <span
                 className={cn(
                     "w-1.5 h-1.5 rounded-full",
-                    config?.color === "red" ? "bg-red-400" : "bg-blue-400"
+                    config?.isTestnet ? "bg-red-400" : "bg-blue-400"
                 )}
             />
-            <span>{config?.name || `Chain ${chainId}`}</span>
+            <span>{config?.name || network}</span>
         </div>
     );
 }

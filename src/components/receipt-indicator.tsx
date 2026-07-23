@@ -9,7 +9,8 @@ import { useEffect, useState } from "react";
 import { Receipt as ReceiptIcon } from "lucide-react";
 import { sdk } from "@/lib/sdk";
 import { useSession } from "@/hooks/use-session";
-import type { Receipt, ReceiptBill, ReceiptCumulative, ReceiptListResponse } from "@compose-market/sdk";
+import type { NetworkId } from "@compose-market/sdk/chains";
+import type { Receipt, Bill, CumulativeBill, ListResponse } from "@compose-market/sdk";
 
 function formatUsd(value: number): string {
     if (value >= 1) return `$${value.toFixed(2)}`;
@@ -43,23 +44,23 @@ function receiptTotal(receipt: Receipt | null): string | null {
 }
 
 function receiptTx(receipt: Receipt | null): string | undefined {
-    return receipt?.bills?.find((bill: ReceiptBill) => bill.txId)?.txId;
+    return receipt?.bills?.find((bill: Bill) => bill.txId)?.txId;
 }
 
-async function listReceipts(chainId: number, signal: AbortSignal): Promise<ReceiptListResponse> {
-    return await sdk.receipts.list({ chainId, limit: 1, signal });
+async function listReceipts(network: NetworkId, signal: AbortSignal): Promise<ListResponse> {
+    return await sdk.receipts.list({ network, limit: 1, signal });
 }
 
 export function CostReceiptIndicator({ className }: { className?: string }) {
-    const { session, composeKeyToken } = useSession();
+    const { session, keyToken } = useSession();
     const [receipt, setReceipt] = useState<Receipt | null>(null);
-    const [cumulative, setCumulative] = useState<ReceiptCumulative | null>(null);
+    const [cumulative, setCumulative] = useState<CumulativeBill | null>(null);
 
     useEffect(() => {
-        if (!composeKeyToken || !session.chainId) return;
+        if (!keyToken || !session.network) return;
 
         const controller = new AbortController();
-        void listReceipts(session.chainId, controller.signal)
+        void listReceipts(session.network, controller.signal)
             .then((history) => {
                 if (controller.signal.aborted) return;
                 setCumulative(history.cumulative);
@@ -72,7 +73,7 @@ export function CostReceiptIndicator({ className }: { className?: string }) {
             });
 
         return () => controller.abort();
-    }, [composeKeyToken, session.chainId]);
+    }, [keyToken, session.network]);
 
     useEffect(() => {
         return sdk.events.on("receipt", (event) => {
@@ -91,7 +92,7 @@ export function CostReceiptIndicator({ className }: { className?: string }) {
     const lastTotal = receiptTotal(receipt);
     const txHash = shortTx(receiptTx(receipt));
 
-    if (!composeKeyToken) return null;
+    if (!keyToken) return null;
 
     return (
         <div className={className}>

@@ -14,7 +14,7 @@ import { AppShell } from "@compose-market/theme/app";
 import { WalletConnector, useWalletAccount } from "@/components/connector";
 import { SessionIndicator } from "@/components/session";
 import { DispenserButton } from "@/components/dispenser";
-import { NetworkSelector } from "@/components/ui/network-selector";
+import { NetworkSelector } from "@/components/network-selector";
 import { CostReceiptIndicator } from "@/components/receipt-indicator";
 
 interface LayoutProps {

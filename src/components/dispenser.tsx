@@ -22,6 +22,7 @@ import {
     getExplorerTxUrl,
     getChainColor,
 } from "@/hooks/use-dispenser";
+import type { NetworkId } from "@compose-market/sdk/chains";
 import { Button } from "@/components/ui/button";
 import {
     Card,
@@ -54,34 +55,34 @@ export function DispenserCard() {
     const { data: checkResult, isLoading: checkLoading } = useDispenserCheck(address);
     const claimMutation = useDispenserClaim();
 
-    const [selectedChain, setSelectedChain] = useState<number | null>(null);
-    const [lastClaimedChainId, setLastClaimedChainId] = useState<number | null>(null);
+    const [selectedChain, setSelectedChain] = useState<NetworkId | null>(null);
+    const [lastClaimedNetwork, setLastClaimedNetwork] = useState<NetworkId | null>(null);
 
-    const handleClaim = async (chainId: number) => {
+    const handleClaim = async (network: NetworkId) => {
         if (!address) {
             toast.error("Please connect first");
             return;
         }
 
-        setSelectedChain(chainId);
+        setSelectedChain(network);
 
         try {
-            const result = await claimMutation.mutateAsync({ address, chainId });
+            const result = await claimMutation.mutateAsync({ address, network });
 
             if (result.success) {
-                setLastClaimedChainId(chainId);
+                setLastClaimedNetwork(network);
                 toast.success("Successfully claimed 1 USDC!", {
                     description: `Transaction: ${result.txHash?.slice(0, 10)}...${result.txHash?.slice(-8)}`,
                     action: result.txHash
                         ? {
                             label: "View",
-                            onClick: () => window.open(getExplorerTxUrl(result.txHash!, chainId), "_blank"),
+                            onClick: () => window.open(getExplorerTxUrl(result.txHash!, network), "_blank"),
                         }
                         : undefined,
                 });
             } else if (result.alreadyClaimed) {
                 toast.error("Already claimed", {
-                    description: `You already claimed on ${result.globalClaimStatus?.claimedOnChainName || "another chain"}`,
+                    description: `You already claimed on ${result.globalClaimStatus?.claimedOnNetworkName || "another chain"}`,
                 });
             } else {
                 toast.error("Failed to claim", {
@@ -174,7 +175,7 @@ export function DispenserCard() {
                                 <p className="text-sm text-muted-foreground mt-1">
                                     You claimed 1 USDC on{" "}
                                     <span className="text-foreground font-medium">
-                                        {checkResult?.claimedOnChainName || `chain ${checkResult?.claimedOnChain}`}
+                                        {checkResult?.claimedOnNetworkName || `chain ${checkResult?.claimedOnNetwork}`}
                                     </span>
                                 </p>
                                 {checkResult?.claimedAt && (
@@ -193,18 +194,18 @@ export function DispenserCard() {
                         <div className="space-y-2">
                             {sortedDispensers.map((dispenser) => {
                                 const isAvailable = dispenser.remainingClaims > 0 && !dispenser.isPaused && dispenser.isConfigured;
-                                const isClaiming = selectedChain === dispenser.chainId;
-                                const chainColor = getChainColor(dispenser.chainId);
+                                const isClaiming = selectedChain === dispenser.network;
+                                const chainColor = getChainColor(dispenser.network);
 
                                 return (
                                     <div
-                                        key={dispenser.chainId}
+                                        key={dispenser.network}
                                         className="flex items-center justify-between p-3 bg-sidebar-accent/50 rounded-sm border border-sidebar-border hover:border-cyan-500/30 transition-colors"
                                     >
                                         <div className="flex-1">
                                             <div className="flex items-center gap-2">
                                                 <span className={`font-medium ${chainColor}`}>
-                                                    {dispenser.chainName}
+                                                    {dispenser.networkName}
                                                 </span>
                                                 {dispenser.isPaused && (
                                                     <Badge variant="outline" className="text-xs text-yellow-500 border-yellow-500/30">
@@ -230,7 +231,7 @@ export function DispenserCard() {
 
                                         <Button
                                             size="sm"
-                                            onClick={() => handleClaim(dispenser.chainId)}
+                                            onClick={() => handleClaim(dispenser.network)}
                                             disabled={!isAvailable || claimMutation.isPending || selectedChain !== null}
                                             className="min-w-[100px] bg-cyan-500 text-black hover:bg-cyan-400 disabled:opacity-50"
                                         >
@@ -261,7 +262,7 @@ export function DispenserCard() {
                         <a
                             href={getExplorerTxUrl(
                                 claimMutation.data.txHash,
-                                lastClaimedChainId ?? sortedDispensers[0]?.chainId ?? 43113,
+                                lastClaimedNetwork ?? sortedDispensers[0]?.network ?? "eip155:43113",
                             )}
                             target="_blank"
                             rel="noopener noreferrer"
@@ -297,7 +298,7 @@ export function DispenserButton() {
     const { data: dispenserStatus } = useDispenserStatus();
 
     const [isOpen, setIsOpen] = useState(false);
-    const [selectedChain, setSelectedChain] = useState<number | null>(null);
+    const [selectedChain, setSelectedChain] = useState<NetworkId | null>(null);
     const dropdownRef = useRef<HTMLDivElement>(null);
 
     // Close on click outside
@@ -317,15 +318,15 @@ export function DispenserButton() {
         };
     }, [isOpen]);
 
-    const handleClaim = async (chainId: number) => {
+    const handleClaim = async (network: NetworkId) => {
         if (!address) {
             toast.error("Please connect your wallet first");
             return;
         }
 
-        setSelectedChain(chainId);
+        setSelectedChain(network);
         try {
-            const result = await claimMutation.mutateAsync({ address, chainId });
+            const result = await claimMutation.mutateAsync({ address, network });
             if (result.success) {
                 toast.success("Claimed 1 USDC!");
                 setIsOpen(false);
@@ -400,7 +401,7 @@ export function DispenserButton() {
                         ) : hasClaimed ? (
                             <div className="p-3 text-center text-sm text-muted-foreground">
                                 <CheckCircle2 className="w-5 h-5 mx-auto mb-2 text-cyan-400" />
-                                Already claimed on {checkResult?.claimedOnChainName}
+                                Already claimed on {checkResult?.claimedOnNetworkName}
                             </div>
                         ) : needsFunding ? (
                             <div className="p-3 text-center text-sm">
@@ -417,19 +418,19 @@ export function DispenserButton() {
                         ) : (
                             availableDispensers.map((dispenser) => (
                                 <Button
-                                    key={dispenser.chainId}
+                                    key={dispenser.network}
                                     variant="ghost"
                                     size="sm"
-                                    onClick={() => handleClaim(dispenser.chainId)}
+                                    onClick={() => handleClaim(dispenser.network)}
                                     disabled={claimMutation.isPending || selectedChain !== null}
                                     className="w-full justify-start gap-2 hover:bg-cyan-500/10"
                                 >
-                                    {selectedChain === dispenser.chainId ? (
+                                    {selectedChain === dispenser.network ? (
                                         <Loader2 className="w-4 h-4 animate-spin" />
                                     ) : (
                                         <Droplets className="w-4 h-4 text-cyan-400" />
                                     )}
-                                    <span className="flex-1 text-left">{dispenser.chainName}</span>
+                                    <span className="flex-1 text-left">{dispenser.networkName}</span>
                                     <span className="text-xs text-muted-foreground">
                                         {dispenser.remainingClaims} left
                                     </span>

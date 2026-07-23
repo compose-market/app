@@ -73,8 +73,8 @@ import {
   isPinataConfigured,
   type AgentCard,
 } from "@/lib/pinata";
-import { CHAIN_CONFIG } from "@/lib/chains";
-import { useChain } from "@/contexts/ChainContext";
+import { evmChainId, getChainConfigByNetwork, requireEvmNetwork } from "@/lib/chains";
+import { useChain } from "@/contexts/Network";
 import { AGENT_REGISTRIES, type AgentRegistryId } from "@/lib/agents";
 
 // =============================================================================
@@ -121,7 +121,10 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
   const [, setLocation] = useLocation();
   const account = useActiveAccount();
   const { mutateAsync: sendTransaction } = useSendTransaction();
-  const { paymentChainId } = useChain();
+  const { paymentNetwork } = useChain();
+  const evmPaymentNetwork = requireEvmNetwork(paymentNetwork, "Warping agents");
+  const paymentChainId = evmChainId(evmPaymentNetwork);
+  const paymentNetworkConfig = getChainConfigByNetwork(evmPaymentNetwork);
 
   // Avatar upload state
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
@@ -326,8 +329,6 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
       const walletAddress = deriveAgentWalletAddress(originalAgentHash, timestamp);
 
       // 4. Build and upload Agent Card to IPFS
-      const chainId = paymentChainId;
-
       const agentCard: AgentCard = {
         schemaVersion: "1.0.0",
         name: values.name,
@@ -340,7 +341,7 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
         dnaHash: originalAgentHash, // Use the external hash as DNA
         walletAddress, // Derived from hash + timestamp - source of truth
         walletTimestamp: timestamp, // Backend needs this to derive private key
-        chain: chainId,
+        network: evmPaymentNetwork,
         model: "warped", // Warped agents use their original model
         licensePrice: usdcToWei(parseFloat(values.licensePrice)).toString(),
         creatorFee: 1,
@@ -388,7 +389,7 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
         <div className="space-y-1">
           <p>{values.name} has been warped into the Manowar ecosystem.</p>
           <a
-            href={`${CHAIN_CONFIG[chainId].explorer}/tx/${result.transactionHash}`}
+            href={`${paymentNetworkConfig?.explorer}/tx/${result.transactionHash}`}
             target="_blank"
             rel="noopener noreferrer"
             className="text-cyan-400 hover:underline text-xs flex items-center gap-1"
@@ -828,7 +829,7 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
                         <h4 className="text-sm font-bold text-white mb-2">Warp Network Details</h4>
                         <div className="flex justify-between text-sm">
                           <span className="text-muted-foreground font-mono">Network</span>
-                          <span className="font-mono text-cyan-400">{CHAIN_CONFIG[paymentChainId]?.name}</span>
+                          <span className="font-mono text-cyan-400">{paymentNetworkConfig?.name}</span>
                         </div>
                         <div className="flex justify-between text-sm">
                           <span className="text-muted-foreground font-mono">Contract</span>
@@ -962,7 +963,7 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Network</span>
-                    <span className="font-mono text-cyan-400">{CHAIN_CONFIG[paymentChainId]?.name}</span>
+                    <span className="font-mono text-cyan-400">{paymentNetworkConfig?.name}</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Gas</span>

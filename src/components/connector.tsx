@@ -11,11 +11,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { thirdwebClient, CHAIN_OBJECTS, USDC_ADDRESSES, CHAIN_CONFIG } from "@/lib/chains";
-import { useChain } from "@/contexts/ChainContext";
+import { thirdwebClient, getChainObject, getUsdcAddress, isEvmNetwork, evmChainId } from "@/lib/chains";
+import { useChain } from "@/contexts/Network";
 import { useTotalBalance } from "@/hooks/use-multichain";
+import { useSelectedUserAddress } from "@/hooks/use-address";
 import { cn } from "@/lib/utils";
 import { mpIdentify, mpReset } from "@/lib/mixpanel";
+import type { EvmNetworkId } from "@compose-market/sdk/chains";
 
 const wallets = [
   inAppWallet({
@@ -47,7 +49,14 @@ interface WalletConnectorProps {
 export function WalletConnector({ className, compact = false }: WalletConnectorProps) {
   const account = useActiveAccount();
   const wallet = useActiveWallet();
-  const { paymentChainId } = useChain();
+  const { paymentNetwork, getChainByNetworkId, evmChains, defaultNetwork } = useChain();
+  const {
+    userAddress,
+    evmAddress,
+    solanaAddress,
+    isEvm,
+    isResolving: userAddressResolving,
+  } = useSelectedUserAddress();
   const [copied, setCopied] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -57,49 +66,72 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
     }
   }, [account?.address]);
 
-  const smartAccountChain = useMemo(() => {
-    return CHAIN_OBJECTS[paymentChainId as keyof typeof CHAIN_OBJECTS];
-  }, [paymentChainId]);
+  const fallbackEvmNetwork = useMemo((): EvmNetworkId | undefined => {
+    if (isEvmNetwork(defaultNetwork)) return defaultNetwork;
+    const first = evmChains.find((chain) => isEvmNetwork(chain.network));
+    return first?.network as EvmNetworkId | undefined;
+  }, [defaultNetwork, evmChains]);
 
-  if (!smartAccountChain) {
-    throw new Error(`Unsupported payment chain: ${paymentChainId}`);
-  }
+  const thirdwebNetwork = isEvm ? paymentNetwork : fallbackEvmNetwork;
+  const thirdwebChainIdValue = thirdwebNetwork && isEvmNetwork(thirdwebNetwork)
+    ? evmChainId(thirdwebNetwork)
+    : undefined;
 
-  const dynamicAccountAbstraction = useMemo(() => {
-    return {
-      chain: smartAccountChain,
-      sponsorGas: true,
-    } satisfies SmartWalletOptions;
-  }, [smartAccountChain]);
+  const connectChain = useMemo(() => {
+    if (thirdwebChainIdValue == null) return undefined;
+    return getChainObject(thirdwebChainIdValue);
+  }, [thirdwebChainIdValue]);
+
+  const chainInfo = getChainByNetworkId(paymentNetwork);
+  const chainColor = chainInfo?.isTestnet ? "bg-red-400" : "bg-blue-400";
 
   const selectedPaymentToken = useMemo(() => {
-    const usdcAddress = USDC_ADDRESSES[paymentChainId];
-    if (!usdcAddress) {
-      throw new Error(`USDC is not configured for chain: ${paymentChainId}`);
-    }
-
+    if (thirdwebChainIdValue == null) return undefined;
+    const usdcAddress = getUsdcAddress(thirdwebChainIdValue);
+    if (!usdcAddress) return undefined;
     return {
       address: usdcAddress,
       name: "USD Coin",
       symbol: "USDC",
       icon: "/tokens/usdc.svg",
     };
-  }, [paymentChainId]);
+  }, [thirdwebChainIdValue]);
 
-  const { formatted: totalBalance, isLoading: balanceLoading } = useTotalBalance(account?.address, {
-    enabled: !!account,
+  const { formatted: totalBalance, isLoading: balanceLoading } = useTotalBalance({
+    evmAddress,
+    solanaAddress,
+  }, {
+    enabled: !!evmAddress,
     deferUntilIdle: !menuOpen,
   });
 
-  const chainConfig = CHAIN_CONFIG[paymentChainId];
-  const chainColor = chainConfig?.color === "red" ? "bg-red-400" : "bg-blue-400";
-
   if (!account) {
+    if (!connectChain || !selectedPaymentToken) {
+      return (
+        <button
+          type="button"
+          disabled
+          className={cn(
+            "cm-hud-button cm-hud-wallet opacity-50 cursor-not-allowed",
+            className
+          )}
+        >
+          <Wallet className="cm-hud-icon cm-hud-wallet__icon" size={18} aria-hidden="true" />
+          <span className="cm-hud-value">Loading...</span>
+        </button>
+      );
+    }
+
+    const dynamicAccountAbstraction: SmartWalletOptions = {
+      chain: connectChain,
+      sponsorGas: true,
+    };
+
     return (
       <ConnectButton
         client={thirdwebClient}
         wallets={wallets}
-        chain={smartAccountChain}
+        chain={connectChain}
         accountAbstraction={dynamicAccountAbstraction}
         connectButton={{
           label: "CONNECT",
@@ -129,7 +161,7 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
         }}
         detailsButton={{
           displayBalanceToken: {
-            [paymentChainId]: selectedPaymentToken.address,
+            [thirdwebChainIdValue!]: selectedPaymentToken.address,
           },
           className: `
             !bg-cyan-500/10 !border-cyan-500/30
@@ -142,7 +174,7 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
           },
         }}
         supportedTokens={{
-          [paymentChainId]: [selectedPaymentToken],
+          [thirdwebChainIdValue!]: [selectedPaymentToken],
         }}
         theme={{
           type: "dark",
@@ -183,10 +215,22 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
     );
   }
 
-  const shortAddress = `${account.address.slice(0, 6)}...${account.address.slice(-4)}`;
+  const displayAddress = userAddress;
+  const shortAddress = displayAddress
+    ? `${displayAddress.slice(0, 6)}...${displayAddress.slice(-4)}`
+    : userAddressResolving ? "Resolving..." : "Unavailable";
+  const accountLabel = isEvm ? "Smart account" : "Solana account";
+  const selectedExplorerUrl = (() => {
+    if (!displayAddress) return null;
+    const explorer = chainInfo?.explorer?.replace(/\/$/, "") || "https://explorer.solana.com";
+    if (isEvm) return `${explorer}/address/${displayAddress}`;
+    const cluster = paymentNetwork === "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1" ? "?cluster=devnet" : "";
+    return `${explorer}/address/${displayAddress}${cluster}`;
+  })();
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(account.address);
+    if (!displayAddress) return;
+    await navigator.clipboard.writeText(displayAddress);
     setCopied(true);
     globalThis.setTimeout(() => setCopied(false), 2_000);
   };
@@ -221,7 +265,7 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
           <div className="flex items-center gap-2 mb-2">
             <span className={cn("w-2.5 h-2.5 rounded-full", chainColor)} />
             <span className="font-mono text-sm font-medium">
-              {chainConfig?.name || "Unknown Chain"}
+              {chainInfo?.name || "Unknown Chain"}
             </span>
           </div>
           <div className="flex items-center justify-between">
@@ -236,23 +280,27 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
         </div>
 
         <div className="px-3 py-2 border-b border-cyan-400/15">
+          <p className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">{accountLabel}</p>
           <div className="flex items-center justify-between">
             <span className="font-mono text-xs text-foreground">{shortAddress}</span>
             <div className="flex items-center gap-1">
               <button
                 onClick={handleCopy}
+                disabled={!displayAddress}
                 className="p-1 text-muted-foreground hover:text-cyan-400 transition-colors"
               >
                 {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
               </button>
-              <a
-                href={`${chainConfig?.explorer}/address/${account.address}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="p-1 text-muted-foreground hover:text-cyan-400 transition-colors"
-              >
-                <ExternalLink className="w-3.5 h-3.5" />
-              </a>
+              {selectedExplorerUrl ? (
+                <a
+                  href={selectedExplorerUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-1 text-muted-foreground hover:text-cyan-400 transition-colors"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              ) : null}
             </div>
           </div>
         </div>

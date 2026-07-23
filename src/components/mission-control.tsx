@@ -426,6 +426,23 @@ function parseTasksFromMarkdown(md?: string): Array<{ title: string; status: "pe
     return tasks;
 }
 
+function planTasks(plan: Plan): Array<{ title: string; description?: string; status: "pending" | "running" | "completed" | "failed" }> {
+    if (plan.tasks?.length) {
+        return plan.tasks.map((task) => ({
+            title: task.title,
+            ...(task.error ? { description: task.error } : task.owner ? { description: task.owner } : {}),
+            status: task.status === "done"
+                ? "completed"
+                : task.status === "doing"
+                    ? "running"
+                    : task.status === "failed" || task.status === "blocked"
+                        ? "failed"
+                        : "pending",
+        }));
+    }
+    return parseTasksFromMarkdown(plan.markdown);
+}
+
 // =============================================================================
 // Main Component
 // =============================================================================
@@ -520,7 +537,7 @@ export function MissionControlSidePanel({
 
         const decided = activePlan.decision || activePlan.state === "approved" || activePlan.state === "rejected" || activePlan.state === "changes_requested";
         const canAct = Boolean(onPlanDecision) && !activePlan.pending && !decided;
-        const tasks = parseTasksFromMarkdown(activePlan.markdown);
+        const tasks = planTasks(activePlan);
         const versionMetadata = (
             <>
                 <span>v{activePlan.version}</span>
@@ -578,7 +595,8 @@ export function MissionControlSidePanel({
                             <PlanTask
                                 key={idx}
                                 index={idx}
-                                title={task.title}
+                                 title={task.title}
+                                 description={task.description}
                                 status={task.status}
                             />
                         ))}

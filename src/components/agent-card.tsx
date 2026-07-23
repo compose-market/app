@@ -8,7 +8,6 @@ import {
   type AgentMetric as AgentMetric,
   type AgentTag as AgentTag,
 } from "@compose-market/theme/agents";
-import { chainLogo, chainLogoUrl } from "@compose-market/theme/chain-logos";
 import { Excerpt, Hint, ShellButton } from "@compose-market/theme/shell";
 import { useLocation } from "wouter";
 import { usePostHog } from "@posthog/react";
@@ -22,11 +21,18 @@ import {
 import { CHAIN_CONFIG, getContractAddress } from "@/lib/performance/chains-data";
 import { API_BASE_URL } from "@/lib/sdk";
 
-const LOGO_DEV_KEY = import.meta.env.VITE_PUBLIC_LOGO_DEV_PUBLISHABLE_KEY;
-
-function logoToken(value: string | undefined): value is string {
-  return Boolean(value?.trim() && !/^sk[_-]/i.test(value.trim()));
-}
+const NETWORK_LOGOS: Record<string, string> = {
+  "eip155:43113": "/networks/avalancheFuji.jpeg",
+  "eip155:43114": "/networks/avalanche.jpeg",
+  "eip155:421614": "/networks/arbitrumSepolia.png",
+  "eip155:42161": "/networks/arbitrum.png",
+  "eip155:5042002": "/networks/arcTestnet.jpeg",
+  "eip155:5042": "/networks/arc.jpeg",
+  "eip155:1328": "/networks/seiTestnet.jpeg",
+  "eip155:1329": "/networks/sei.jpeg",
+  "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1": "/networks/solanaDevnet.jpeg",
+  "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp": "/networks/solana.jpeg",
+};
 
 export interface AgentCardProps {
   agent: OnchainAgent;
@@ -71,7 +77,7 @@ function chainLabel(agent: OnchainAgent): string {
   if (chainInfo) {
     return chainInfo.name;
   }
-  return typeof chainId === "number" ? `Chain ${chainId}` : "Unknown Chain";
+  return agent.network ?? agent.metadata?.network ?? "Unknown Chain";
 }
 
 function buildBadges(agent: OnchainAgent, market: boolean): AgentBadge[] {
@@ -83,8 +89,9 @@ function buildBadges(agent: OnchainAgent, market: boolean): AgentBadge[] {
 }
 
 function NetworkMark({ agent }: { agent: OnchainAgent }) {
-  const logo = chainLogo(chain(agent));
-  if (!logo || !logoToken(LOGO_DEV_KEY)) {
+  const network = agent.network ?? agent.metadata?.network;
+  const logo = network ? NETWORK_LOGOS[network] : undefined;
+  if (!logo) {
     return null;
   }
   const label = chainLabel(agent);
@@ -93,11 +100,10 @@ function NetworkMark({ agent }: { agent: OnchainAgent }) {
       <span className="cm-agent-card__network" aria-label={label}>
         <img
           className="cm-agent-card__network-image"
-          src={chainLogoUrl(logo, LOGO_DEV_KEY, { size: 32 })}
+          src={logo}
           alt=""
           loading="lazy"
           decoding="async"
-          referrerPolicy="origin"
         />
       </span>
     </Hint>
@@ -105,8 +111,10 @@ function NetworkMark({ agent }: { agent: OnchainAgent }) {
 }
 
 function chain(agent: OnchainAgent): number | undefined {
-  const value = agent.metadata?.chain;
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  const network = agent.network ?? agent.metadata?.network;
+  if (!network?.startsWith("eip155:")) return undefined;
+  const value = Number.parseInt(network.slice("eip155:".length), 10);
+  return Number.isFinite(value) ? value : undefined;
 }
 
 function conf(chainId: number | undefined): (typeof CHAIN_CONFIG)[number] | undefined {

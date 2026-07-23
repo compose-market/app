@@ -37,8 +37,7 @@ import {
     ChevronRight,
     ArrowLeft,
 } from "lucide-react";
-import { CHAIN_CONFIG } from "@/lib/performance/chains-data";
-import { getContractAddress } from "@/lib/chains";
+import { evmChainId, getChainByNetwork, getContractAddress, isEvmNetwork } from "@/lib/chains";
 
 export interface WorkflowCardProps {
     workflow: OnchainWorkflow;
@@ -65,10 +64,15 @@ export function WorkflowCard({ workflow, onCopyEndpoint }: WorkflowCardProps) {
     const agents = workflow.metadata?.agents || [];
     const selectedAgent = selectedAgentIndex !== null ? agents[selectedAgentIndex] : null;
 
-    // Workflow's minting chain
-    const workflowChainId = workflow.chainId!;
-    const chainInfo = CHAIN_CONFIG[workflowChainId];
-    const chainAbbr = chainInfo.name.split(" ")[0].toUpperCase().slice(0, 4);
+    const workflowNetwork = workflow.network ?? workflow.metadata?.network;
+    const chainInfo = workflowNetwork ? getChainByNetwork(workflowNetwork) : undefined;
+    const chainAbbr = (chainInfo?.name || workflowNetwork || "NET").split(" ")[0].toUpperCase().slice(0, 4);
+    const workflowExplorerUrl = workflowNetwork && chainInfo?.explorer && isEvmNetwork(workflowNetwork)
+        ? `${chainInfo.explorer}/token/${getContractAddress("Workflow", evmChainId(workflowNetwork))}?a=${workflow.id}`
+        : null;
+    const creatorExplorerUrl = workflowNetwork && chainInfo?.explorer && isEvmNetwork(workflowNetwork)
+        ? `${chainInfo.explorer}/address/${workflow.creator}`
+        : null;
 
     // API endpoint URL - direct path without double /api/
     const apiEndpoint = workflow.walletAddress
@@ -243,7 +247,8 @@ export function WorkflowCard({ workflow, onCopyEndpoint }: WorkflowCardProps) {
                 titleIcon={<Layers />}
                 headerAction={(
                     <button
-                        onClick={() => window.open(`${CHAIN_CONFIG[workflowChainId].explorer}/token/${getContractAddress("Workflow", workflowChainId)}?a=${workflow.id}`, "_blank")}
+                        onClick={() => workflowExplorerUrl && window.open(workflowExplorerUrl, "_blank")}
+                        disabled={!workflowExplorerUrl}
                         className="text-muted-foreground hover:text-fuchsia-400 transition-colors shrink-0"
                         aria-label="View on Explorer"
                     >
@@ -279,7 +284,7 @@ export function WorkflowCard({ workflow, onCopyEndpoint }: WorkflowCardProps) {
                     { value: `$${formatPrice(workflow.totalPrice)}`, icon: <DollarSign />, tone: "fuchsia", tooltip: "Total Workflow Price" },
                     { value: unitsDisplay, icon: <Package />, tone: "cyan", tooltip: "Available Units" },
                     { value: String(agents.length), icon: <Bot />, tone: "fuchsia", tooltip: "Agents in Workflow" },
-                    { value: chainAbbr, icon: <Globe />, tone: "cyan", tooltip: chainInfo.name },
+                    { value: chainAbbr, icon: <Globe />, tone: "cyan", tooltip: chainInfo?.name ?? workflowNetwork ?? "Network" },
                 ]}
                 coordinatorIcon={<Cpu />}
                 coordinatorValue={workflow.hasCoordinator ? workflow.coordinatorModel : undefined}
@@ -333,14 +338,20 @@ export function WorkflowCard({ workflow, onCopyEndpoint }: WorkflowCardProps) {
                         </div>
                         <div className="cm-workflow-card__creator">
                             <span>Creator:</span>
-                            <a
-                                href={`${CHAIN_CONFIG[workflowChainId].explorer}/address/${workflow.creator}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="cm-workflow-card__creator-value"
-                            >
-                                {`${workflow.creator.slice(0, 6)}...${workflow.creator.slice(-4)}`}
-                            </a>
+                            {creatorExplorerUrl ? (
+                                <a
+                                    href={creatorExplorerUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="cm-workflow-card__creator-value"
+                                >
+                                    {`${workflow.creator.slice(0, 6)}...${workflow.creator.slice(-4)}`}
+                                </a>
+                            ) : (
+                                <span className="cm-workflow-card__creator-value">
+                                    {`${workflow.creator.slice(0, 6)}...${workflow.creator.slice(-4)}`}
+                                </span>
+                            )}
                         </div>
                     </div>
                 ) : undefined}
