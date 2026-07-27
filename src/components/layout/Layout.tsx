@@ -2,8 +2,10 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 import {
   Activity,
+  BarChart3,
   Bell,
   Box,
+  Key,
   Layers,
   MoreHorizontal,
   PlusCircle,
@@ -22,11 +24,13 @@ interface LayoutProps {
 }
 
 const links = [
-  { href: "/market", icon: Box, label: "Market" },
-  { href: "/compose", icon: Layers, label: "Compose" },
+  // { href: "/market", icon: Box, label: "Market" },
+  // { href: "/compose", icon: Layers, label: "Compose" },
+  { href: "/dashboard", icon: BarChart3, label: "Dashboard" },
+  { href: "/keys", icon: Key, label: "API Keys" },
   { href: "/create-agent", icon: PlusCircle, label: "Create Agent" },
   { href: "/playground", icon: Sparkles, label: "Playground" },
-  { href: "/my-assets", icon: Activity, label: "My Assets" },
+  // { href: "/my-assets", icon: Activity, label: "My Assets" },
 ];
 
 export function Layout({ children }: LayoutProps) {
