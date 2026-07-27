@@ -21,7 +21,7 @@ test("agent page exposes icon-only channel binding through theme primitives", ()
   const source = read("src/pages/agent.tsx");
 
   assert.match(source, /<Hint label="Backpack">/);
-  assert.match(source, /<ShellButton[\s\S]{0,220}iconOnly[\s\S]{0,220}aria-label="Backpack"/);
+  assert.match(source, /<Button[\s\S]{0,220}iconOnly[\s\S]{0,220}aria-label="Backpack"/);
   assert.match(source, /<BackpackDialog/);
   assert.doesNotMatch(source, /fetch\([^)]*\/channels/u);
 });
