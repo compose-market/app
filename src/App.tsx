@@ -10,18 +10,20 @@ import { isStandaloneAppRoute } from "@/lib/utils";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/toaster";
 
-const Market = lazy(() => import("@/pages/market"));
+// const Market = lazy(() => import("@/pages/market"));
 const CreateAgent = lazy(() => import("@/pages/create-agent"));
-const Compose = lazy(() => import("@/pages/compose"));
-const Models = lazy(() => import("@/pages/models"));
-const Agents = lazy(() => import("@/pages/agents"));
-const AgentDetail = lazy(() => import("@/pages/agent"));
-const Registry = lazy(() => import("@/pages/registry"));
-const MyAssets = lazy(() => import("@/pages/my-assets"));
+const Dashboard = lazy(() => import("@/pages/dashboard"));
+const Keys = lazy(() => import("@/pages/keys"));
+// const Compose = lazy(() => import("@/pages/compose"));
+// const Models = lazy(() => import("@/pages/models"));
+// const Agents = lazy(() => import("@/pages/agents"));
+// const AgentDetail = lazy(() => import("@/pages/agent"));
+// const Registry = lazy(() => import("@/pages/registry"));
+// const MyAssets = lazy(() => import("@/pages/my-assets"));
 const Playground = lazy(() => import("@/pages/playground"));
-const Workflow = lazy(() => import("@/pages/workflow"));
-const ConnectLocal = lazy(() => import("@/pages/connect-local"));
-const InstallLocal = lazy(() => import("@/pages/install-local"));
+// const Workflow = lazy(() => import("@/pages/workflow"));
+// const ConnectLocal = lazy(() => import("@/pages/connect-local"));
+// const InstallLocal = lazy(() => import("@/pages/install-local"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 
 function PageFallback() {
@@ -40,35 +42,38 @@ function PageFallback() {
 function AppRouter() {
   const [location] = useLocation();
 
-  if (isStandaloneAppRoute(location)) {
-    return (
-      <Suspense fallback={<PageFallback />}>
-        <Switch>
-          <Route path="/connect-local/:rest*" component={ConnectLocal} />
-          <Route path="/connect-local" component={ConnectLocal} />
-          <Route path="/install-local" component={InstallLocal} />
-        </Switch>
-      </Suspense>
-    );
-  }
+  // if (isStandaloneAppRoute(location)) {
+  // return (
+  // <Suspense fallback={<PageFallback />}>
+  // <Switch>
+  {/* <Route path="/connect-local/:rest*" component={ConnectLocal} /> */ }
+  {/* <Route path="/connect-local" component={ConnectLocal} /> */ }
+  {/* <Route path="/install-local" component={InstallLocal} /> */ }
+  // </Switch>
+  // </Suspense>
+  // );
+  // }
 
   return (
     <Layout>
       <Suspense fallback={<PageFallback />}>
         <Switch>
           <Route path="/">
-            <Redirect to="/market" replace />
+            <Redirect to="/dashboard" replace />
           </Route>
-          <Route path="/market" component={Market} />
+          <Route path="/dashboard" component={Dashboard} />
+          <Route path="/keys" component={Keys} />
           <Route path="/create-agent" component={CreateAgent} />
-          <Route path="/compose" component={Compose} />
-          <Route path="/models" component={Models} />
-          <Route path="/agents" component={Agents} />
-          <Route path="/agent/:id" component={AgentDetail} />
-          <Route path="/registry" component={Registry} />
-          <Route path="/my-assets" component={MyAssets} />
           <Route path="/playground" component={Playground} />
-          <Route path="/workflow/:id" component={Workflow} />
+          {/* <Route path="/market" component={Market} /> */}
+          {/* <Route path="/compose" component={Compose} /> */}
+          {/* <Route path="/models" component={Models} /> */}
+          {/* <Route path="/agents" component={Agents} /> */}
+          {/* <Route path="/agent/:id" component={AgentDetail} /> */}
+          {/* <Route path="/registry" component={Registry} /> */}
+          {/* <Route path="/my-assets" component={MyAssets} /> */}
+          <Route path="/playground" component={Playground} />
+          {/* <Route path="/workflow/:id" component={Workflow} /> */}
           <Route component={NotFound} />
         </Switch>
       </Suspense>
