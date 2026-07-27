@@ -1,6 +1,6 @@
 /**
  * Manowar Protocol Contract Configuration
- * Multi-chain support with Avalanche Fuji as default
+ * Multi-chain support 
  * 
  * Contract addresses are defined in chains.ts (single source of truth)
  */

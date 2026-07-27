@@ -51,12 +51,8 @@ import type { NetworkId } from "@compose-market/sdk/chains";
  * Uses the real RPC URL from the chains config (no proxy).
  */
 export function createSolanaRpcFromNetwork(network: NetworkId, rpcUrl: string) {
-    if (network === "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1") {
-        return createSolanaRpc(solanaDevnet(rpcUrl));
-    }
-    if (network === "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp") {
-        return createSolanaRpc(solanaMainnet(rpcUrl));
-    }
+    if (network === "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1") { return createSolanaRpc(solanaDevnet(rpcUrl)); }
+    // if (network === "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp") { return createSolanaRpc(solanaMainnet(rpcUrl)); }
     throw new Error(`Unsupported Solana network: ${network}`);
 }
 
