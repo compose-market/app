@@ -82,6 +82,7 @@ export interface UseStream {
     runWorkflow: (args: WorkflowStreamArgs) => Promise<void>;
     runResponses: (args: ResponsesStreamArgs) => Promise<void>;
     appendResponses: (args: ResponsesAppendArgs) => Promise<void>;
+    cancelResponses: () => void;
 }
 
 interface LiveResponse {
@@ -182,6 +183,13 @@ export function useStream(
     const blockSeqRef = useRef(0);
     const liveRef = useRef<Map<string, LiveResponse>>(new Map());
     const openingRef = useRef<Map<string, OpeningResponse>>(new Map());
+    const responseControllerRef = useRef<AbortController | null>(null);
+
+    const cancelResponses = useCallback((): void => {
+        const controller = responseControllerRef.current;
+        responseControllerRef.current = null;
+        if (controller) abort(controller);
+    }, []);
 
     const closeRealtime = useCallback((cancel: boolean): void => {
         const live = Array.from(liveRef.current.values());
@@ -224,8 +232,9 @@ export function useStream(
         return () => {
             window.removeEventListener("beforeunload", unload);
             closeRealtime(true);
+            cancelResponses();
         };
-    }, [closeRealtime]);
+    }, [cancelResponses, closeRealtime]);
 
     const runAgent = useCallback(async (args: AgentStreamArgs): Promise<void> => {
         const c = chatRef.current;
@@ -399,6 +408,7 @@ export function useStream(
     }, []);
 
     const runResponses = useCallback(async (args: ResponsesStreamArgs): Promise<void> => {
+        cancelResponses();
         const model = modelId(args.params);
         const active = model ? liveRef.current.get(model) : undefined;
         if (model && active) {
@@ -450,8 +460,11 @@ export function useStream(
         c.streamedTextRef.current = "";
         textBlockRef.current = null;
 
+        const controller = new AbortController();
+        const cleanup = linked(args.signal, controller);
+        responseControllerRef.current = controller;
         const stream = sdk.inference.responses.stream(args.params, {
-            signal: args.signal,
+            signal: controller.signal,
             ...(args.options ?? {}),
         });
 
@@ -466,8 +479,11 @@ export function useStream(
             if (result.receipt) callbacksRef.current.onReceipt?.(result.receipt);
         } catch (err) {
             fail(err, chatRef.current, args.assistantId, callbacksRef);
+        } finally {
+            cleanup();
+            if (responseControllerRef.current === controller) responseControllerRef.current = null;
         }
-    }, [append, runRealtimeResponses]);
+    }, [append, cancelResponses, runRealtimeResponses]);
 
     const appendResponses = useCallback(async (args: ResponsesAppendArgs): Promise<void> => {
         await sdk.inference.responses.append(args.responseId, {
@@ -479,7 +495,7 @@ export function useStream(
         });
     }, []);
 
-    return useMemo(() => ({ runAgent, runWorkflow, runResponses, appendResponses }), [runAgent, runWorkflow, runResponses, appendResponses]);
+    return useMemo(() => ({ runAgent, runWorkflow, runResponses, appendResponses, cancelResponses }), [runAgent, runWorkflow, runResponses, appendResponses, cancelResponses]);
 }
 
 async function consume(
@@ -542,6 +558,21 @@ function dispatchModel(
             chat.streamedTextRef.current += append;
             chat.scheduleStreamUpdate(chat.streamedTextRef.current);
         }
+        chat.setActivityPhase("thinking", "Finalizing payment");
+        return;
+    }
+
+    const rawType = event.raw && typeof event.raw === "object" && "type" in event.raw
+        ? (event.raw as { type?: unknown }).type
+        : undefined;
+    if ((rawType === "response.reasoning_summary_text.done" || rawType === "response.reasoning_text.done") && typeof (event.raw as { text?: unknown }).text === "string") {
+        const blockId = `reasoning:${event.responseId ?? "main"}`;
+        chat.upsertAssistantBlock(assistantId, { id: blockId, type: "reasoning", text: (event.raw as { text: string }).text });
+        return;
+    }
+
+    if (event.type === "model.done") {
+        chat.setActivityPhase("thinking", "Finalizing payment");
         return;
     }
 
@@ -569,7 +600,13 @@ function dispatchModel(
                 error: item.error,
             });
         }
-        chat.setActivityPhase("streaming", `Generated ${item.artifactType}`);
+        if (item.status === "failed") {
+            const message = item.error || `${item.artifactType} generation failed`;
+            chat.setActivityPhase("error", message);
+            cbRef.current.onError?.({ message });
+        } else {
+            chat.setActivityPhase("streaming", item.partial === true || item.status === "running" ? `Generating ${item.artifactType}` : `Generated ${item.artifactType}`);
+        }
         return;
     }
 
@@ -669,7 +706,7 @@ function finish(
     chat.flushStreamContent(assistantId, finalText);
     callbacks(cbRef).onFinal?.({ text: finalText, requestId, structuredOutput });
     if (chat.currentAssistantIdRef.current === assistantId) {
-        chat.clearActivityState();
+        chat.clearActivityStateUnlessError();
     }
 }
 
