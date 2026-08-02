@@ -1,22 +1,25 @@
 /**
- * useKeys — React Query hook for listing, creating, and revoking Keys.
- *
- * Uses the unsigned x-session-user-address header for list/create (no session needed).
- * Revocation requires a compose key JWT — uses the SDK's current token.
+ * Owner-wide Compose Key history plus the existing network-scoped mutations.
+ * Listing is token-free and pair-aware; creation and revocation retain their
+ * current wallet, network, and authorization behavior.
  */
 
-import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
-import { sdk } from "@/lib/sdk";
-import { useActiveAccount } from "thirdweb/react";
-import { useSession } from "@/hooks/use-session";
-import { SESSION_BUDGET_PRESETS } from "@/lib/chains";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import type { KeyRecord } from "@compose-market/sdk";
-export type { KeyRecord };
 import type { NetworkId } from "@compose-market/sdk/chains";
 
+import { useReconciliation } from "@/hooks/use-reconciliation";
+import { useSession } from "@/hooks/use-session";
+import { useWalletPair } from "@/hooks/use-pair";
+import { SESSION_BUDGET_PRESETS } from "@/lib/chains";
+import { durableQueryMeta, DURABLE_CACHE_MAX_AGE } from "@/lib/queryClient";
+import { sdk } from "@/lib/sdk";
+
+export type { KeyRecord };
+
 const STALE_TIME = 15_000;
-const CACHE_KEY = ["keys"];
+const CACHE_KEY = "keys";
 
 export interface CreateKeyInput {
   name: string;
@@ -49,30 +52,35 @@ function isActiveKey(key: KeyRecord): boolean {
 }
 
 export function useKeys(): UseKeysReturn {
-  const account = useActiveAccount();
   const { ensureKeyToken } = useSession();
-  const queryClient = useQueryClient();
-
+  const { owner, pair, isLoading: pairLoading, error: pairError } = useWalletPair();
   const [createdToken, setCreatedToken] = useState<string | null>(null);
   const [createdKeyId, setCreatedKeyId] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
 
-  const { data, isLoading, isFetching, error } = useQuery<KeyRecord[], Error>({
-    queryKey: [...CACHE_KEY, account?.address],
+  const query = useQuery<KeyRecord[], Error>({
+    queryKey: [CACHE_KEY, owner],
     queryFn: async () => {
-      const keys = await sdk.keys.list();
-      return keys.sort((a, b) => b.createdAt - a.createdAt);
+      if (!owner) throw new Error("An active EVM smart account is required");
+      const keys = await sdk.keys.list({ userAddress: owner });
+      return keys.sort((left, right) => right.createdAt - left.createdAt);
     },
     staleTime: STALE_TIME,
-    gcTime: STALE_TIME * 4,
-    enabled: Boolean(account?.address),
+    gcTime: DURABLE_CACHE_MAX_AGE,
+    enabled: Boolean(owner && pair),
     retry: 1,
+    meta: durableQueryMeta,
+  });
+
+  useReconciliation({
+    owner: pair ? owner : null,
+    subscribe: (options) => sdk.keys.subscribe(options),
+    refetch: query.refetch,
   });
 
   const createMutation = useMutation({
     mutationFn: async (input: CreateKeyInput) => {
       const previousToken = sdk.keys.currentToken();
-
       const created = await sdk.keys.create({
         purpose: input.purpose ?? "api",
         budgetUsd: input.budgetUsd,
@@ -81,21 +89,17 @@ export function useKeys(): UseKeysReturn {
         name: input.name,
       });
 
-      if (previousToken && previousToken !== created.token) {
-        sdk.keys.use(previousToken);
-      }
-
+      if (previousToken && previousToken !== created.token) sdk.keys.use(previousToken);
       return { token: created.token, keyId: created.keyId };
     },
     onSuccess: (result) => {
       setCreatedToken(result.token);
       setCreatedKeyId(result.keyId);
       setCreateError(null);
-      void queryClient.invalidateQueries({ queryKey: CACHE_KEY });
+      void query.refetch();
     },
-    onError: (err: unknown) => {
-      const message = err instanceof Error ? err.message : "Failed to create key";
-      setCreateError(message);
+    onError: (error: unknown) => {
+      setCreateError(error instanceof Error ? error.message : "Failed to create key");
     },
   });
 
@@ -105,44 +109,37 @@ export function useKeys(): UseKeysReturn {
       await sdk.keys.revoke(keyId);
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: CACHE_KEY });
+      void query.refetch();
     },
   });
 
   const forceRefresh = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: CACHE_KEY });
-  }, [queryClient]);
+    await query.refetch();
+  }, [query.refetch]);
 
   const createKey = useCallback(
-    async (input: CreateKeyInput) => {
-      const result = await createMutation.mutateAsync(input);
-      return result;
-    },
+    async (input: CreateKeyInput) => createMutation.mutateAsync(input),
     [createMutation],
   );
-
   const revokeKey = useCallback(
-    async (keyId: string) => {
-      await revokeMutation.mutateAsync(keyId);
-    },
+    async (keyId: string) => revokeMutation.mutateAsync(keyId),
     [revokeMutation],
   );
-
   const clearCreatedToken = useCallback(() => {
     setCreatedToken(null);
     setCreatedKeyId(null);
     setCreateError(null);
   }, []);
 
-  const keys = data ?? [];
+  const keys = query.data ?? [];
   const activeKeys = useMemo(() => keys.filter(isActiveKey), [keys]);
 
   return {
     keys,
     activeKeys,
-    isLoading,
-    isRefetching: isFetching && !isLoading,
-    error: error ?? null,
+    isLoading: Boolean(owner) && (pairLoading || query.isLoading),
+    isRefetching: query.isFetching && !query.isLoading,
+    error: pairError ?? query.error ?? null,
     forceRefresh,
     createKey,
     revokeKey,

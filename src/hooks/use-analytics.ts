@@ -1,21 +1,30 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo } from "react";
-import { useActiveAccount } from "thirdweb/react";
+import { useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type { InferenceAnalytics } from "@compose-market/sdk";
 
-import type { NetworkId } from "@compose-market/sdk/chains";
-
-import { useChain } from "@/contexts/Network";
+import { useReconciliation } from "@/hooks/use-reconciliation";
+import { useWalletPair } from "@/hooks/use-pair";
+import {
+  buildAnalyticsQueryKey,
+  buildRollingAnalyticsFilters,
+  summarize,
+  type Summary,
+} from "@/lib/analytics";
+import { durableQueryMeta, DURABLE_CACHE_MAX_AGE } from "@/lib/queryClient";
 import { sdk } from "@/lib/sdk";
-import { summarize, type Summary } from "@/lib/analytics";
 
 const STALE_TIME = 30_000;
-const CACHE_KEY = "inference-analytics-dashboard";
 
-export interface AnalyticsRange {
-  from: string;
-  to: string;
-  interval: InferenceAnalytics.InferenceAnalyticsInterval;
+type StableFilters = Omit<
+  InferenceAnalytics.InferenceAnalyticsFilters,
+  "from" | "to" | "networks"
+>;
+
+export interface UseAnalyticsInput {
+  rangeId: string;
+  rangeMs: number;
+  networks: readonly string[];
+  filters: StableFilters;
 }
 
 export interface UseAnalyticsReturn {
@@ -26,34 +35,48 @@ export interface UseAnalyticsReturn {
   forceRefresh: () => Promise<void>;
 }
 
-export function useAnalytics(filters: InferenceAnalytics.InferenceAnalyticsFilters): UseAnalyticsReturn {
-  const account = useActiveAccount();
-  const { paymentNetwork } = useChain();
-  const queryClient = useQueryClient();
-  const canonical = useMemo(() => ({ ...filters, network: filters.network ?? paymentNetwork }), [filters, paymentNetwork]);
+export function useAnalytics(input: UseAnalyticsInput): UseAnalyticsReturn {
+  const { owner, pair, isLoading: pairLoading, error: pairError } = useWalletPair();
+  const queryKey = buildAnalyticsQueryKey(owner ?? "", input.rangeId, input.networks, input.filters);
 
-  useEffect(() => {
-    if (account?.address && canonical.network) sdk.wallets.attach({ address: account.address, network: canonical.network as NetworkId });
-  }, [account?.address, canonical.network]);
-
-  const query = useQuery<Summary, Error>({
-    queryKey: [CACHE_KEY, account?.address, canonical],
-    queryFn: async () => summarize(await sdk.analytics.get(canonical)),
+  const query = useQuery<
+    InferenceAnalytics.InferenceAnalyticsResponse,
+    Error,
+    Summary
+  >({
+    queryKey,
+    queryFn: async () => {
+      if (!owner) throw new Error("An active EVM smart account is required");
+      const filters = buildRollingAnalyticsFilters({
+        rangeMs: input.rangeMs,
+        filters: input.filters,
+        networks: input.networks,
+      });
+      return sdk.analytics.get(filters, { userAddress: owner });
+    },
+    select: summarize,
     staleTime: STALE_TIME,
-    gcTime: STALE_TIME * 4,
-    enabled: Boolean(account?.address && canonical.network),
+    gcTime: DURABLE_CACHE_MAX_AGE,
+    enabled: Boolean(owner && pair),
     retry: 1,
+    meta: durableQueryMeta,
+  });
+
+  useReconciliation({
+    owner: pair ? owner : null,
+    subscribe: (options) => sdk.analytics.subscribe(options),
+    refetch: query.refetch,
   });
 
   const forceRefresh = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: [CACHE_KEY] });
-  }, [queryClient]);
+    await query.refetch();
+  }, [query.refetch]);
 
   return {
     summary: query.data ?? null,
-    isLoading: query.isLoading,
+    isLoading: Boolean(owner) && (pairLoading || query.isLoading),
     isRefetching: query.isFetching && !query.isLoading,
-    error: query.error ?? null,
+    error: pairError ?? query.error ?? null,
     forceRefresh,
   };
 }
