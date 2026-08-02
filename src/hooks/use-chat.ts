@@ -293,6 +293,7 @@ export interface UseChatReturn {
     flushStreamContent: (assistantId?: string, content?: string) => void;
     activityState: ChatActivityState;
     clearActivityState: () => void;
+    clearActivityStateUnlessError: () => void;
     setActivityPhase: (phase: ChatActivityPhase, label?: string) => void;
     startToolActivity: (toolName: string, summary?: string, displayName?: string) => void;
     finishToolActivity: (toolName: string, summary?: string, failed?: boolean, displayName?: string) => void;
@@ -664,6 +665,15 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
 
     const clearActivityState = useCallback(() => {
         setActivityState({
+            phase: "idle",
+            label: "",
+            tools: [],
+            updatedAt: Date.now(),
+        });
+    }, []);
+
+    const clearActivityStateUnlessError = useCallback(() => {
+        setActivityState((prev) => prev.phase === "error" ? prev : {
             phase: "idle",
             label: "",
             tools: [],
@@ -1111,7 +1121,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         scheduleStreamUpdate,
         flushStreamContent,
         activityState,
-        clearActivityState,
+        clearActivityState, clearActivityStateUnlessError,
         setActivityPhase,
         startToolActivity,
         finishToolActivity,
@@ -1143,7 +1153,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         addUserMessage, createAssistantPlaceholder, updateAssistantMessage,
         applyAssistantActivityEvent, applyAssistantModelEvent, upsertAssistantBlock, appendAssistantBlockText, failAssistant, upsertAssistantArtifact,
         clearMessages, scheduleStreamUpdate, flushStreamContent,
-        clearActivityState, setActivityPhase, startToolActivity, finishToolActivity,
+        clearActivityState, clearActivityStateUnlessError, setActivityPhase, startToolActivity, finishToolActivity,
         isNearBottom, handleFileSelect, handleRemoveFile, clearFiles, cleanupFiles,
         setRealtimeSession, closeRealtime, startRecording, stopRecording,
     ]);
