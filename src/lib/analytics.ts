@@ -6,6 +6,7 @@ type Response = InferenceAnalytics.InferenceAnalyticsResponse;
 type Totals = InferenceAnalytics.InferenceAnalyticsTotals;
 
 export interface ModelUsage {
+  subject: string;
   modelId: string;
   family: string;
   totalAmountAtomic: bigint;
@@ -33,7 +34,7 @@ export interface TypeEntry {
 export interface FeedItem {
   id: string;
   requestId: string;
-  chainId: number;
+  network: string;
   model: string;
   type: string;
   pricedUnits: InferenceAnalytics.InferencePricedUnit[];
@@ -117,6 +118,7 @@ export function summarize(response: Response): Summary {
     modelUsage: response.breakdowns.models.map((entry) => {
       if (!entry.label || !entry.types?.length) throw new Error(`Missing model analytics dimensions: ${entry.key}`);
       return {
+        subject: entry.key,
         modelId: entry.key,
         family: entry.label,
         totalAmountAtomic: atomic(entry.totals.billing.finalAmountAtomic),
@@ -143,7 +145,7 @@ export function summarize(response: Response): Summary {
       return {
         id: settlement.id,
         requestId: settlement.requestId,
-        chainId: settlement.chainId,
+        network: settlement.network,
         model: settlement.model,
         type: settlement.types.join(", "),
         pricedUnits: settlement.pricedUnits,
@@ -156,5 +158,47 @@ export function summarize(response: Response): Summary {
       };
     }),
     chartMetrics: metrics(response),
+  };
+}
+
+export interface RollingAnalyticsInput {
+  rangeMs: number;
+  filters: Omit<InferenceAnalytics.InferenceAnalyticsFilters, "from" | "to" | "networks">;
+  networks: readonly string[];
+}
+
+function canonicalOwner(owner: string): string {
+  return owner.startsWith("0x") ? owner.toLowerCase() : owner;
+}
+
+function canonicalNetworks(networks: readonly string[]): string[] {
+  return [...new Set(networks)].sort();
+}
+
+export function buildAnalyticsQueryKey(
+  owner: string,
+  rangeId: string,
+  networks: readonly string[],
+  filters: Omit<InferenceAnalytics.InferenceAnalyticsFilters, "from" | "to" | "networks">,
+) {
+  return [
+    "inference-analytics-dashboard",
+    canonicalOwner(owner),
+    rangeId,
+    canonicalNetworks(networks),
+    filters,
+  ] as const;
+}
+
+export function buildRollingAnalyticsFilters(
+  input: RollingAnalyticsInput,
+  now = Date.now(),
+): InferenceAnalytics.InferenceAnalyticsFilters {
+  const networks = canonicalNetworks(input.networks);
+  return {
+    ...input.filters,
+    from: new Date(now - input.rangeMs).toISOString(),
+    to: new Date(now).toISOString(),
+    ...(networks.length > 0 ? { networks } : {}),
   };
 }

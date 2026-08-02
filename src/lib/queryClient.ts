@@ -1,5 +1,112 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import {
+  persistQueryClientSave,
+  type PersistedClient,
+  type Persister,
+} from "@tanstack/react-query-persist-client";
 import { apiFetch } from "@/lib/api";
+
+export const DURABLE_CACHE_MAX_AGE = 24 * 60 * 60 * 1000;
+export const DURABLE_CACHE_BUSTER = "dashboard-keys-v1";
+export const durableQueryMeta = { persist: true } as const;
+
+export function shouldPersistQuery(query: {
+  meta?: Record<string, unknown>;
+  state: { status: string };
+}): boolean {
+  return query.meta?.persist === true && query.state.status === "success";
+}
+
+const DATABASE_NAME = "compose-market-query-cache";
+const STORE_NAME = "query-cache";
+const CLIENT_KEY = "durable-client";
+
+function openCacheDatabase(): Promise<IDBDatabase | undefined> {
+  if (typeof indexedDB === "undefined") return Promise.resolve(undefined);
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DATABASE_NAME, 1);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(STORE_NAME)) {
+        request.result.createObjectStore(STORE_NAME);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("Unable to open the durable query cache"));
+  });
+}
+
+function requestResult<T>(request: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("IndexedDB request failed"));
+  });
+}
+
+function transactionDone(transaction: IDBTransaction): Promise<void> {
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction aborted"));
+    transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB transaction failed"));
+  });
+}
+
+export const indexedDbQueryPersister: Persister = {
+  async persistClient(client: PersistedClient): Promise<void> {
+    const database = await openCacheDatabase();
+    if (!database) return;
+    try {
+      const transaction = database.transaction(STORE_NAME, "readwrite");
+      transaction.objectStore(STORE_NAME).put(client, CLIENT_KEY);
+      await transactionDone(transaction);
+    } finally {
+      database.close();
+    }
+  },
+  async restoreClient(): Promise<PersistedClient | undefined> {
+    const database = await openCacheDatabase();
+    if (!database) return undefined;
+    try {
+      const transaction = database.transaction(STORE_NAME, "readonly");
+      const client = await requestResult(transaction.objectStore(STORE_NAME).get(CLIENT_KEY));
+      await transactionDone(transaction);
+      return client as PersistedClient | undefined;
+    } finally {
+      database.close();
+    }
+  },
+  async removeClient(): Promise<void> {
+    const database = await openCacheDatabase();
+    if (!database) return;
+    try {
+      const transaction = database.transaction(STORE_NAME, "readwrite");
+      transaction.objectStore(STORE_NAME).delete(CLIENT_KEY);
+      await transactionDone(transaction);
+    } finally {
+      database.close();
+    }
+  },
+};
+
+const dehydrateOptions = {
+  shouldDehydrateQuery: shouldPersistQuery,
+  shouldDehydrateMutation: () => false,
+};
+
+export const queryPersistenceOptions = {
+  persister: indexedDbQueryPersister,
+  maxAge: DURABLE_CACHE_MAX_AGE,
+  buster: DURABLE_CACHE_BUSTER,
+  dehydrateOptions,
+};
+
+export async function persistDurableQueries(client: QueryClient): Promise<void> {
+  await persistQueryClientSave({
+    queryClient: client,
+    persister: indexedDbQueryPersister,
+    buster: DURABLE_CACHE_BUSTER,
+    dehydrateOptions,
+  });
+}
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
@@ -46,7 +153,7 @@ export const queryClient = new QueryClient({
       refetchInterval: false,
       refetchOnWindowFocus: false,
       staleTime: 60 * 1000,
-      gcTime: 5 * 60 * 1000,
+      gcTime: DURABLE_CACHE_MAX_AGE,
       retry: false,
     },
     mutations: {
