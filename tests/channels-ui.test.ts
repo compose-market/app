@@ -20,8 +20,8 @@ test("web SDK singleton configures the channel service URL", () => {
 test("agent page exposes icon-only channel binding through theme primitives", () => {
   const source = read("src/pages/agent.tsx");
 
-  assert.match(source, /<Hint label="Backpack">/);
-  assert.match(source, /<Button[\s\S]{0,220}iconOnly[\s\S]{0,220}aria-label="Backpack"/);
+  assert.match(source, /import \{ Hint, ShellButton \} from "@compose-market\/theme\/shell"/);
+  assert.match(source, /<Hint label="Backpack">\s*<ShellButton\s+size="sm"\s+tone="secondary"\s+iconOnly\s+aria-label="Backpack"\s+onClick=\{openBackpack\}\s*>[\s\S]*?<Backpack size=\{14\} \/>[\s\S]*?<\/ShellButton>\s*<\/Hint>/);
   assert.match(source, /<BackpackDialog/);
   assert.doesNotMatch(source, /fetch\([^)]*\/channels/u);
 });

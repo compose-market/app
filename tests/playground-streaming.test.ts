@@ -180,6 +180,17 @@ test("partial realtime audio chunks do not hydrate by fetching the response", ()
   assert.doesNotMatch(chatSource, /hiddenArtifact/);
 });
 
+test("ordinary response streams stay active through payment finalization and can be cancelled", () => {
+  const responsesRunner = section(streamSource, "const runResponses", "const appendResponses");
+  assert.match(streamSource, /const responseControllerRef = useRef<AbortController \| null>/);
+  assert.match(streamSource, /const cancelResponses = useCallback/);
+  assert.match(responsesRunner, /const controller = new AbortController\(\)/);
+  assert.match(responsesRunner, /signal: controller\.signal/);
+  assert.match(streamSource, /Finalizing payment/);
+  assert.doesNotMatch(streamSource, /event\.type === "model\.text\.done"[\s\S]{0,400}onDone/);
+  assert.match(playgroundSource, /streamer\.cancelResponses\(\)/);
+});
+
 test("theme stream nodes keep raw kind and status out of visible chrome by default", () => {
   const nodeSource = section(themeStreamSource, "export function StreamNode", "export interface StreamArtifactProps");
   assert.match(nodeSource, /data-kind=\{kind\}/);

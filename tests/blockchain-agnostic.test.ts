@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 const packageJson = readFileSync(new URL("../package.json", import.meta.url), "utf8");
 const packageLock = readFileSync(new URL("../package-lock.json", import.meta.url), "utf8");
-const blockchainSource = readFileSync(new URL("../src/lib/blockchain.ts", import.meta.url), "utf8");
+const programsUrl = new URL("../src/lib/programs.ts", import.meta.url);
+const programsSource = readFileSync(programsUrl, "utf8");
 const contractsSource = readFileSync(new URL("../src/lib/contracts.ts", import.meta.url), "utf8");
 const shareSource = readFileSync(new URL("../src/lib/share.ts", import.meta.url), "utf8");
 const shareDialogSource = readFileSync(new URL("../src/components/share-dialog.tsx", import.meta.url), "utf8");
@@ -22,21 +23,25 @@ test("web package metadata keeps the SDK as a publishable semver dependency", ()
   assert.doesNotMatch(packageLock, /"@compose-market\/sdk"\s*:\s*"(?:file:|link:|workspace:|local:)/);
 });
 
-test("web blockchain adapter imports product builders from the SDK blockchain subpath", () => {
-  assert.match(blockchainSource, /from "@compose-market\/sdk\/blockchain"/);
-  assert.match(blockchainSource, /buildIdentityMintInstruction/);
-  assert.match(blockchainSource, /buildMarketMintWorkflowInstruction/);
-  assert.match(blockchainSource, /buildMarketCreateRfaInstruction/);
-  assert.match(blockchainSource, /decodeIdentityRegistryAccount/);
-  assert.match(blockchainSource, /decodeMarketRegistryAccount/);
+test("web program adapter replaces the removed blockchain module and imports SDK builders", () => {
+  assert.equal(existsSync(new URL("../src/lib/blockchain.ts", import.meta.url)), false);
+  assert.equal(existsSync(programsUrl), true);
+  assert.match(programsSource, /from "@compose-market\/sdk\/blockchain"/);
+  assert.match(programsSource, /buildIdentityMintInstruction/);
+  assert.match(programsSource, /buildMarketMintWorkflowInstruction/);
+  assert.match(programsSource, /buildMarketCreateRfaInstruction/);
+  assert.match(programsSource, /decodeIdentityRegistryAccount/);
+  assert.match(programsSource, /decodeMarketRegistryAccount/);
+  assert.match(createAgentSource, /from "@\/lib\/programs"/);
+  assert.match(composeSource, /from "@\/lib\/programs"/);
 });
 
-test("web blockchain adapter is app-local transport glue, not an SDK account factory", () => {
-  assert.doesNotMatch(blockchainSource, /\/api\/svm\/account|\/api\/svm\/approve/);
-  assert.doesNotMatch(blockchainSource, /createAccount\(|account factory|sponsor/i);
-  assert.match(blockchainSource, /sdk\.svm\.feePayer\(\)/);
-  assert.match(blockchainSource, /sdk\.svm\.relay\(/);
-  assert.match(blockchainSource, /buildSwigInstructionTransaction/);
+test("web program adapter is app-local transport glue, not an SDK account factory", () => {
+  assert.doesNotMatch(programsSource, /\/api\/svm\/account|\/api\/svm\/approve/);
+  assert.doesNotMatch(programsSource, /createAccount\(|account factory|sponsor/i);
+  assert.match(programsSource, /sdk\.svm\.feePayer\(\)/);
+  assert.match(programsSource, /sdk\.svm\.relay\(/);
+  assert.match(programsSource, /buildSwigInstructionTransaction/);
 });
 
 test("create-agent no longer fakes Solana deployment as chainId zero", () => {
