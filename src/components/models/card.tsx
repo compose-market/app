@@ -267,13 +267,13 @@ export function ModelCard({
                 </Hint>
             ) : undefined}
             subtitle={activeTab === "details" ? (
-                <span className="cm-model-card__model-meta-row" style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
+                <span className="cm-model-card__model-meta-row">
                     <Hint label={modelInfo?.family || modelInfo?.provider || "unknown"}>
-                        <span className="cm-model-card__provider" style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}>
+                        <span className="cm-model-card__provider">
                             {modelInfo?.family && (() => {
                                 const logoUrl = getFamilyLogoUrl(modelInfo.family);
                                 if (logoUrl) {
-                                    return <img src={logoUrl} alt={modelInfo.family} className="cm-family-icon" style={{ width: "0.85rem", height: "0.85rem", borderRadius: "2px" }} />;
+                                    return <img src={logoUrl} alt={modelInfo.family} className="cm-family-icon" />;
                                 }
                                 return null;
                             })()}
@@ -295,7 +295,7 @@ export function ModelCard({
             icon={activeTab === "details" ? (() => {
                 const logoUrl = modelInfo?.family ? getFamilyLogoUrl(modelInfo.family) : null;
                 if (logoUrl) {
-                    return <img src={logoUrl} alt={modelInfo?.family} className="cm-family-icon" style={{ width: "1.5rem", height: "1.5rem", borderRadius: "2px", objectFit: "contain", display: "block", margin: "auto" }} />;
+                    return <img src={logoUrl} alt={modelInfo?.family} className="cm-family-icon" />;
                 }
                 return <Cpu />;
             })() : undefined}
@@ -365,7 +365,7 @@ export function ModelCard({
 
                             {pricingSections.length > 0 && (
                                 <ModelSection label={iconLabel("Price", "price", "section")} className="cm-model-card__section--pricing">
-                                    <div className="cm-model-card__pricing-list" style={{ display: "flex", flexDirection: "column", gap: "0.5rem", width: "100%" }}>
+                                    <div className="cm-model-card__pricing-list">
                                         {pricingSections.map((section, index) => (
                                             <ModelPricing key={`price-${section.header}-${index}`} unit={section.unit}>
                                                 {section.entries.map((entry) => (
@@ -392,6 +392,7 @@ export function ModelCard({
                             value={systemPrompt}
                             onChange={(event) => onSystemPromptChange(event.target.value)}
                             placeholder="Optional system prompt..."
+                            rows={3}
                             className="cm-model-card__text-area"
                         />
                     </ModelSection>
@@ -399,7 +400,7 @@ export function ModelCard({
                     {/* Optional Pricing */}
                     {optionalPricingSections.length > 0 && (
                         <ModelSection label={iconLabel("Price", "price", "section")} className="cm-model-card__section--pricing">
-                            <div className="cm-model-card__pricing-list" style={{ display: "flex", flexDirection: "column", gap: "0.5rem", width: "100%" }}>
+                            <div className="cm-model-card__pricing-list">
                                 {optionalPricingSections.map((section, index) => (
                                     <ModelPricing key={`optional-price-${section.header}-${index}`} unit={section.unit}>
                                         {section.entries.map((entry) => (

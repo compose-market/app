@@ -219,7 +219,7 @@ function SessionManageDialog({ open, onOpenChange }: SessionManageDialogProps) {
       if (!keyToken) {
         throw new Error("Compose Key token unavailable");
       }
-      const keys = await sdk.keys.list();
+      const keys = await sdk.keys.list({ userAddress: account.address });
       setSessions(keys.filter((key) => key.purpose === "api" && isActiveKey(key)));
     } catch (error) {
       console.error("Failed to fetch sessions:", error);

@@ -9,8 +9,9 @@
 
 import { useState, useCallback } from "react";
 import { Check, Copy, Key, Plus, RefreshCw, Trash2, Zap, Clock } from "lucide-react";
-import { useKeys, type KeyRecord } from "@/hooks/use-keys";
+import { useKeys, type KeyRecord, type UseKeysReturn } from "@/hooks/use-keys";
 import { useWalletAccount } from "@/components/connector";
+import { NetworkBadge } from "@/components/network-selector";
 import { useChain } from "@/contexts/Network";
 import { toast } from "sonner";
 import {
@@ -59,7 +60,8 @@ function keyStatus(key: KeyRecord): "active" | "expired" | "revoked" {
 }
 
 export function ApiKeysPanel() {
-  const { keys, activeKeys, isLoading, isRefetching, forceRefresh, revokeKey, isRevoking } = useKeys();
+  const keysState = useKeys();
+  const { keys, activeKeys, isLoading, isRefetching, error, forceRefresh, revokeKey, isRevoking } = keysState;
   const { isConnected } = useWalletAccount();
   const [createOpen, setCreateOpen] = useState(false);
   const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null);
@@ -107,6 +109,19 @@ export function ApiKeysPanel() {
     );
   }
 
+  if (error && keys.length === 0) {
+    return (
+      <div className="cm-keys-page">
+        <KeysHeader onRefresh={() => void forceRefresh()} isRefetching={isRefetching} onCreate={() => setCreateOpen(true)} />
+        <div className="cm-dashboard__empty">
+          <Key className="cm-dashboard__empty-icon" />
+          <span className="cm-dashboard__empty-title">Unable to load keys</span>
+          <span className="cm-dashboard__empty-text">{error.message}</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="cm-keys-page">
       <KeysHeader
@@ -115,6 +130,12 @@ export function ApiKeysPanel() {
         onCreate={() => setCreateOpen(true)}
         activeCount={activeKeys.length}
       />
+
+      {error ? (
+        <div className="rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-400">
+          Unable to update keys: {error.message}
+        </div>
+      ) : null}
 
       {keys.length === 0 ? (
         <div className="cm-dashboard__empty">
@@ -145,6 +166,7 @@ export function ApiKeysPanel() {
                     <span className="cm-key-card__purpose" data-purpose={key.purpose}>
                       {key.purpose}
                     </span>
+                    <NetworkBadge network={key.network} />
                     <span className="cm-key-card__id">inference-{key.keyId.slice(0, 8)}***</span>
                   </div>
                   <div className="cm-key-card__meta">
@@ -200,7 +222,7 @@ export function ApiKeysPanel() {
         </div>
       )}
 
-      <CreateKeyDialog open={createOpen} onOpenChange={setCreateOpen} />
+      <CreateKeyDialog open={createOpen} onOpenChange={setCreateOpen} keysState={keysState} />
     </div>
   );
 }
@@ -263,8 +285,16 @@ const DURATION_PRESETS = [
   { label: "30d", hours: 720 },
 ];
 
-function CreateKeyDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
-  const { createKey, isCreating, createdToken, createdKeyId, clearCreatedToken, createError, budgetPresets } = useKeys();
+function CreateKeyDialog({
+  open,
+  onOpenChange,
+  keysState,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  keysState: UseKeysReturn;
+}) {
+  const { createKey, isCreating, createdToken, clearCreatedToken, createError } = keysState;
   const { paymentNetwork, getChainByNetworkId } = useChain();
   const currentChain = getChainByNetworkId(paymentNetwork);
   const [name, setName] = useState("");

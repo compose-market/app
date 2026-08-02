@@ -12,7 +12,7 @@ export function ReceiptFeed({ receipts, focused = false, dataBlock, onClick }: {
   onClick?: () => void;
 }) {
   const summary = useMemo(() => {
-    const counts = { settled: 0, claimed: 0, queued: 0, failed: 0 };
+    const counts = { settled: 0, claimed: 0, submitted: 0, queued: 0, failed: 0 };
     for (const receipt of receipts) counts[receipt.settlementStatus] += 1;
     return counts;
   }, [receipts]);
@@ -31,7 +31,8 @@ export function ReceiptFeed({ receipts, focused = false, dataBlock, onClick }: {
       {receipts.length === 0 ? <div className="cm-block__empty">No settlements yet</div> : (
         <div className="cm-feed-list">
           {visible.map((receipt) => {
-            const explorer = CHAIN_CONFIG[receipt.chainId]?.explorer;
+            const chainId = receipt.network.startsWith("eip155:") ? Number(receipt.network.slice("eip155:".length)) : undefined;
+            const explorer = chainId ? CHAIN_CONFIG[chainId]?.explorer : undefined;
             return (
               <div key={receipt.id} className="cm-receipt-item">
                 <div className="cm-receipt-item__top">
