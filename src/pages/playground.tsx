@@ -192,7 +192,11 @@ export default function PlaygroundPage() {
   }, [familyCategories, selectedFamily]);
 
   // ============ Model Selection ============
-  const [selectedModel, setSelectedModel] = useState<string>("gpt-4o");
+  const [selectedModel, setSelectedModel] = useState<string>(() => {
+    // Deep-link support: /playground?model=<public-catalog-id> pre-selects a model.
+    const requested = new URLSearchParams(window.location.search).get("model");
+    return requested && requested.trim().length > 0 ? requested.trim() : "gpt-4o";
+  });
   const [commandBarOpen, setCommandBarOpen] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState("");
   const [showSessionDialog, setShowSessionDialog] = useState(false);
@@ -233,6 +237,7 @@ export default function PlaygroundPage() {
   const streamer = useStream(chat, {
     onError: (err) => setInferenceError(err.message),
   });
+  useEffect(() => () => streamer.cancelResponses(), [streamer]);
 
   const [inputValue, setInputValue] = useState("");
 
@@ -412,8 +417,9 @@ export default function PlaygroundPage() {
       }
 
       const history = [...currentMessages.slice(currentConversationStartIndex), userMessage];
-      const input: ResponseMessage[] = history.map(toMessage);
-      if (currentSystemPrompt.trim()) input.unshift({ role: "system", content: currentSystemPrompt.trim() });
+      const inputItems: ResponseMessage[] = history.map(toMessage);
+      if (currentSystemPrompt.trim()) inputItems.unshift({ role: "system", content: currentSystemPrompt.trim() });
+      const input = inputItems as unknown as NonNullable<Parameters<typeof sdk.inference.responses.stream>[0]["input"]>;
 
       const callOptions: StreamCallOptions = {
         ...(activeKeyToken ? { key: activeKeyToken } : {}),
@@ -442,12 +448,13 @@ export default function PlaygroundPage() {
     }
   }, [wallet, account, budgetRemaining, clearFiles, sessionActive, keyToken, ensureKeyToken, paymentNetwork, toast, posthog, chat, setMessages, streamer, userAddress, userAddressResolving]);
   const handleClearChat = useCallback(() => {
+    streamer.cancelResponses();
     clearMessages();
     setInferenceError(null);
     clearFiles();
     setConversationStartIndex(0);
     if (uploadedCids.length > 0) cleanupFiles();
-  }, [uploadedCids, cleanupFiles, clearFiles, clearMessages]);
+  }, [uploadedCids, cleanupFiles, clearFiles, clearMessages, streamer]);
 
   // ==========================================================================
   // Render

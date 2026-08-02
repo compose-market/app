@@ -1,16 +1,25 @@
 import { useMemo, useState } from "react";
-import { BarChart3, RefreshCw, Wallet } from "lucide-react";
+import { BarChart3, Filter, RefreshCw, Wallet } from "lucide-react";
 import { useActiveAccount } from "thirdweb/react";
 import type { InferenceAnalytics } from "@compose-market/sdk";
+import type { NetworkId } from "@compose-market/sdk/chains";
 
 import { useAnalytics } from "@/hooks/use-analytics";
 import { useFocus } from "@/hooks/use-focus";
+import { useChain } from "@/contexts/Network";
 import { OverviewCards } from "@/components/dashboard/overview";
 import { SpendingChart } from "@/components/dashboard/spending";
 import { ModelUsageTable } from "@/components/dashboard/models";
 import { ReceiptFeed } from "@/components/dashboard/receipts";
 import { SpendingByModality } from "@/components/dashboard/by-modality";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { toggleNetworkSelection } from "@/components/dashboard/networks";
 
 const RANGES = [
   { label: "24h", ms: 86_400_000, interval: "hour" },
@@ -19,33 +28,105 @@ const RANGES = [
   { label: "180d", ms: 180 * 86_400_000, interval: "day" },
 ] as const;
 
+type StableFilters = Omit<
+  InferenceAnalytics.InferenceAnalyticsFilters,
+  "from" | "to" | "networks"
+>;
+
 export default function DashboardPage() {
   const account = useActiveAccount();
+  const { chains } = useChain();
   const [range, setRange] = useState<(typeof RANGES)[number]>(RANGES[2]);
-  const [anchor, setAnchor] = useState(() => Date.now());
+  const [selectedNetworks, setSelectedNetworks] = useState<NetworkId[]>([]);
   const [metric, setMetric] = useState("billing");
-  const filters = useMemo<InferenceAnalytics.InferenceAnalyticsFilters>(() => ({
-    from: new Date(anchor - range.ms).toISOString(),
-    to: new Date(anchor).toISOString(),
-    interval: range.interval,
-    limit: 100,
-  }), [anchor, range]);
-  const { summary, isLoading, isRefetching, error, forceRefresh } = useAnalytics(filters);
   const { containerRef, focused, toggleFocus } = useFocus();
 
-  const refresh = async () => {
-    setAnchor(Date.now());
-    await forceRefresh();
-  };
+  const supportedNetworks = useMemo(
+    () => [...chains]
+      .filter((chain): chain is typeof chain & { network: NetworkId } => Boolean(chain.network))
+      .sort((left, right) => left.name.localeCompare(right.name)),
+    [chains],
+  );
+  const filters = useMemo<StableFilters>(() => ({
+    interval: range.interval,
+    limit: 100,
+  }), [range.interval]);
+  const { summary, isLoading, isRefetching, error, forceRefresh } = useAnalytics({
+    rangeId: range.label,
+    rangeMs: range.ms,
+    networks: selectedNetworks,
+    filters,
+  });
+
+  const networkLabel = selectedNetworks.length === 0
+    ? "All networks"
+    : selectedNetworks.length === 1
+      ? supportedNetworks.find((chain) => chain.network === selectedNetworks[0])?.name ?? selectedNetworks[0]
+      : `${selectedNetworks.length} networks`;
 
   const header = (
     <div className="cm-dashboard__header">
-      <div className="cm-dashboard__title"><BarChart3 className="cm-dashboard__title-icon" /><span>Dashboard</span></div>
+      <div className="cm-dashboard__title">
+        <BarChart3 className="cm-dashboard__title-icon" />
+        <span>Dashboard</span>
+        {isRefetching ? <span className="text-xs font-normal text-muted-foreground">Updating…</span> : null}
+      </div>
       <div className="cm-dashboard__actions">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="sm" className="cm-shell-button cm-shell-button--ghost">
+              <Filter className="h-4 w-4" />
+              {networkLabel}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-56">
+            <DropdownMenuCheckboxItem
+              checked={selectedNetworks.length === 0}
+              onCheckedChange={(checked) => {
+                if (checked) setSelectedNetworks([]);
+              }}
+              onSelect={(event) => event.preventDefault()}
+            >
+              All
+            </DropdownMenuCheckboxItem>
+            {supportedNetworks.map((chain) => (
+              <DropdownMenuCheckboxItem
+                key={chain.network}
+                checked={selectedNetworks.includes(chain.network)}
+                onCheckedChange={(checked) => {
+                  setSelectedNetworks((current) => toggleNetworkSelection(
+                    current,
+                    chain.network,
+                    checked === true,
+                  ) as NetworkId[]);
+                }}
+                onSelect={(event) => event.preventDefault()}
+              >
+                {chain.name}
+              </DropdownMenuCheckboxItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
         <div className="cm-time-range">
-          {RANGES.map((option) => <button key={option.label} className="cm-time-range__option" data-active={range === option} onClick={() => { setRange(option); setAnchor(Date.now()); }}>{option.label}</button>)}
+          {RANGES.map((option) => (
+            <button
+              key={option.label}
+              className="cm-time-range__option"
+              data-active={range === option}
+              onClick={() => setRange(option)}
+            >
+              {option.label}
+            </button>
+          ))}
         </div>
-        <Button variant="ghost" size="icon" onClick={() => void refresh()} disabled={isRefetching || isLoading} className="cm-shell-button cm-shell-button--ghost cm-shell-button--icon" aria-label="Refresh analytics">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => void forceRefresh()}
+          disabled={isRefetching || isLoading}
+          className="cm-shell-button cm-shell-button--ghost cm-shell-button--icon"
+          aria-label="Refresh analytics"
+        >
           <RefreshCw className={`h-4 w-4 ${isRefetching ? "animate-spin" : ""}`} />
         </Button>
       </div>
@@ -54,7 +135,14 @@ export default function DashboardPage() {
 
   const empty = (title: string, text: string, loading = false) => (
     <div className="cm-dashboard" ref={containerRef} data-focus={focused ?? undefined}>
-      {header}<div className="cm-dashboard__empty">{loading ? <RefreshCw className="cm-dashboard__empty-icon animate-spin" /> : <Wallet className="cm-dashboard__empty-icon" />}<span className="cm-dashboard__empty-title">{title}</span><span className="cm-dashboard__empty-text">{text}</span></div>
+      {header}
+      <div className="cm-dashboard__empty">
+        {loading
+          ? <RefreshCw className="cm-dashboard__empty-icon animate-spin" />
+          : <Wallet className="cm-dashboard__empty-icon" />}
+        <span className="cm-dashboard__empty-title">{title}</span>
+        <span className="cm-dashboard__empty-text">{text}</span>
+      </div>
     </div>
   );
 
@@ -63,10 +151,18 @@ export default function DashboardPage() {
   if (isLoading && !summary) return empty("Loading usage data", "Reading your inference telemetry.", true);
   if (!summary || summary.requestCount === 0) return empty("No usage yet", "Head to the Playground to make your first inference call.");
 
-  const selectedMetric = summary.chartMetrics.some((candidate) => candidate.id === metric) ? metric : summary.chartMetrics[0]?.id || "billing";
+  const selectedMetric = summary.chartMetrics.some((candidate) => candidate.id === metric)
+    ? metric
+    : summary.chartMetrics[0]?.id || "billing";
+
   return (
     <div className="cm-dashboard" ref={containerRef} data-focus={focused ?? undefined}>
       {header}
+      {error ? (
+        <div className="rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-400">
+          Unable to update usage data: {error.message}
+        </div>
+      ) : null}
       <OverviewCards summary={summary} />
       <SpendingChart timeline={summary.timeline} metrics={summary.chartMetrics} selectedMetric={selectedMetric} onMetricChange={setMetric} focused={focused === "chart"} dataBlock="chart" onClick={() => toggleFocus("chart")} />
       <SpendingByModality modalityBreakdown={summary.typeBreakdown} focused={focused === "mod"} dataBlock="mod" onClick={() => toggleFocus("mod")} />
