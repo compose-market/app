@@ -1,11 +1,12 @@
 import { lazy, Suspense } from "react";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { Redirect, Route, Switch, useLocation } from "wouter";
 import { ThirdwebProvider } from "thirdweb/react";
 import { Layout } from "@/components/layout/Layout";
+import { OwnerCacheBoundary } from "@/components/cache";
 import { ChainProvider, useChain } from "@/contexts/Network";
 import { SessionProvider } from "@/hooks/use-session";
-import { queryClient } from "@/lib/queryClient";
+import { queryClient, queryPersistenceOptions } from "@/lib/queryClient";
 import { isStandaloneAppRoute } from "@/lib/utils";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/toaster";
@@ -121,11 +122,13 @@ function AppInner() {
 function App() {
   return (
     <ThirdwebProvider>
-      <QueryClientProvider client={queryClient}>
-        <ChainProvider>
-          <AppInner />
-        </ChainProvider>
-      </QueryClientProvider>
+      <PersistQueryClientProvider client={queryClient} persistOptions={queryPersistenceOptions}>
+        <OwnerCacheBoundary>
+          <ChainProvider>
+            <AppInner />
+          </ChainProvider>
+        </OwnerCacheBoundary>
+      </PersistQueryClientProvider>
     </ThirdwebProvider>
   );
 }
