@@ -1,84 +1,89 @@
-import { useId, useMemo } from "react";
-import type { ChartMetric, TimelineBucket } from "@/lib/analytics";
+import { Suspense, lazy, useMemo, useState } from "react";
+import type { AnalyticsInterval, TimelineBucket } from "@/lib/analytics";
+import { formatMs, formatTokens, numberLabel } from "@/lib/analytics";
+import { atomicToUsd, formatUsd } from "@/lib/receipts";
+import type { ChartTab } from "./usage";
+
+const UsageChart = lazy(() => import("./usage"));
+
+const TABS: Array<{ id: ChartTab; label: string }> = [
+  { id: "spend", label: "Spend" },
+  { id: "requests", label: "Requests" },
+  { id: "tokens", label: "Tokens" },
+  { id: "latency", label: "Latency" },
+];
+
+function usePeriodBadge(timeline: TimelineBucket[], tab: ChartTab): string {
+  return useMemo(() => {
+    if (tab === "spend") {
+      const total = timeline.reduce((sum, bucket) => sum + atomicToUsd(bucket.totals.billing.finalAmountAtomic), 0);
+      return formatUsd(total);
+    }
+    if (tab === "requests") {
+      const total = timeline.reduce((sum, bucket) => sum + bucket.totals.requests.total, 0);
+      return numberLabel(total);
+    }
+    if (tab === "tokens") {
+      const total = timeline.reduce((sum, bucket) => {
+        const metrics = bucket.totals.usage.metrics;
+        const input = metrics.input_tokens ?? metrics.text_input_tokens ?? 0;
+        const output = metrics.output_tokens ?? metrics.text_output_tokens ?? 0;
+        return sum + (input + output > 0 ? input + output : metrics.total_tokens ?? 0);
+      }, 0);
+      return formatTokens(total);
+    }
+    // Latency: count-weighted average across buckets.
+    let weighted = 0;
+    let count = 0;
+    for (const bucket of timeline) {
+      weighted += bucket.totals.latency.averageMs * bucket.totals.latency.count;
+      count += bucket.totals.latency.count;
+    }
+    return count > 0 ? `${formatMs(weighted / count)} avg` : "—";
+  }, [timeline, tab]);
+}
 
 export function SpendingChart({
   timeline,
-  metrics,
-  selectedMetric,
-  onMetricChange,
+  interval,
   focused = false,
   dataBlock,
   onClick,
 }: {
   timeline: TimelineBucket[];
-  metrics: ChartMetric[];
-  selectedMetric: string;
-  onMetricChange: (metric: string) => void;
+  interval: AnalyticsInterval;
   focused?: boolean;
   dataBlock?: string;
   onClick?: () => void;
 }) {
-  const gradientId = useId().replace(/:/gu, "");
-  const metric = metrics.find((candidate) => candidate.id === selectedMetric) ?? metrics[0];
-  const data = useMemo(() => {
-    if (!metric || timeline.length === 0) return null;
-    const values = timeline.map((bucket) => metric.value(bucket.totals));
-    const max = Math.max(...values, 0);
-    const width = 100;
-    const height = 100;
-    const points = timeline.map((bucket, index) => ({
-      x: timeline.length === 1 ? 50 : index * width / (timeline.length - 1),
-      y: max === 0 ? 95 : height - values[index] / max * 85 - 5,
-      bucket,
-      value: values[index],
-    }));
-    const linePath = points.map((point, index) => `${index ? "L" : "M"} ${point.x} ${point.y}`).join(" ");
-    return {
-      points,
-      linePath,
-      areaPath: `${linePath} L ${points.at(-1)?.x ?? 50} ${height} L ${points[0]?.x ?? 50} ${height} Z`,
-      total: values.reduce((sum, value) => sum + value, 0),
-    };
-  }, [metric, timeline]);
+  const [tab, setTab] = useState<ChartTab>("spend");
+  const badge = usePeriodBadge(timeline, tab);
 
   return (
     <div className="cm-block" data-block={dataBlock} data-focused={focused} onClick={onClick}>
       <div className="cm-block__header">
-        <select
-          className="cm-chart-select"
-          value={metric?.id}
-          onClick={(event) => event.stopPropagation()}
-          onChange={(event) => onMetricChange(event.target.value)}
-          aria-label="Chart metric"
-        >
-          {metrics.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.label}</option>)}
-        </select>
-        {data && metric && <span className="cm-block__badge">{metric.format(data.total)}</span>}
+        <div className="cm-time-range" onClick={(event) => event.stopPropagation()}>
+          {TABS.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              className="cm-time-range__option"
+              data-active={tab === option.id}
+              onClick={() => setTab(option.id)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        <span className="cm-block__badge">{badge}</span>
       </div>
-      {data && metric ? (
-        <>
-          <svg className="cm-chart-svg" viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label={`${metric.label} over time`}>
-            <defs>
-              <linearGradient id={`${gradientId}-fill`} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity="0.28" />
-                <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity="0.02" />
-              </linearGradient>
-              <linearGradient id={`${gradientId}-stroke`} x1="0" y1="0" x2="1" y2="0">
-                <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity="0.6" />
-                <stop offset="100%" stopColor="hsl(var(--accent))" stopOpacity="0.9" />
-              </linearGradient>
-            </defs>
-            <path d={data.areaPath} fill={`url(#${gradientId}-fill)`} />
-            <path d={data.linePath} fill="none" stroke={`url(#${gradientId}-stroke)`} strokeWidth="0.6" vectorEffect="non-scaling-stroke" />
-            {data.points.map((point) => (
-              <circle key={point.bucket.timestamp} cx={point.x} cy={point.y} r="0.8" fill="hsl(var(--primary))">
-                <title>{`${new Date(point.bucket.timestamp).toLocaleString()} · ${metric.format(point.value)}`}</title>
-              </circle>
-            ))}
-          </svg>
-          {focused && <div className="cm-chart-axis"><span>{new Date(timeline[0].timestamp).toLocaleDateString()}</span><span>{new Date(timeline.at(-1)!.endTimestamp).toLocaleDateString()}</span></div>}
-        </>
-      ) : <div className="cm-block__empty">No telemetry for this range</div>}
+      {timeline.length === 0 ? (
+        <div className="cm-block__empty">No telemetry for this range</div>
+      ) : (
+        <Suspense fallback={<div className="cm-chart-loading" aria-label="Loading chart" />}>
+          <UsageChart timeline={timeline} interval={interval} tab={tab} focused={focused} />
+        </Suspense>
+      )}
     </div>
   );
 }
