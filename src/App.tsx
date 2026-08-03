@@ -60,7 +60,7 @@ function AppRouter() {
       <Suspense fallback={<PageFallback />}>
         <Switch>
           <Route path="/">
-            <Redirect to="/dashboard" replace />
+            <Redirect to="/keys" replace />
           </Route>
           <Route path="/dashboard" component={Dashboard} />
           <Route path="/keys" component={Keys} />
