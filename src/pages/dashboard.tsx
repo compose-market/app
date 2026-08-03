@@ -11,7 +11,6 @@ import { OverviewCards } from "@/components/dashboard/overview";
 import { SpendingChart } from "@/components/dashboard/spending";
 import { ModelUsageTable } from "@/components/dashboard/models";
 import { ReceiptFeed } from "@/components/dashboard/receipts";
-import { SpendingByModality } from "@/components/dashboard/by-modality";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -38,7 +37,6 @@ export default function DashboardPage() {
   const { chains } = useChain();
   const [range, setRange] = useState<(typeof RANGES)[number]>(RANGES[2]);
   const [selectedNetworks, setSelectedNetworks] = useState<NetworkId[]>([]);
-  const [metric, setMetric] = useState("billing");
   const { containerRef, focused, toggleFocus } = useFocus();
 
   const supportedNetworks = useMemo(
@@ -51,7 +49,19 @@ export default function DashboardPage() {
     interval: range.interval,
     limit: 100,
   }), [range.interval]);
-  const { summary, isLoading, isRefetching, error, forceRefresh } = useAnalytics({
+  const {
+    summary,
+    requests,
+    activity,
+    hasMoreRequests,
+    hasMoreSettlements,
+    isLoadingMore,
+    loadMore,
+    isLoading,
+    isRefetching,
+    error,
+    forceRefresh,
+  } = useAnalytics({
     rangeId: range.label,
     rangeMs: range.ms,
     networks: selectedNetworks,
@@ -151,10 +161,6 @@ export default function DashboardPage() {
   if (isLoading && !summary) return empty("Loading usage data", "Reading your inference telemetry.", true);
   if (!summary || summary.requestCount === 0) return empty("No usage yet", "Head to the Playground to make your first inference call.");
 
-  const selectedMetric = summary.chartMetrics.some((candidate) => candidate.id === metric)
-    ? metric
-    : summary.chartMetrics[0]?.id || "billing";
-
   return (
     <div className="cm-dashboard" ref={containerRef} data-focus={focused ?? undefined}>
       {header}
@@ -164,10 +170,31 @@ export default function DashboardPage() {
         </div>
       ) : null}
       <OverviewCards summary={summary} />
-      <SpendingChart timeline={summary.timeline} metrics={summary.chartMetrics} selectedMetric={selectedMetric} onMetricChange={setMetric} focused={focused === "chart"} dataBlock="chart" onClick={() => toggleFocus("chart")} />
-      <SpendingByModality modalityBreakdown={summary.typeBreakdown} focused={focused === "mod"} dataBlock="mod" onClick={() => toggleFocus("mod")} />
-      <ModelUsageTable models={summary.modelUsage} focused={focused === "models"} dataBlock="models" onClick={() => toggleFocus("models")} />
-      <ReceiptFeed receipts={summary.activity} focused={focused === "feed"} dataBlock="feed" onClick={() => toggleFocus("feed")} />
+      <SpendingChart
+        timeline={summary.timeline}
+        interval={summary.interval}
+        focused={focused === "chart"}
+        dataBlock="chart"
+        onClick={() => toggleFocus("chart")}
+      />
+      <ModelUsageTable
+        models={summary.modelUsage}
+        modalityBreakdown={summary.typeBreakdown}
+        focused={focused === "models"}
+        dataBlock="models"
+        onClick={() => toggleFocus("models")}
+      />
+      <ReceiptFeed
+        receipts={activity}
+        requests={requests}
+        hasMoreSettlements={hasMoreSettlements}
+        hasMoreRequests={hasMoreRequests}
+        isLoadingMore={isLoadingMore}
+        onLoadMore={(kind) => void loadMore(kind)}
+        focused={focused === "feed"}
+        dataBlock="feed"
+        onClick={() => toggleFocus("feed")}
+      />
     </div>
   );
 }
