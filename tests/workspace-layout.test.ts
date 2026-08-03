@@ -10,13 +10,13 @@ function read(path: string): string {
   return readFileSync(resolve(root, path), "utf8");
 }
 
-test("root route redirects to dashboard while home and market stay outside the app graph", () => {
+test("root route redirects to keys while home and market stay outside the app graph", () => {
   const app = read("src/App.tsx");
   const layout = read("src/components/layout/Layout.tsx");
 
   assert.equal(existsSync(resolve(root, "src/pages/home.tsx")), false);
   assert.doesNotMatch(app, /@\/pages\/home/);
-  assert.match(app, /<Redirect\s+to="\/dashboard"\s+replace\s*\/>/);
+  assert.match(app, /<Redirect\s+to="\/keys"\s+replace\s*\/>/);
   assert.match(app, /const Dashboard = lazy\(\(\) => import\("@\/pages\/dashboard"\)\);/);
   assert.match(app, /<Route path="\/dashboard" component=\{Dashboard\} \/>/);
   assert.match(app, /\/\/ const Market = lazy\(\(\) => import\("@\/pages\/market"\)\);/);
