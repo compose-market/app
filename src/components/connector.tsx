@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ConnectButton, useActiveAccount, useActiveWallet } from "thirdweb/react";
+import { ConnectButton, useActiveAccount, useActiveWallet, useActiveWalletConnectionStatus } from "thirdweb/react";
 import { createWallet, inAppWallet } from "thirdweb/wallets";
 import type { SmartWalletOptions } from "thirdweb/wallets";
 import { ChevronDown, LogOut, Copy, Check, ExternalLink, Wallet } from "lucide-react";
@@ -17,6 +17,7 @@ import { useTotalBalance } from "@/hooks/use-multichain";
 import { useSelectedUserAddress } from "@/hooks/use-address";
 import { cn } from "@/lib/utils";
 import { mpIdentify, mpReset } from "@/lib/mixpanel";
+import { clearCachedAccount, readCachedAccount, writeCachedAccount } from "@/lib/cache";
 import type { EvmNetworkId } from "@compose-market/sdk/chains";
 
 const wallets = [
@@ -49,6 +50,7 @@ interface WalletConnectorProps {
 export function WalletConnector({ className, compact = false }: WalletConnectorProps) {
   const account = useActiveAccount();
   const wallet = useActiveWallet();
+  const connectionStatus = useActiveWalletConnectionStatus();
   const { paymentNetwork, getChainByNetworkId, evmChains, defaultNetwork } = useChain();
   const {
     userAddress,
@@ -59,12 +61,29 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
   } = useSelectedUserAddress();
   const [copied, setCopied] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  // Mount-time snapshot of the previous session's identity. Stable for the
+  // page's lifetime: once the live account resolves it takes over everywhere.
+  const [cachedAccount] = useState(() => readCachedAccount());
+
+  // Thirdweb re-derives the smart account over the network on every reload
+  // (auth ×2 → chain metadata → factory eth_call). While that runs, render
+  // the deterministic, permanent cached address instead of flashing CONNECT.
+  const isReconnecting = !account && connectionStatus === "connecting" && cachedAccount != null;
 
   useEffect(() => {
     if (account?.address) {
       mpIdentify(account.address);
+      writeCachedAccount(account.address, paymentNetwork, solanaAddress);
     }
-  }, [account?.address]);
+  }, [account?.address, paymentNetwork, solanaAddress]);
+
+  // Auto-connect failed for good (expired/revoked session): drop the stale
+  // identity so the next reload doesn't render a ghost account.
+  useEffect(() => {
+    if (connectionStatus === "disconnected") {
+      clearCachedAccount();
+    }
+  }, [connectionStatus]);
 
   const fallbackEvmNetwork = useMemo((): EvmNetworkId | undefined => {
     if (isEvmNetwork(defaultNetwork)) return defaultNetwork;
@@ -97,15 +116,21 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
     };
   }, [thirdwebChainIdValue]);
 
+  // While reconnecting, feed the balance query the cached addresses so the
+  // persisted (IndexedDB) multichain-balance query hydrates instantly with
+  // the exact same queryKey the previous session used.
+  const displayEvmAddress = evmAddress ?? (isReconnecting ? cachedAccount?.address ?? null : null);
+  const displaySolanaAddress = solanaAddress ?? (isReconnecting ? cachedAccount?.solanaAddress ?? null : null);
+
   const { formatted: totalBalance, isLoading: balanceLoading } = useTotalBalance({
-    evmAddress,
-    solanaAddress,
+    evmAddress: displayEvmAddress,
+    solanaAddress: displaySolanaAddress,
   }, {
-    enabled: !!evmAddress,
+    enabled: !!displayEvmAddress || !!displaySolanaAddress,
     deferUntilIdle: !menuOpen,
   });
 
-  if (!account) {
+  if (!account && !isReconnecting) {
     if (!connectChain || !selectedPaymentToken) {
       return (
         <button
@@ -215,10 +240,12 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
     );
   }
 
-  const displayAddress = userAddress;
+  const displayAddress = userAddress ?? (isReconnecting
+    ? (isEvm ? cachedAccount?.address ?? null : cachedAccount?.solanaAddress ?? null)
+    : null);
   const shortAddress = displayAddress
     ? `${displayAddress.slice(0, 6)}...${displayAddress.slice(-4)}`
-    : userAddressResolving ? "Resolving..." : "Unavailable";
+    : userAddressResolving || isReconnecting ? "Resolving..." : "Unavailable";
   const accountLabel = isEvm ? "Smart account" : "Solana account";
   const selectedExplorerUrl = (() => {
     if (!displayAddress) return null;
@@ -236,6 +263,7 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
   };
 
   const handleDisconnect = () => {
+    clearCachedAccount();
     mpReset();
     wallet?.disconnect();
   };
@@ -246,8 +274,10 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
         <button
           type="button"
           aria-label={`Wallet ${shortAddress}`}
+          data-reconnecting={isReconnecting || undefined}
           className={cn(
             "cm-hud-button cm-hud-wallet",
+            isReconnecting && "opacity-80",
             className
           )}
         >

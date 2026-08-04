@@ -345,7 +345,7 @@ export function QuickstartPanel({
           data-active={segment === "ide"}
           onClick={() => onSegmentChange("ide")}
         >
-          External use (IDE / Agent)
+          External (IDE / Agent)
         </button>
       </div>
 

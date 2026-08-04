@@ -81,7 +81,7 @@ type PurposeFilter = "all" | "api" | "session";
 
 export function ApiKeysPanel() {
   const keysState = useKeys();
-  const { keys, activeKeys, isLoading, isRefetching, error, forceRefresh, revokeKey, isRevoking } = keysState;
+  const { owner, keys, activeKeys, isLoading, isRefetching, error, forceRefresh, revokeKey, isRevoking } = keysState;
   const { isConnected } = useWalletAccount();
   const [createOpen, setCreateOpen] = useState(false);
   const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null);
@@ -115,7 +115,7 @@ export function ApiKeysPanel() {
   }, []);
 
   const confirmRevoke = useCallback(async () => {
-    if (!revokeTarget) return;
+    if (!revokeTarget || !isConnected) return;
     try {
       await revokeKey(revokeTarget.keyId);
       toast.success("Key revoked");
@@ -124,7 +124,7 @@ export function ApiKeysPanel() {
     } finally {
       setRevokeTarget(null);
     }
-  }, [revokeKey, revokeTarget]);
+  }, [isConnected, revokeKey, revokeTarget]);
 
   const openQuickstart = useCallback(() => {
     setSegment("ide");
@@ -137,9 +137,13 @@ export function ApiKeysPanel() {
     }
   }, []);
 
+  const openCreate = useCallback(() => {
+    if (isConnected) setCreateOpen(true);
+  }, [isConnected]);
+
   // The quickstart is static guidance — it renders instantly in every
   // state, without waiting for the wallet, session, or keys query.
-  const mainContent = !isConnected ? (
+  const mainContent = !owner ? (
     <div className="cm-dashboard__empty">
       <Key className="cm-dashboard__empty-icon" />
       <span className="cm-dashboard__empty-title">Connect your wallet</span>
@@ -166,7 +170,9 @@ export function ApiKeysPanel() {
       <KeysHeader
         onRefresh={() => void forceRefresh()}
         isRefetching={isRefetching}
-        onCreate={() => setCreateOpen(true)}
+        canRefresh={Boolean(owner)}
+        onCreate={openCreate}
+        canCreate={isConnected}
         onOpenGuide={() => setGuideOpen(true)}
         activeCount={activeKeys.length}
       />
@@ -190,7 +196,7 @@ export function ApiKeysPanel() {
                 The guide on the right has the exact config for your setup.
               </span>
               <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem", flexWrap: "wrap", justifyContent: "center" }}>
-                <Button onClick={() => setCreateOpen(true)} className="cm-shell-button cm-shell-button--primary">
+                <Button onClick={openCreate} disabled={!isConnected} className="cm-shell-button cm-shell-button--primary">
                   <Plus className="w-4 h-4" />
                   Create Key
                 </Button>
@@ -284,7 +290,7 @@ export function ApiKeysPanel() {
                               className="cm-key-card__action"
                               data-action="revoke"
                               onClick={() => setRevokeTarget(key)}
-                              disabled={isRevoking}
+                              disabled={isRevoking || !isConnected}
                               title="Revoke key"
                               aria-label="Revoke key"
                             >
@@ -305,7 +311,7 @@ export function ApiKeysPanel() {
         </div>
 
         <div className="cm-split__side">
-          <QuickstartPanel segment={segment} onSegmentChange={setSegment} highlight={highlight} onCreateKey={() => setCreateOpen(true)} />
+          <QuickstartPanel segment={segment} onSegmentChange={setSegment} highlight={highlight} onCreateKey={openCreate} />
         </div>
       </div>
 
@@ -320,7 +326,7 @@ export function ApiKeysPanel() {
           <div className="cm-sheet-body cm-sheet-body--inspect">
             <QuickstartPanel segment={segment} onSegmentChange={setSegment} highlight={false} onCreateKey={() => {
               setGuideOpen(false);
-              setCreateOpen(true);
+              openCreate();
             }} />
           </div>
         </SheetContent>
@@ -346,7 +352,7 @@ export function ApiKeysPanel() {
             <AlertDialogCancel className="cm-shell-button cm-shell-button--ghost">Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => void confirmRevoke()}
-              disabled={isRevoking}
+              disabled={isRevoking || !isConnected}
               className="cm-shell-button cm-shell-button--danger"
             >
               {isRevoking ? "Revoking…" : "Revoke Key"}
@@ -361,13 +367,17 @@ export function ApiKeysPanel() {
 function KeysHeader({
   onRefresh,
   isRefetching,
+  canRefresh,
   onCreate,
+  canCreate,
   onOpenGuide,
   activeCount,
 }: {
   onRefresh: () => void;
   isRefetching: boolean;
+  canRefresh: boolean;
   onCreate: () => void;
+  canCreate: boolean;
   onOpenGuide: () => void;
   activeCount?: number;
 }) {
@@ -397,13 +407,13 @@ function KeysHeader({
           variant="ghost"
           size="icon"
           onClick={onRefresh}
-          disabled={isRefetching}
+          disabled={!canRefresh || isRefetching}
           className="cm-shell-button cm-shell-button--ghost cm-shell-button--icon"
           title="Refresh"
         >
           <RefreshCw className={`h-4 w-4 ${isRefetching ? "animate-spin" : ""}`} />
         </Button>
-        <Button onClick={onCreate} className="cm-shell-button cm-shell-button--primary" size="sm">
+        <Button onClick={onCreate} disabled={!canCreate} className="cm-shell-button cm-shell-button--primary" size="sm">
           <Plus className="w-4 h-4" />
           New Key
         </Button>

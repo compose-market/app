@@ -15,6 +15,7 @@ import {
 import { AppShell } from "@compose-market/theme/app";
 import { WalletConnector, useWalletAccount } from "@/components/connector";
 import { SessionIndicator } from "@/components/session";
+import { useSession } from "@/hooks/use-session";
 import { DispenserButton } from "@/components/dispenser";
 import { NetworkSelector } from "@/components/network-selector";
 import { CostReceiptIndicator } from "@/components/receipt-indicator";
@@ -39,6 +40,7 @@ export function Layout({ children }: LayoutProps) {
   const [overflowOpen, setOverflowOpen] = useState(false);
   const hudRef = useRef<HTMLDivElement | null>(null);
   const { isConnected } = useWalletAccount();
+  const { sessionActive } = useSession();
 
   useEffect(() => {
     setSearchOpen(false);
@@ -86,7 +88,7 @@ export function Layout({ children }: LayoutProps) {
               <CostReceiptIndicator />
             </div>
 
-            {isConnected ? (
+            {isConnected || sessionActive ? (
               <div className="cm-app-chrome__hud-item" data-priority="medium">
                 <SessionIndicator />
               </div>
