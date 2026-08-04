@@ -13,6 +13,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { EvmNetworkId, NetworkId, SolanaNetworkId, FacilitatorChain } from "@compose-market/sdk/chains";
 import { evmChainId, getUsdcContractForNetwork, isEvmNetwork } from "@/lib/chains";
 import { useChain } from "@/contexts/Network";
+import { durableQueryMeta } from "@/lib/queryClient";
 import { createSolanaRpcFromNetwork } from "@/lib/svm/swig";
 
 export interface ChainBalance {
@@ -226,6 +227,9 @@ export function useMultiChainBalance(accounts: MultiChainBalanceAccounts, option
         enabled: queryEnabled,
         staleTime: options.staleTime ?? 30 * 1000,
         refetchInterval: options.refetchInterval ?? 60 * 1000,
+        // Dehydrate into the IndexedDB persister so balances render instantly
+        // on page reload (revalidated by staleTime/refetchInterval above).
+        meta: durableQueryMeta,
     });
 }
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useActiveWalletConnectionStatus } from "thirdweb/react";
 import type { InferenceAnalytics } from "@compose-market/sdk";
 
 import { useReconciliation } from "@/hooks/use-reconciliation";
@@ -15,6 +16,7 @@ import {
   type Summary,
 } from "@/lib/analytics";
 import { durableQueryMeta, DURABLE_CACHE_MAX_AGE } from "@/lib/queryClient";
+import { readCachedAccount } from "@/lib/cache";
 import { sdk } from "@/lib/sdk";
 
 const STALE_TIME = 30_000;
@@ -34,6 +36,7 @@ export interface UseAnalyticsInput {
 }
 
 export interface UseAnalyticsReturn {
+  owner: string | null;
   summary: Summary | null;
   /** Base request page merged with any cursor-paged extras. */
   requests: RequestRow[];
@@ -50,7 +53,14 @@ export interface UseAnalyticsReturn {
 }
 
 export function useAnalytics(input: UseAnalyticsInput): UseAnalyticsReturn {
-  const { owner, pair, isLoading: pairLoading, error: pairError } = useWalletPair();
+  const { owner: liveOwner, pair } = useWalletPair();
+  const connectionStatus = useActiveWalletConnectionStatus();
+  const [cachedAccount] = useState(() => readCachedAccount());
+  const owner = liveOwner ?? (
+    connectionStatus !== "disconnected"
+      ? cachedAccount?.address.toLowerCase() ?? null
+      : null
+  );
   const queryKey = buildAnalyticsQueryKey(owner ?? "", input.rangeId, input.networks, input.filters);
 
   const query = useQuery<
@@ -71,13 +81,13 @@ export function useAnalytics(input: UseAnalyticsInput): UseAnalyticsReturn {
     select: summarize,
     staleTime: STALE_TIME,
     gcTime: DURABLE_CACHE_MAX_AGE,
-    enabled: Boolean(owner && pair),
+    enabled: Boolean(owner),
     retry: 1,
     meta: durableQueryMeta,
   });
 
   useReconciliation({
-    owner: pair ? owner : null,
+    owner: pair ? liveOwner : null,
     subscribe: (options) => sdk.analytics.subscribe(options),
     refetch: query.refetch,
   });
@@ -138,10 +148,12 @@ export function useAnalytics(input: UseAnalyticsInput): UseAnalyticsReturn {
     : summary?.response.settlements.nextCursor ?? null;
 
   const forceRefresh = useCallback(async () => {
+    if (!owner) return;
     await query.refetch();
-  }, [query.refetch]);
+  }, [owner, query.refetch]);
 
   return {
+    owner,
     summary,
     requests: summary ? [...summary.requests, ...extraRequests] : [],
     activity: summary ? [...summary.activity, ...extraSettlements] : [],
@@ -149,9 +161,9 @@ export function useAnalytics(input: UseAnalyticsInput): UseAnalyticsReturn {
     hasMoreSettlements: Boolean(settlementCursor),
     isLoadingMore,
     loadMore,
-    isLoading: Boolean(owner) && (pairLoading || query.isLoading),
+    isLoading: Boolean(owner) && query.isLoading,
     isRefetching: query.isFetching && !query.isLoading,
-    error: pairError ?? query.error ?? null,
+    error: query.error ?? null,
     forceRefresh,
   };
 }

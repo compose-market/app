@@ -1,43 +1,52 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
 
-    <title>Compose.Market - AI Agent Marketplace</title>
-    
-    <!-- Open Graph / Social Meta Tags -->
-    <meta property="og:title" content="Compose.Market - Manowar" />
-    <meta property="og:description" content="Web3 Native Agent Marketplace & Workflow Composer on Avalanche" />
-    <meta property="og:type" content="website" />
-    <meta property="og:image" content="/branding/png/logo-512.png" />
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Compose.Market" />
-    <meta name="twitter:description" content="Build, Lease, and Monetize Autonomous Agent Workflows." />
-    <meta name="twitter:image" content="/branding/png/logo-512.png" />
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
 
-    <!-- Favicons for all platforms -->
-    <link rel="icon" type="image/png" href="/favicon.png?v=2" />
-    <link rel="icon" type="image/svg+xml" href="/branding/favicon.svg?v=2" />
-    <link rel="icon" type="image/png" sizes="32x32" href="/branding/favicons/favicon-32x32.png?v=2" />
-    <link rel="icon" type="image/png" sizes="16x16" href="/branding/favicons/favicon-16x16.png?v=2" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=2" />
-    <link rel="icon" type="image/png" sizes="192x192" href="/branding/favicons/android-chrome-192x192.png?v=2" />
-    <link rel="icon" type="image/png" sizes="512x512" href="/branding/favicons/android-chrome-512x512.png?v=2" />
-    
-    <!-- PWA Manifest -->
-    <link rel="manifest" href="/site.webmanifest" />
-    <meta name="theme-color" content="#22d3ee" />
-    
-    <!-- Legacy fallback -->
-    <link rel="shortcut icon" href="/favicon.png?v=2" />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <!-- Fonts: Orbitron (Display), Rajdhani (UI), Fira Code (Code) -->
-    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@300..700&family=Orbitron:wght@400..900&family=Rajdhani:wght@300..700&display=swap" rel="stylesheet">
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+  <title>Compose.Market - AI Agent Marketplace</title>
+
+  <!-- Open Graph / Social Meta Tags -->
+  <meta property="og:title" content="Compose.Market - Manowar" />
+  <meta property="og:description" content="Web3 Native Agent Marketplace & Workflow Composer on Avalanche" />
+  <meta property="og:type" content="website" />
+  <meta property="og:image" content="/branding/png/logo-512.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Compose.Market" />
+  <meta name="twitter:description" content="Build, Lease, and Monetize Autonomous Agent Workflows." />
+  <meta name="twitter:image" content="/branding/png/logo-512.png" />
+
+  <!-- Favicons for all platforms -->
+  <link rel="icon" type="image/png" href="/favicon.png?v=2" />
+  <link rel="icon" type="image/svg+xml" href="/branding/favicon.svg?v=2" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/branding/favicons/favicon-32x32.png?v=2" />
+  <link rel="icon" type="image/png" sizes="16x16" href="/branding/favicons/favicon-16x16.png?v=2" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=2" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/branding/favicons/android-chrome-192x192.png?v=2" />
+  <link rel="icon" type="image/png" sizes="512x512" href="/branding/favicons/android-chrome-512x512.png?v=2" />
+
+  <!-- PWA Manifest -->
+  <link rel="manifest" href="/site.webmanifest" />
+  <meta name="theme-color" content="#22d3ee" />
+
+  <!-- Legacy fallback -->
+  <link rel="shortcut icon" href="/favicon.png?v=2" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <!-- Wallet/API reconnect path: warm up connections used on every page load -->
+  <link rel="preconnect" href="https://api.compose.market">
+  <link rel="preconnect" href="https://embedded-wallet.thirdweb.com">
+  <link rel="preconnect" href="https://api.thirdweb.com">
+  <!-- Fonts: Orbitron (Display), Rajdhani (UI), Fira Code (Code) -->
+  <link
+    href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@300..700&family=Orbitron:wght@400..900&family=Rajdhani:wght@300..700&display=swap"
+    rel="stylesheet">
+</head>
+
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+
 </html>

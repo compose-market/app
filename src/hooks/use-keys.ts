@@ -6,6 +6,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { useActiveWalletConnectionStatus } from "thirdweb/react";
 import type { KeyRecord } from "@compose-market/sdk";
 import type { NetworkId } from "@compose-market/sdk/chains";
 
@@ -13,6 +14,7 @@ import { useReconciliation } from "@/hooks/use-reconciliation";
 import { useSession } from "@/hooks/use-session";
 import { useWalletPair } from "@/hooks/use-pair";
 import { SESSION_BUDGET_PRESETS } from "@/lib/chains";
+import { readCachedAccount } from "@/lib/cache";
 import { durableQueryMeta, DURABLE_CACHE_MAX_AGE } from "@/lib/queryClient";
 import { sdk } from "@/lib/sdk";
 
@@ -30,6 +32,7 @@ export interface CreateKeyInput {
 }
 
 export interface UseKeysReturn {
+  owner: string | null;
   keys: KeyRecord[];
   activeKeys: KeyRecord[];
   isLoading: boolean;
@@ -53,7 +56,14 @@ function isActiveKey(key: KeyRecord): boolean {
 
 export function useKeys(): UseKeysReturn {
   const { ensureKeyToken } = useSession();
-  const { owner, pair, isLoading: pairLoading, error: pairError } = useWalletPair();
+  const { owner: liveOwner, pair } = useWalletPair();
+  const connectionStatus = useActiveWalletConnectionStatus();
+  const [cachedAccount] = useState(() => readCachedAccount());
+  const owner = liveOwner ?? (
+    connectionStatus !== "disconnected"
+      ? cachedAccount?.address.toLowerCase() ?? null
+      : null
+  );
   const [createdToken, setCreatedToken] = useState<string | null>(null);
   const [createdKeyId, setCreatedKeyId] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -67,13 +77,13 @@ export function useKeys(): UseKeysReturn {
     },
     staleTime: STALE_TIME,
     gcTime: DURABLE_CACHE_MAX_AGE,
-    enabled: Boolean(owner && pair),
+    enabled: Boolean(owner),
     retry: 1,
     meta: durableQueryMeta,
   });
 
   useReconciliation({
-    owner: pair ? owner : null,
+    owner: pair ? liveOwner : null,
     subscribe: (options) => sdk.keys.subscribe(options),
     refetch: query.refetch,
   });
@@ -114,8 +124,9 @@ export function useKeys(): UseKeysReturn {
   });
 
   const forceRefresh = useCallback(async () => {
+    if (!owner) return;
     await query.refetch();
-  }, [query.refetch]);
+  }, [owner, query.refetch]);
 
   const createKey = useCallback(
     async (input: CreateKeyInput) => createMutation.mutateAsync(input),
@@ -135,11 +146,12 @@ export function useKeys(): UseKeysReturn {
   const activeKeys = useMemo(() => keys.filter(isActiveKey), [keys]);
 
   return {
+    owner,
     keys,
     activeKeys,
-    isLoading: Boolean(owner) && (pairLoading || query.isLoading),
+    isLoading: Boolean(owner) && query.isLoading,
     isRefetching: query.isFetching && !query.isLoading,
-    error: pairError ?? query.error ?? null,
+    error: query.error ?? null,
     forceRefresh,
     createKey,
     revokeKey,

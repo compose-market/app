@@ -8,10 +8,12 @@ import {
     type ReactNode,
 } from "react";
 import { usePostHog } from "@posthog/react";
-import { useActiveAccount, useAdminWallet } from "thirdweb/react";
+import { useQuery } from "@tanstack/react-query";
+import { useActiveAccount, useActiveWalletConnectionStatus, useAdminWallet } from "thirdweb/react";
 import { useSelectedUserAddress } from "@/hooks/use-address";
 import {
     Error,
+    type ActiveSessionMetadata,
     type BudgetEvent,
     type SessionActiveEvent,
     type SessionExpiredEvent,
@@ -33,6 +35,8 @@ import {
     thirdwebClient,
 } from "@/lib/chains";
 import { sdk } from "@/lib/sdk";
+import { readCachedAccount } from "@/lib/cache";
+import { durableQueryMeta, DURABLE_CACHE_MAX_AGE } from "@/lib/queryClient";
 import { buildSwigApproveTransaction } from "@/lib/svm/swig";
 import { deriveSwigConfigAddress } from "@/lib/svm/account";
 import { fetchSolanaUsdcBalance } from "@/hooks/use-multichain";
@@ -126,6 +130,7 @@ async function loadSessionThirdwebDeps(): Promise<SessionThirdwebDeps> {
 
 export function SessionProvider({ children }: { children: ReactNode }) {
     const account = useActiveAccount();
+    const connectionStatus = useActiveWalletConnectionStatus();
     const adminWallet = useAdminWallet();
     const { paymentNetwork, solanaChains } = useChain();
     const { userAddress, isResolving: userAddressResolving, evmSignerAddress, solanaAddress } = useSelectedUserAddress();
@@ -133,8 +138,60 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const [session, setSession] = useState<SessionState>(defaultSession);
     const [isCreating, setIsCreating] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [cachedAccount] = useState(() => readCachedAccount());
     const sessionRef = useRef<SessionState>(defaultSession);
     const attachedWalletKeyRef = useRef<string | null>(null);
+
+    // Metadata-only preload. This does NOT attach a wallet, hydrate/use/clear
+    // a token, start SSE, or participate in signing. It only asks the same
+    // Valkey-backed GET /api/session endpoint whether the cached address has
+    // an active session, while Thirdweb restores the real signer in parallel.
+    const cachedUserAddress = isEvmNetwork(paymentNetwork)
+        ? cachedAccount?.address ?? null
+        : cachedAccount?.solanaAddress ?? null;
+    const canPreloadSession = !userAddress
+        && connectionStatus !== "disconnected"
+        && Boolean(cachedUserAddress);
+    const { data: preloadedSession } = useQuery<SessionState, globalThis.Error>({
+        queryKey: ["session-metadata", cachedUserAddress, paymentNetwork],
+        queryFn: async ({ signal }) => {
+            if (!cachedUserAddress) return defaultSession;
+            const response = await sdk.fetch("/api/session", {
+                method: "GET",
+                signal,
+                key: null,
+                paymentMode: "key",
+                userAddress: cachedUserAddress,
+                network: paymentNetwork,
+            });
+            if (!response.ok) {
+                throw new globalThis.Error(`Session metadata lookup failed: ${response.status}`);
+            }
+            const status = await response.json() as ActiveSessionMetadata;
+            if (!status.hasSession) return defaultSession;
+            return {
+                isActive: status.status?.isActive ?? true,
+                budgetLimit: toNumberSafe(status.budgetLimit),
+                budgetUsed: toNumberSafe(status.budgetUsed),
+                budgetLocked: toNumberSafe(status.budgetLocked),
+                budgetRemaining: toNumberSafe(status.budgetRemaining),
+                expiresAt: typeof status.expiresAt === "number" ? status.expiresAt : null,
+                network: status.network ?? paymentNetwork,
+                // The live attach/getActive flow below remains the only token owner.
+                keyToken: null,
+            };
+        },
+        enabled: canPreloadSession,
+        staleTime: 15_000,
+        gcTime: DURABLE_CACHE_MAX_AGE,
+        retry: 1,
+        meta: durableQueryMeta,
+    });
+
+    useEffect(() => {
+        if (!canPreloadSession || !preloadedSession) return;
+        setSession(preloadedSession);
+    }, [canPreloadSession, preloadedSession]);
 
     // Keep the SDK wallet context aligned with the selected payment network.
     // On Solana, wait for the deterministic smart account instead of falling

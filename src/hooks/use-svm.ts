@@ -22,6 +22,7 @@ import { useAdminWallet } from "thirdweb/react";
 import { sdk } from "@/lib/sdk";
 import { useChain } from "@/contexts/Network";
 import { isEvmNetwork } from "@/lib/chains";
+import { clearSwigCreated, readSwigCreated, writeSwigCreated } from "@/lib/cache";
 import {
     deriveSwigId,
     deriveSwigConfigAddress,
@@ -70,22 +71,42 @@ export function useSolanaSmartAccount(): SolanaSmartAccountState & {
     const create = useCallback(async () => {
         if (!adminAddress || creatingRef.current) return;
         if (!selectedSolanaNetwork || !selectedSolanaRpcUrl) return;
+
+        const swigId = deriveSwigId(adminAddress);
+        const configPda = await deriveSwigConfigAddress(adminAddress);
+
+        const checkedKey = `${adminAddress.toLowerCase()}:${selectedSolanaNetwork}:${configPda}`;
+        if (checkedKeyRef.current === checkedKey) {
+            return;
+        }
+
+        // Existence cache hit: the Swig account is permanent once created, so
+        // trust the cache and never flip isCreating (which would gate
+        // useSelectedUserAddress → session sync). Revalidate in the
+        // background and self-heal if the cache ever lies.
+        if (readSwigCreated(adminAddress, selectedSolanaNetwork)) {
+            checkedKeyRef.current = checkedKey;
+            void (async () => {
+                try {
+                    const rpc = createSolanaRpcFromNetwork(selectedSolanaNetwork, selectedSolanaRpcUrl);
+                    const existing = await fetchSwigAccount(rpc, configPda);
+                    if (!existing) clearSwigCreated(adminAddress, selectedSolanaNetwork);
+                } catch {
+                    // Transient RPC failure: keep trusting the cache.
+                }
+            })();
+            return;
+        }
+
         creatingRef.current = true;
         setIsCreating(true);
         setError(null);
         try {
-            const swigId = deriveSwigId(adminAddress);
-            const configPda = await deriveSwigConfigAddress(adminAddress);
-
-            const checkedKey = `${adminAddress.toLowerCase()}:${selectedSolanaNetwork}:${configPda}`;
-            if (checkedKeyRef.current === checkedKey) {
-                return;
-            }
-
             const rpc = createSolanaRpcFromNetwork(selectedSolanaNetwork, selectedSolanaRpcUrl);
 
             const existing = await fetchSwigAccount(rpc, configPda);
             if (existing) {
+                writeSwigCreated(adminAddress, selectedSolanaNetwork);
                 checkedKeyRef.current = checkedKey;
                 return;
             }
@@ -118,6 +139,7 @@ export function useSolanaSmartAccount(): SolanaSmartAccountState & {
             if (!created) {
                 throw new Error("Solana account creation relayed but Swig account was not found");
             }
+            writeSwigCreated(adminAddress, selectedSolanaNetwork);
             checkedKeyRef.current = checkedKey;
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
