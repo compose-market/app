@@ -6,7 +6,7 @@ export interface MintShareData {
   network: string;
 }
 
-const STORAGE_KEY = 'compose_mint_share';
+const STORAGE_KEY = 'mint_share';
 
 export function saveMintSuccessForShare(data: MintShareData): void {
   try {

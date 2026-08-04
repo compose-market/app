@@ -62,7 +62,7 @@ export function initMixpanel(): Promise<void> {
 // Identity
 // ---------------------------------------------------------------------------
 
-const FIRST_SEEN_KEY = "mp_compose_first_seen";
+const FIRST_SEEN_KEY = "mp_first_seen";
 
 /**
  * Identify user by wallet address.
