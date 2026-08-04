@@ -53,7 +53,7 @@ test("network selector and connector balance queries include EVM and Solana acco
   assert.match(networkSelectorSource, /evmAddress/);
   assert.match(networkSelectorSource, /solanaAddress/);
   assert.match(connectorSource, /useSelectedUserAddress/);
-  assert.match(connectorSource, /useTotalBalance\(\{\s*evmAddress,\s*solanaAddress/s);
+  assert.match(connectorSource, /useTotalBalance\(\{[\s\S]*?evmAddress:[\s\S]*?solanaAddress:[\s\S]*?\}\s*,/s);
 });
 
 test("connector connects through an EVM smart account chain even when Solana is selected", () => {

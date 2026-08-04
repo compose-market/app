@@ -95,10 +95,14 @@ test("pair registration, persisted providers, owner reads, local filters, and on
   assert.match(app, /OwnerCacheBoundary/);
 
   assert.doesNotMatch(analytics, /useChain|paymentNetwork|wallets\.attach/);
+  assert.match(analytics, /readCachedAccount/);
+  assert.match(analytics, /enabled:\s*Boolean\(owner\)/);
   assert.match(analytics, /sdk\.analytics\.get\([^]*\{\s*userAddress:\s*owner\s*\}/);
   assert.match(analytics, /select:\s*summarize/);
   assert.match(analytics, /meta:\s*durableQueryMeta/);
   assert.match(keysHook, /sdk\.keys\.list\(\{\s*userAddress:\s*owner\s*\}\)/);
+  assert.match(keysHook, /readCachedAccount/);
+  assert.match(keysHook, /enabled:\s*Boolean\(owner\)/);
   assert.match(keysHook, /useReconciliation/);
 
   assert.match(dashboard, /toggleNetworkSelection/);
@@ -109,6 +113,10 @@ test("pair registration, persisted providers, owner reads, local filters, and on
   assert.match(keysPage, /Unable to load keys/);
 
   assert.doesNotMatch(session, /useWalletPair|sdk\.user\./);
+  assert.match(session, /sdk\.fetch\("\/api\/session"/);
+  assert.match(session, /key:\s*null/);
+  assert.match(session, /sdk\.wallets\.attach\(\{\s*address:\s*userAddress/s);
+  assert.doesNotMatch(session, /sdk\.wallets\.attach\(\{\s*address:\s*cachedUserAddress/s);
   assert.doesNotMatch(connector, /useWalletPair|sdk\.user\./);
 });
 
