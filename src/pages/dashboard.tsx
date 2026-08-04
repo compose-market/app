@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
 import { BarChart3, Filter, RefreshCw, Wallet } from "lucide-react";
-import { useActiveAccount } from "thirdweb/react";
 import type { InferenceAnalytics } from "@compose-market/sdk";
 import type { NetworkId } from "@compose-market/sdk/chains";
 
@@ -33,7 +32,6 @@ type StableFilters = Omit<
 >;
 
 export default function DashboardPage() {
-  const account = useActiveAccount();
   const { chains } = useChain();
   const [range, setRange] = useState<(typeof RANGES)[number]>(RANGES[2]);
   const [selectedNetworks, setSelectedNetworks] = useState<NetworkId[]>([]);
@@ -50,6 +48,7 @@ export default function DashboardPage() {
     limit: 100,
   }), [range.interval]);
   const {
+    owner,
     summary,
     requests,
     activity,
@@ -133,7 +132,7 @@ export default function DashboardPage() {
           variant="ghost"
           size="icon"
           onClick={() => void forceRefresh()}
-          disabled={isRefetching || isLoading}
+          disabled={!owner || isRefetching || isLoading}
           className="cm-shell-button cm-shell-button--ghost cm-shell-button--icon"
           aria-label="Refresh analytics"
         >
@@ -156,7 +155,7 @@ export default function DashboardPage() {
     </div>
   );
 
-  if (!account) return empty("Connect your wallet", "Connect your wallet to view your inference usage and spending analytics.");
+  if (!owner) return empty("Connect your wallet", "Connect your wallet to view your inference usage and spending analytics.");
   if (error && !summary) return empty("Unable to load usage data", error.message);
   if (isLoading && !summary) return empty("Loading usage data", "Reading your inference telemetry.", true);
   if (!summary || summary.requestCount === 0) return empty("No usage yet", "Head to the Playground to make your first inference call.");
