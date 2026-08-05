@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import { Link, useLocation } from "wouter";
 import {
   clearSelectedCatalogModel,
@@ -21,12 +21,7 @@ export default function ModelsPage() {
   const [, setLocation] = useLocation();
   const [search, setSearch] = useState("");
   const [selectedType, setSelectedType] = useState("all");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
-
-  useMemo(() => {
-    const timer = setTimeout(() => setDebouncedSearch(search), 300);
-    return () => clearTimeout(timer);
-  }, [search]);
+  const deferredSearch = useDeferredValue(search);
 
   const {
     models,
@@ -36,7 +31,7 @@ export default function ModelsPage() {
     error,
     forceRefresh,
     typeCategories,
-  } = useModels({ search: debouncedSearch, type: selectedType === "all" ? undefined : selectedType });
+  } = useModels({ search: deferredSearch, type: selectedType === "all" ? undefined : selectedType });
 
   const types = useMemo(() => typeCategories.map((entry) => entry.id).sort(), [typeCategories]);
 

@@ -45,7 +45,7 @@ import { ModelCard, type ModelParamsSchema } from "@/components/models/card";
 import { ModelSelector } from "@/components/models/selector";
 import { CapabilityChips } from "@/components/models/capabilities";
 import { useChat } from "@/hooks/use-chat";
-import { useModels } from "@/hooks/use-model";
+import { useModelDetails, useModelParams, useModels } from "@/hooks/use-model";
 import { CostReceiptIndicator } from "@/components/receipt-indicator";
 import { Switcher, type Option } from "@/components/control";
 import { useToast } from "@/hooks/use-toast";
@@ -145,7 +145,7 @@ export default function PlaygroundPage() {
   // ============ Filter State ============
   const [selectedType, setSelectedType] = useState("text-generation");
   const [selectedFamily, setSelectedFamily] = useState("all");
-  const { data: registryMeta } = useRegistryMeta();
+  const { data: registryMeta } = useRegistryMeta({ enabled: activeTab === "connectors" });
 
   // ============ Models (single source — filters cascade to all consumers) ============
   const {
@@ -219,9 +219,7 @@ export default function PlaygroundPage() {
   }, [paneCollapsed]);
 
   // Model Parameters State
-  const [modelParams, setModelParams] = useState<ModelParamsSchema | null>(null);
   const [paramValues, setParamValues] = useState<Record<string, unknown>>({});
-  const modelParamsCacheRef = useRef<Map<string, ModelParamsSchema | null>>(new Map());
 
   // Chat state
   const conversationId = useRef(`playground-${Date.now()}`).current;
@@ -277,43 +275,20 @@ export default function PlaygroundPage() {
   }, [selectedModel]);
 
   // Selected model info
-  const selectedModelInfo = useMemo(
+  const selectedModelIndex = useMemo(
     () => models.find((m) => m.modelId === selectedModel) || null,
     [models, selectedModel],
   );
-  // Fetch model params
+  const { data: selectedModelDetails } = useModelDetails(selectedModel);
+  const selectedModelInfo = selectedModelDetails ?? selectedModelIndex;
+  const { data: rawModelParams } = useModelParams<ModelParamsSchema>(selectedModel);
+  const modelParams = useMemo(() => (
+    rawModelParams && Object.keys(rawModelParams.params).length > 0 ? rawModelParams : null
+  ), [rawModelParams]);
+
   useEffect(() => {
-    if (!selectedModel || !selectedModelInfo) {
-      setModelParams(null);
-      setParamValues({});
-      return;
-    }
-    const cached = modelParamsCacheRef.current.get(selectedModel);
-    if (cached !== undefined) {
-      setModelParams(cached);
-      setParamValues(getDefaultParamValues(cached));
-      return;
-    }
-    const abortController = new AbortController();
-    const fetchParams = async () => {
-      try {
-        const data = await sdk.models.getParams(selectedModel);
-        if (abortController.signal.aborted) return;
-        const normalizedData = Object.keys(data.params).length > 0 ? (data as unknown as ModelParamsSchema) : null;
-        modelParamsCacheRef.current.set(selectedModel, normalizedData);
-        setModelParams(normalizedData);
-        setParamValues(getDefaultParamValues(normalizedData));
-      } catch (err) {
-        if (abortController.signal.aborted) return;
-        console.error("[playground] Failed to fetch model params:", err);
-        modelParamsCacheRef.current.set(selectedModel, null);
-        setModelParams(null);
-        setParamValues({});
-      }
-    };
-    void fetchParams();
-    return () => { abortController.abort(); };
-  }, [selectedModel, selectedModelInfo]);
+    setParamValues(getDefaultParamValues(modelParams));
+  }, [modelParams, selectedModel]);
 
   // Refs for hot values used in handleSendMessage (avoids callback churn)
   const messagesRef = useRef(messages);

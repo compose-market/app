@@ -88,6 +88,237 @@ export interface SelectedCatalogModel {
   contextWindow: ModelJsonValue;
 }
 
+export interface RankedCatalogModel {
+  model: CatalogModel;
+  score: number;
+  source: "local" | "semantic" | "hybrid";
+}
+
+export interface SemanticModelHit {
+  key?: string;
+  modelId: string;
+  provider: string;
+  family?: string;
+  name?: string | null;
+  score: number;
+}
+
+interface SearchProfile {
+  folded: string;
+  joined: string;
+  words: string;
+  compact: string;
+  tokens: string[];
+}
+
+function searchProfile(value: string): SearchProfile {
+  const folded = value
+    .normalize("NFKD")
+    .replace(/\p{M}+/gu, "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/gu, " ");
+  const joined = folded.replace(/\s+/gu, "");
+  const words = folded
+    .replace(/([a-z])([0-9])/gu, "$1 $2")
+    .replace(/([0-9])([a-z])/gu, "$1 $2")
+    .replace(/[^a-z0-9]+/gu, " ")
+    .trim()
+    .replace(/\s+/gu, " ");
+  return {
+    folded,
+    joined,
+    words,
+    compact: words.replace(/\s+/gu, ""),
+    tokens: words ? words.split(" ") : [],
+  };
+}
+
+/**
+ * Public normalization used by tests and remote-query cache keys.
+ * Separators and letter/number boundaries become spaces:
+ * `Qwen3.8-Max` -> `qwen 3 8 max`.
+ */
+export function normalizeModelSearchText(value: string): string {
+  return searchProfile(value).words;
+}
+
+function damerauLevenshtein(left: string, right: string): number {
+  if (left === right) return 0;
+  if (!left) return right.length;
+  if (!right) return left.length;
+
+  const rows = left.length + 1;
+  const columns = right.length + 1;
+  const matrix = Array.from({ length: rows }, () => new Array<number>(columns).fill(0));
+  for (let row = 0; row < rows; row += 1) matrix[row]![0] = row;
+  for (let column = 0; column < columns; column += 1) matrix[0]![column] = column;
+
+  for (let row = 1; row < rows; row += 1) {
+    for (let column = 1; column < columns; column += 1) {
+      const cost = left[row - 1] === right[column - 1] ? 0 : 1;
+      matrix[row]![column] = Math.min(
+        matrix[row - 1]![column]! + 1,
+        matrix[row]![column - 1]! + 1,
+        matrix[row - 1]![column - 1]! + cost,
+      );
+      if (
+        row > 1
+        && column > 1
+        && left[row - 1] === right[column - 2]
+        && left[row - 2] === right[column - 1]
+      ) {
+        matrix[row]![column] = Math.min(
+          matrix[row]![column]!,
+          matrix[row - 2]![column - 2]! + cost,
+        );
+      }
+    }
+  }
+  return matrix[left.length]![right.length]!;
+}
+
+function fuzzyDistance(query: string, candidate: string): number | null {
+  if (query.length < 3 || !candidate) return null;
+  const comparable = candidate.slice(0, Math.min(candidate.length, query.length));
+  const distance = damerauLevenshtein(query, comparable);
+  const allowed = query.length <= 4 ? 1 : query.length <= 8 ? 2 : Math.min(3, Math.floor(query.length * 0.25));
+  return distance <= allowed ? distance : null;
+}
+
+function scoreProfile(query: SearchProfile, candidate: SearchProfile, weight: number, fuzzy: boolean): number {
+  if (!query.compact || !candidate.compact) return 0;
+
+  if (candidate.folded === query.folded) return 1_200 * weight;
+  if (candidate.joined === query.joined) return 1_175 * weight;
+  if (candidate.compact === query.compact) return 1_150 * weight;
+
+  if (candidate.folded.startsWith(query.folded)) return (1_075 - Math.min(60, candidate.folded.length - query.folded.length)) * weight;
+  if (candidate.joined.startsWith(query.joined)) return (1_050 - Math.min(60, candidate.joined.length - query.joined.length)) * weight;
+  if (candidate.compact.startsWith(query.compact)) return (1_025 - Math.min(60, candidate.compact.length - query.compact.length)) * weight;
+
+  // One-character queries may match exact prefixes (for example xAI), but
+  // must not match arbitrary letters buried in every name or description.
+  if (query.compact.length < 2) return 0;
+
+  const joinedIndex = candidate.joined.indexOf(query.joined);
+  if (joinedIndex >= 0) return (900 - Math.min(100, joinedIndex * 4)) * weight;
+  const compactIndex = candidate.compact.indexOf(query.compact);
+  if (compactIndex >= 0) return (875 - Math.min(100, compactIndex * 4)) * weight;
+
+  if (query.tokens.length > 0) {
+    const matched = query.tokens.filter((token) => (
+      candidate.tokens.some((candidateToken) => candidateToken === token || candidateToken.startsWith(token))
+    )).length;
+    if (matched === query.tokens.length) return (780 + matched * 8) * weight;
+    if (query.tokens.length > 1 && matched / query.tokens.length >= 0.75) return (650 + matched * 8) * weight;
+  }
+
+  if (fuzzy) {
+    const compactDistance = fuzzyDistance(query.compact, candidate.compact);
+    if (compactDistance !== null) return (690 - compactDistance * 70) * weight;
+
+    if (query.tokens.length > 0) {
+      let totalDistance = 0;
+      for (const token of query.tokens) {
+        const best = candidate.tokens.reduce<number | null>((current, candidateToken) => {
+          const distance = fuzzyDistance(token, candidateToken);
+          if (distance === null) return current;
+          return current === null ? distance : Math.min(current, distance);
+        }, null);
+        if (best === null) return 0;
+        totalDistance += best;
+      }
+      return (640 - totalDistance * 55) * weight;
+    }
+  }
+
+  return 0;
+}
+
+function decimalVersionBonus(query: SearchProfile, candidate: SearchProfile): number {
+  const versions = query.folded.match(/\d+(?:\.\d+)+/gu) ?? [];
+  return versions.some((version) => candidate.folded.includes(version)) ? 90 : 0;
+}
+
+function modelSearchScore(model: CatalogModel, query: SearchProfile): number {
+  const modelId = searchProfile(model.modelId);
+  const name = searchProfile(model.name || "");
+  const nameScore = Math.max(
+    scoreProfile(query, modelId, 1, true) + decimalVersionBonus(query, modelId),
+    scoreProfile(query, name, 0.98, true) + decimalVersionBonus(query, name),
+  );
+  const familyScore = Math.max(
+    scoreProfile(query, searchProfile(model.family || ""), 0.72, true),
+    scoreProfile(query, searchProfile(model.provider), 0.7, true),
+  );
+  const typeScore = scoreProfile(query, searchProfile(getModelTypeValues(model).join(" ")), 0.62, false);
+  const descriptionScore = scoreProfile(query, searchProfile(model.description || ""), 0.48, false);
+  return Math.max(nameScore, familyScore, typeScore, descriptionScore);
+}
+
+/** Rank a catalog locally. This is intentionally deterministic and fast for 700+ rows. */
+export function rankCatalogModels(models: CatalogModel[], query: string, limit = 50): RankedCatalogModel[] {
+  const profile = searchProfile(query);
+  if (!profile.compact) {
+    return models.slice(0, limit).map((model, index) => ({ model, score: models.length - index, source: "local" }));
+  }
+
+  return models
+    .map((model, index) => ({ model, index, score: modelSearchScore(model, profile) }))
+    .filter((entry) => entry.score >= 260)
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .slice(0, limit)
+    .map(({ model, score }) => ({ model, score, source: "local" as const }));
+}
+
+function modelIdentity(provider: string, modelId: string): string {
+  return `${provider.toLowerCase()}:${modelId.toLowerCase()}`;
+}
+
+/**
+ * Merge semantic ranks into local ranks without ever selecting Worker-owned
+ * model objects. Every semantic hit is resolved back to the canonical catalog.
+ */
+export function mergeSemanticModelRanks(
+  catalog: CatalogModel[],
+  local: RankedCatalogModel[],
+  semantic: SemanticModelHit[],
+  limit = 50,
+): RankedCatalogModel[] {
+  const byIdentity = new Map(catalog.map((model) => [modelIdentity(model.provider, model.modelId), model]));
+  const byModelId = new Map<string, CatalogModel[]>();
+  for (const model of catalog) {
+    const id = model.modelId.toLowerCase();
+    byModelId.set(id, [...(byModelId.get(id) || []), model]);
+  }
+
+  const ranked = new Map<string, RankedCatalogModel>();
+  for (const item of local) {
+    ranked.set(modelIdentity(item.model.provider, item.model.modelId), item);
+  }
+
+  for (const hit of semantic) {
+    const identity = modelIdentity(hit.provider, hit.modelId);
+    const exact = byIdentity.get(identity);
+    const fallback = byModelId.get(hit.modelId.toLowerCase());
+    const model = exact ?? (fallback?.length === 1 ? fallback[0] : undefined);
+    if (!model) continue;
+
+    const semanticScore = 600 + Math.max(0, Math.min(1, hit.score)) * 260;
+    const existing = ranked.get(modelIdentity(model.provider, model.modelId));
+    ranked.set(modelIdentity(model.provider, model.modelId), {
+      model,
+      score: existing ? Math.max(existing.score, semanticScore) + 35 : semanticScore,
+      source: existing ? "hybrid" : "semantic",
+    });
+  }
+
+  return [...ranked.values()]
+    .sort((left, right) => right.score - left.score)
+    .slice(0, limit);
+}
+
 export const MODEL_SELECTION_STORAGE_KEY = "selectedCatalogModel";
 
 export function getModelTypeValues(model: CatalogModel): string[] {
