@@ -1,8 +1,8 @@
 /**
  * useModels - Central React Query hook for model fetching
  *
- * Single source of truth for all model data in the frontend. Fetches from
- * `/v1/models` via `sdk.models.list()` with a 6-hour stale cache.
+ * Single source of truth for selector/search model data. Fetches the compact
+ * `/v1/models/index`; selected full cards and params use independent queries.
  */
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -10,10 +10,14 @@ import { useMemo, useCallback } from "react";
 import {
     buildTypeCategories,
     getModelTypeValues,
+    normalizeModelSearchText,
+    rankCatalogModels,
     type CatalogModel,
     type ModelCategory,
+    type SemanticModelHit,
 } from "@/lib/models";
 import { sdk } from "@/lib/sdk";
+import { durableQueryMeta, DURABLE_CACHE_MAX_AGE } from "@/lib/queryClient";
 
 // =============================================================================
 // Types
@@ -42,19 +46,29 @@ export interface UseModelsReturn {
 // =============================================================================
 
 const STALE_TIME = 6 * 60 * 60 * 1000; // 6 hours
-const CACHE_KEY = ["models-catalog"];
+const CACHE_KEY = ["models-catalog-index"];
+const MODELS_URL = (import.meta.env.VITE_MODELS_URL ?? "https://models.compose.market").replace(/\/+$/u, "");
 
 // =============================================================================
 // Hook
 // =============================================================================
 
 async function fetchCatalog(): Promise<CatalogModel[]> {
-    const result = await sdk.models.list();
+    const response = await sdk.fetch("/v1/models/index", {
+        method: "GET",
+        cache: "no-cache",
+        key: null,
+        paymentMode: "key",
+    });
+    if (!response.ok) {
+        throw new Error(`Failed to load model index: ${response.status}`);
+    }
+    const result = await response.json() as { data?: unknown };
     if (!Array.isArray(result.data) || result.data.length === 0) {
-        throw new Error("No models returned from /v1/models");
+        throw new Error("No models returned from /v1/models/index");
     }
 
-    return result.data;
+    return result.data as CatalogModel[];
 }
 
 export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
@@ -71,8 +85,9 @@ export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
         queryKey: CACHE_KEY,
         queryFn: fetchCatalog,
         staleTime: STALE_TIME,
-        gcTime: STALE_TIME * 2, // Keep cached 12 hours
+        gcTime: DURABLE_CACHE_MAX_AGE,
         enabled,
+        meta: durableQueryMeta,
     });
 
     // Filter models based on options
@@ -88,13 +103,7 @@ export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
         }
 
         if (search?.trim()) {
-            const query = search.toLowerCase().trim();
-            result = result.filter(
-                (model) =>
-                    model.modelId.toLowerCase().includes(query) ||
-                    (model.name || "").toLowerCase().includes(query) ||
-                    (model.family || model.provider).toLowerCase().includes(query)
-            );
+            result = rankCatalogModels(result, search, result.length).map((entry) => entry.model);
         }
 
         return result;
@@ -118,6 +127,120 @@ export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
         forceRefresh,
         lastUpdated,
         typeCategories,
+    };
+}
+
+export interface UseModelResourceReturn<T> {
+    data: T | null;
+    isLoading: boolean;
+    error: Error | null;
+}
+
+async function fetchModelResource<T>(path: string, signal: AbortSignal): Promise<T> {
+    const response = await sdk.fetch(path, {
+        method: "GET",
+        signal,
+        key: null,
+        paymentMode: "key",
+    });
+    if (!response.ok) throw new Error(`Model resource request failed: ${response.status}`);
+    return await response.json() as T;
+}
+
+export function useModelDetails(modelId: string | null): UseModelResourceReturn<CatalogModel> {
+    const result = useQuery<CatalogModel, Error>({
+        queryKey: ["model-card", modelId],
+        queryFn: ({ signal }) => fetchModelResource<CatalogModel>(
+            `/v1/models/${encodeURIComponent(modelId!)}`,
+            signal,
+        ),
+        enabled: Boolean(modelId),
+        staleTime: STALE_TIME,
+        gcTime: DURABLE_CACHE_MAX_AGE,
+        meta: durableQueryMeta,
+    });
+    return { data: result.data ?? null, isLoading: result.isLoading, error: result.error ?? null };
+}
+
+export function useModelParams<T>(modelId: string | null): UseModelResourceReturn<T> {
+    const result = useQuery<T, Error>({
+        queryKey: ["model-params", modelId],
+        queryFn: ({ signal }) => fetchModelResource<T>(
+            `/v1/models/${encodeURIComponent(modelId!)}/params`,
+            signal,
+        ),
+        enabled: Boolean(modelId),
+        staleTime: STALE_TIME,
+        gcTime: DURABLE_CACHE_MAX_AGE,
+        meta: durableQueryMeta,
+    });
+    return { data: result.data ?? null, isLoading: result.isLoading, error: result.error ?? null };
+}
+
+export interface UseSemanticModelSearchOptions {
+    enabled?: boolean;
+    limit?: number;
+}
+
+export interface UseSemanticModelSearchReturn {
+    hits: SemanticModelHit[];
+    isLoading: boolean;
+    error: Error | null;
+}
+
+/**
+ * Semantic ranking hints from models.compose.market. These are never selected
+ * directly; CommandBar resolves every hit back to the canonical loaded catalog.
+ */
+export function useSemanticModelSearch(
+    query: string,
+    options: UseSemanticModelSearchOptions = {},
+): UseSemanticModelSearchReturn {
+    const normalized = normalizeModelSearchText(query);
+    const limit = Math.min(Math.max(options.limit ?? 20, 1), 50);
+    const enabled = (options.enabled ?? true) && normalized.replace(/\s+/gu, "").length >= 3;
+
+    const result = useQuery<SemanticModelHit[], Error>({
+        queryKey: ["models-semantic-search", normalized, limit],
+        queryFn: async ({ signal }) => {
+            const target = new URL(`${MODELS_URL}/search`);
+            target.searchParams.set("q", query.trim());
+            target.searchParams.set("limit", String(limit));
+            target.searchParams.set("compact", "1");
+            const response = await fetch(target, {
+                method: "GET",
+                headers: { Accept: "application/json" },
+                signal,
+            });
+            if (!response.ok) {
+                throw new Error(`Semantic model search failed: ${response.status}`);
+            }
+            const body = await response.json() as { data?: unknown };
+            if (!Array.isArray(body.data)) return [];
+            return body.data.flatMap((item): SemanticModelHit[] => {
+                if (!item || typeof item !== "object") return [];
+                const row = item as Record<string, unknown>;
+                if (typeof row.modelId !== "string" || typeof row.provider !== "string") return [];
+                return [{
+                    ...(typeof row.key === "string" ? { key: row.key } : {}),
+                    modelId: row.modelId,
+                    provider: row.provider,
+                    ...(typeof row.family === "string" ? { family: row.family } : {}),
+                    ...(typeof row.name === "string" || row.name === null ? { name: row.name as string | null } : {}),
+                    score: typeof row.score === "number" ? row.score : 0,
+                }];
+            });
+        },
+        enabled,
+        staleTime: 5 * 60 * 1000,
+        gcTime: 30 * 60 * 1000,
+        retry: 1,
+    });
+
+    return {
+        hits: result.data ?? [],
+        isLoading: result.isFetching,
+        error: result.error ?? null,
     };
 }
 

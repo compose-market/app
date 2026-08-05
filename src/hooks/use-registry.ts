@@ -474,10 +474,11 @@ export function useRegistryServer(registryId: string | null) {
     });
 }
 
-export function useRegistryMeta() {
+export function useRegistryMeta(options: { enabled?: boolean } = {}) {
     return useQuery({
         queryKey: ["registry", "meta"],
         queryFn: fetchRegistryMeta,
+        enabled: options.enabled ?? true,
         staleTime: METADATA_STALE_TIME,
         gcTime: REGISTRY_GC_TIME,
     });
