@@ -6,11 +6,20 @@
  *
  * Uses useModels hook (no extra fetches), renders via portal.
  */
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback, useDeferredValue } from "react";
 import { createPortal } from "react-dom";
 import { ShellCommandItem, ShellCommandOverlay, ShellCommandPanel } from "@compose-market/theme/shell";
-import { useModels } from "@/hooks/use-model";
-import { formatModelTypeLabel, getPrimaryModelType, getDefaultModelPricingSections, getModelTypeValues, getFamilyLogoUrl } from "@/lib/models";
+import { useModels, useSemanticModelSearch } from "@/hooks/use-model";
+import {
+  formatModelTypeLabel,
+  getPrimaryModelType,
+  getDefaultModelPricingSections,
+  getModelTypeValues,
+  getFamilyLogoUrl,
+  mergeSemanticModelRanks,
+  normalizeModelSearchText,
+  rankCatalogModels,
+} from "@/lib/models";
 import type { CatalogModel } from "@/lib/models";
 import { typeIcon } from "@compose-market/theme/icons/react";
 
@@ -75,16 +84,39 @@ function getFamilyColor(family: string): { bg: string; text: string } {
   };
 }
 
+function selectionKey(model: CatalogModel): string {
+  return `${model.provider.toLowerCase()}:${model.modelId.toLowerCase()}`;
+}
+
 export function CommandBar({ open, onOpenChange, value, onSelect, type, family }: CommandBarProps) {
   const [searchQuery, setSearchQuery] = useState("");
+  const [semanticQuery, setSemanticQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const selectedKeyRef = useRef<string | null>(null);
 
-  const { models } = useModels({});
+  const { models } = useModels({ enabled: open });
+  const deferredQuery = useDeferredValue(searchQuery);
 
-  // Apply external + search filters
-  const filteredModels = useMemo(() => {
+  useEffect(() => {
+    const query = searchQuery.trim();
+    if (query.length < 3) {
+      setSemanticQuery("");
+      return;
+    }
+    const timer = window.setTimeout(() => setSemanticQuery(query), 200);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery]);
+
+  const { hits: semanticHits, isLoading: semanticLoading } = useSemanticModelSearch(semanticQuery, {
+    enabled: open,
+    limit: 20,
+  });
+
+  // External filters apply before either local or semantic ranking.
+  const eligibleModels = useMemo(() => {
+    if (!open) return [];
     let result = models;
 
     if (type && type !== "all") {
@@ -93,21 +125,30 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, family }
     if (family && family !== "all") {
       result = result.filter((m: CatalogModel) => (m.family || m.provider) === family);
     }
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      result = result.filter(
-        (m: CatalogModel) =>
-          m.modelId.toLowerCase().includes(q) ||
-          (m.name || "").toLowerCase().includes(q) ||
-          (m.family || m.provider).toLowerCase().includes(q) ||
-          getPrimaryModelType(m).toLowerCase().includes(q)
-      );
-    }
     return result;
-  }, [models, type, family, searchQuery]);
+  }, [family, models, open, type]);
+
+  const searchActive = Boolean(deferredQuery.trim());
+  const localRanks = useMemo(
+    () => searchActive ? rankCatalogModels(eligibleModels, deferredQuery, 50) : [],
+    [deferredQuery, eligibleModels, searchActive],
+  );
+  const activeSemanticHits = useMemo(() => (
+    normalizeModelSearchText(semanticQuery) === normalizeModelSearchText(deferredQuery)
+      ? semanticHits
+      : []
+  ), [deferredQuery, semanticHits, semanticQuery]);
+  const filteredModels = useMemo(() => {
+    if (!searchActive) return eligibleModels;
+    return mergeSemanticModelRanks(eligibleModels, localRanks, activeSemanticHits, 50)
+      .map((entry) => entry.model);
+  }, [activeSemanticHits, eligibleModels, localRanks, searchActive]);
 
   // Group by family
   const grouped = useMemo(() => {
+    if (searchActive) {
+      return [["Best matches", filteredModels] as [string, CatalogModel[]]];
+    }
     const groups = new Map<string, CatalogModel[]>();
     for (const m of filteredModels) {
       const fam = m.family || m.provider;
@@ -117,13 +158,14 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, family }
     }
     // Sort groups by size descending
     return Array.from(groups.entries()).sort((a, b) => b[1].length - a[1].length);
-  }, [filteredModels]);
+  }, [filteredModels, searchActive]);
 
   // Flat list for keyboard navigation
   const flatList = useMemo(() => grouped.flatMap(([, models]) => models), [grouped]);
 
   // Reset selection on filter change
   useEffect(() => {
+    selectedKeyRef.current = null;
     setSelectedIndex(0);
   }, [searchQuery, type, family]);
 
@@ -131,10 +173,24 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, family }
   useEffect(() => {
     if (open) {
       setSearchQuery("");
+      setSemanticQuery("");
+      selectedKeyRef.current = null;
       setSelectedIndex(0);
       requestAnimationFrame(() => inputRef.current?.focus());
     }
   }, [open]);
+
+  // Semantic results can arrive later. If the user already moved selection,
+  // preserve that model rather than silently moving the keyboard target.
+  useEffect(() => {
+    const selectedKey = selectedKeyRef.current;
+    if (!selectedKey) {
+      setSelectedIndex((index) => Math.min(index, Math.max(0, flatList.length - 1)));
+      return;
+    }
+    const nextIndex = flatList.findIndex((model) => selectionKey(model) === selectedKey);
+    if (nextIndex >= 0) setSelectedIndex(nextIndex);
+  }, [flatList]);
 
   // Scroll selected item into view
   useEffect(() => {
@@ -150,11 +206,19 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, family }
       switch (e.key) {
         case "ArrowDown":
           e.preventDefault();
-          setSelectedIndex((i) => Math.min(i + 1, flatList.length - 1));
+          setSelectedIndex((index) => {
+            const next = Math.min(index + 1, Math.max(0, flatList.length - 1));
+            selectedKeyRef.current = flatList[next] ? selectionKey(flatList[next]) : null;
+            return next;
+          });
           break;
         case "ArrowUp":
           e.preventDefault();
-          setSelectedIndex((i) => Math.max(i - 1, 0));
+          setSelectedIndex((index) => {
+            const next = Math.max(index - 1, 0);
+            selectedKeyRef.current = flatList[next] ? selectionKey(flatList[next]) : null;
+            return next;
+          });
           break;
         case "Enter":
           e.preventDefault();
@@ -191,7 +255,9 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, family }
 
         <div className="cm-command-list" ref={listRef}>
           {flatList.length === 0 ? (
-            <div className="cm-command-empty">No models match "{searchQuery}"</div>
+            <div className="cm-command-empty">
+              {semanticLoading ? `Searching catalog for "${searchQuery}"…` : `No models match "${searchQuery}"`}
+            </div>
           ) : (
             grouped.map(([familyName, familyModels]) => {
               const fColor = getFamilyColor(familyName);
@@ -210,12 +276,13 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, family }
                 {familyModels.map((model) => {
                   const idx = flatList.indexOf(model);
                   const modelType = getPrimaryModelType(model);
+                  const modelColor = getFamilyColor(model.family || model.provider);
                   const isSelected = idx === selectedIndex;
                   const isCurrent = model.modelId === value;
 
                   return (
                     <ShellCommandItem
-                      key={model.modelId}
+                      key={selectionKey(model)}
                       data-cmd-item
                       selected={isSelected}
                       current={isCurrent}
@@ -223,7 +290,10 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, family }
                         onSelect(model.modelId);
                         onOpenChange(false);
                       }}
-                      onMouseEnter={() => setSelectedIndex(idx)}
+                      onMouseEnter={() => {
+                        selectedKeyRef.current = selectionKey(model);
+                        setSelectedIndex(idx);
+                      }}
                       className="flex items-center justify-between gap-2"
                     >
                       <div className="flex-1 min-w-0 flex items-center justify-between">
@@ -237,7 +307,7 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, family }
                       <div className="cm-command-item__meta cm-model-command-meta hidden sm:flex">
                         <span
                           className="cm-command-item__family"
-                          style={{ background: fColor.bg, color: fColor.text }}
+                          style={{ background: modelColor.bg, color: modelColor.text }}
                         >{model.provider}</span>
                         <span className="cm-command-item__type">
                           {formatModelTypeLabel(modelType)}
@@ -256,6 +326,7 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, family }
         <div className="cm-command-footer">
           <span>
             {filteredModels.length} of {models.length} models
+            {semanticLoading && searchActive ? " · semantic search…" : ""}
           </span>
           <div className="cm-command-footer__hints">
             <span className="cm-command-hint">

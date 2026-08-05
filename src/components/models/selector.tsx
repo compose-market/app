@@ -30,7 +30,7 @@ export function ModelSelector({
     const open = controlledOpen !== undefined ? controlledOpen : localOpen;
     const setOpen = controlledOnOpenChange !== undefined ? controlledOnOpenChange : setLocalOpen;
 
-    const { models } = useModels({ type, family });
+    const { models } = useModels({});
 
     const selectedModel = useMemo(
         () => models.find((m) => m.modelId === value) || null,
