@@ -2,7 +2,27 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { ComposeSDK } from "@compose-market/sdk";
-import type { CatalogModel } from "../src/lib/models";
+import {
+  mergeSemanticModelRanks,
+  normalizeModelSearchText,
+  rankCatalogModels,
+  type CatalogModel,
+} from "../src/lib/models";
+
+function catalogModel(modelId: string, name: string, provider = "alibaba"): CatalogModel {
+  return {
+    modelId,
+    provider: provider as CatalogModel["provider"],
+    family: provider,
+    name,
+    type: "text generation",
+    description: `${name} language model`,
+    input: ["text"],
+    output: ["text"],
+    contextWindow: null,
+    pricing: null,
+  };
+}
 
 test("web consumes @compose-market/sdk as a third-party integrator", async () => {
   const calls: Array<{ host: string; method: string; path: string; headers: Headers }> = [];
@@ -107,4 +127,66 @@ test("web catalog models can carry API-owned operations without local routing", 
 
   assert.equal(Array.isArray(model.operations), true);
   assert.equal((model.operations?.[0] as { operation?: string }).operation, "text-to-speech");
+});
+
+test("model search normalizes separators and letter-number boundaries", () => {
+  assert.equal(normalizeModelSearchText(" QWEN-3.8_Max "), "qwen 3 8 max");
+  const models = [
+    catalogModel("qwen3.8-max", "Qwen3.8-Max"),
+    catalogModel("qwen3-8b", "Qwen3-8B"),
+    catalogModel("llama-3.8", "Llama 3.8", "meta"),
+  ];
+
+  assert.equal(rankCatalogModels(models, "qwen 3.8")[0]?.model.modelId, "qwen3.8-max");
+  assert.equal(rankCatalogModels(models, "QWEN-3.8")[0]?.model.modelId, "qwen3.8-max");
+});
+
+test("model search tolerates a short typo without matching every short query", () => {
+  const models = [
+    catalogModel("qwen3.8-max", "Qwen3.8-Max"),
+    catalogModel("gpt-4o", "GPT-4o", "openai"),
+    catalogModel("llama-3.3", "Llama 3.3", "meta"),
+  ];
+
+  assert.equal(rankCatalogModels(models, "gwen 3.8")[0]?.model.modelId, "qwen3.8-max");
+  assert.deepEqual(rankCatalogModels(models, "x"), []);
+});
+
+test("semantic hits enrich rankings but resolve to canonical catalog models", () => {
+  const qwen = catalogModel("qwen3.8-max", "Qwen3.8-Max");
+  const vision = catalogModel("vision-pro", "Vision Pro", "google");
+  const catalog = [qwen, vision];
+  const local = rankCatalogModels(catalog, "cheap vision model");
+  const merged = mergeSemanticModelRanks(catalog, local, [{
+    modelId: "vision-pro",
+    provider: "google",
+    score: 0.97,
+  }]);
+
+  assert.equal(merged[0]?.model, vision);
+  assert.equal(merged[0]?.source, "semantic");
+  assert.deepEqual(mergeSemanticModelRanks(catalog, [], [{
+    modelId: "missing-model",
+    provider: "unknown",
+    score: 1,
+  }]), []);
+});
+
+test("Playground catalog loading uses the durable compact index and independent resources", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const [modelsHook, playground, commandBar] = await Promise.all([
+    readFile(new URL("../src/hooks/use-model.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/pages/playground.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/models/command-bar.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(modelsHook, /sdk\.fetch\("\/v1\/models\/index"/);
+  assert.match(modelsHook, /meta:\s*durableQueryMeta/);
+  assert.match(modelsHook, /useModelDetails/);
+  assert.match(modelsHook, /useModelParams/);
+  assert.doesNotMatch(modelsHook, /sdk\.models\.list\(\)/);
+  assert.match(playground, /useRegistryMeta\(\{\s*enabled:\s*activeTab\s*===\s*"connectors"\s*\}\)/);
+  assert.doesNotMatch(playground, /sdk\.models\.getParams/);
+  assert.match(commandBar, /useModels\(\{\s*enabled:\s*open\s*\}\)/);
+  assert.match(commandBar, /if\s*\(!open\)\s*return\s*\[\]/);
 });
