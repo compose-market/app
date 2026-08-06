@@ -40,6 +40,8 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { formatWeiUsd, timeAgo } from "@/lib/receipts";
 import { QuickstartPanel, type QuickstartSegment } from "@/components/keys/quickstart";
+import { SessionBudgetDialog } from "@/components/session";
+import { useSession } from "@/hooks/use-session";
 
 function formatTimeRemaining(expiresAt: number): string {
   const remaining = expiresAt - Date.now();
@@ -83,7 +85,9 @@ export function ApiKeysPanel() {
   const keysState = useKeys();
   const { owner, keys, activeKeys, isLoading, isRefetching, error, forceRefresh, revokeKey, isRevoking } = keysState;
   const { isConnected } = useWalletAccount();
+  const { sessionActive } = useSession();
   const [createOpen, setCreateOpen] = useState(false);
+  const [sessionOpen, setSessionOpen] = useState(false);
   const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null);
   const [purposeFilter, setPurposeFilter] = useState<PurposeFilter>("all");
   const [revokeTarget, setRevokeTarget] = useState<KeyRecord | null>(null);
@@ -139,6 +143,12 @@ export function ApiKeysPanel() {
 
   const openCreate = useCallback(() => {
     if (isConnected) setCreateOpen(true);
+  }, [isConnected]);
+
+  const openSession = useCallback(() => {
+    if (!isConnected) return;
+    setGuideOpen(false);
+    setSessionOpen(true);
   }, [isConnected]);
 
   // The quickstart is static guidance — it renders instantly in every
@@ -311,7 +321,14 @@ export function ApiKeysPanel() {
         </div>
 
         <div className="cm-split__side">
-          <QuickstartPanel segment={segment} onSegmentChange={setSegment} highlight={highlight} onCreateKey={openCreate} />
+          <QuickstartPanel
+            segment={segment}
+            onSegmentChange={setSegment}
+            highlight={highlight}
+            sessionActive={sessionActive}
+            onCreateSession={openSession}
+            onCreateKey={openCreate}
+          />
         </div>
       </div>
 
@@ -324,10 +341,17 @@ export function ApiKeysPanel() {
             </SheetTitle>
           </SheetHeader>
           <div className="cm-sheet-body cm-sheet-body--inspect">
-            <QuickstartPanel segment={segment} onSegmentChange={setSegment} highlight={false} onCreateKey={() => {
-              setGuideOpen(false);
-              openCreate();
-            }} />
+            <QuickstartPanel
+              segment={segment}
+              onSegmentChange={setSegment}
+              highlight={false}
+              sessionActive={sessionActive}
+              onCreateSession={openSession}
+              onCreateKey={() => {
+                setGuideOpen(false);
+                openCreate();
+              }}
+            />
           </div>
         </SheetContent>
       </Sheet>
@@ -337,6 +361,12 @@ export function ApiKeysPanel() {
         onOpenChange={setCreateOpen}
         keysState={keysState}
         onOpenQuickstart={openQuickstart}
+      />
+
+      <SessionBudgetDialog
+        open={sessionOpen}
+        onOpenChange={setSessionOpen}
+        showTrigger={false}
       />
 
       <AlertDialog open={revokeTarget !== null} onOpenChange={(open) => { if (!open) setRevokeTarget(null); }}>

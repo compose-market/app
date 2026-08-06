@@ -169,7 +169,15 @@ function CopyRow({ id, label, value, copiedId, onCopy }: {
 
 type DevSnippetTab = "curl" | "python" | "typescript";
 
-function IntegratePane({ onCreateKey }: { onCreateKey?: () => void }) {
+function IntegratePane({
+  sessionActive,
+  onCreateSession,
+  onCreateKey,
+}: {
+  sessionActive: boolean;
+  onCreateSession?: () => void;
+  onCreateKey?: () => void;
+}) {
   const [tab, setTab] = useState<DevSnippetTab>("curl");
 
   return (
@@ -187,14 +195,25 @@ function IntegratePane({ onCreateKey }: { onCreateKey?: () => void }) {
         <button
           type="button"
           className="cm-quickstart__step"
+          data-active={sessionActive ? undefined : "true"}
+          data-complete={sessionActive ? "true" : undefined}
+          onClick={onCreateSession}
+          disabled={sessionActive}
+          aria-label={sessionActive ? "Session Active" : "Create a Session"}
+        >
+          <strong>1</strong>{sessionActive ? "Session Active" : "Create a Session"}
+        </button>
+        <button
+          type="button"
+          className="cm-quickstart__step"
           data-active="true"
           onClick={onCreateKey}
-          aria-label="Create a Compose Key"
+          aria-label="Export a Compose Key"
         >
-          <strong>1</strong>Create a Compose Key
+          <strong>2</strong>Export a Compose Key
         </button>
-        <span className="cm-quickstart__step"><strong>2</strong>Export the env var</span>
-        <span className="cm-quickstart__step"><strong>3</strong>Call /v1/responses</span>
+        <span className="cm-quickstart__step"><strong>3</strong>Export the env var</span>
+        <span className="cm-quickstart__step"><strong>4</strong>Call /v1/responses</span>
       </div>
 
       <SnippetBlock code={ENV_EXPORT} language="bash" label="env" />
@@ -302,11 +321,15 @@ export function QuickstartPanel({
   segment,
   onSegmentChange,
   highlight = false,
+  sessionActive = false,
+  onCreateSession,
   onCreateKey,
 }: {
   segment: QuickstartSegment;
   onSegmentChange: (segment: QuickstartSegment) => void;
   highlight?: boolean;
+  sessionActive?: boolean;
+  onCreateSession?: () => void;
   onCreateKey?: () => void;
 }) {
   return (
@@ -350,7 +373,13 @@ export function QuickstartPanel({
       </div>
 
       <div className="cm-quickstart__body">
-        {segment === "integrate" ? <IntegratePane onCreateKey={onCreateKey} /> : <IdePane />}
+        {segment === "integrate" ? (
+          <IntegratePane
+            sessionActive={sessionActive}
+            onCreateSession={onCreateSession}
+            onCreateKey={onCreateKey}
+          />
+        ) : <IdePane />}
       </div>
     </aside>
   );

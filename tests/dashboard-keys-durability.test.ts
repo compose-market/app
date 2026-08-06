@@ -73,13 +73,14 @@ test("persistence allowlist accepts only successful explicitly marked durable qu
 });
 
 test("pair registration, persisted providers, owner reads, local filters, and one Keys hook stay within scope", async () => {
-  const [pair, app, analytics, keysHook, dashboard, keysPage, session, connector] = await Promise.all([
+  const [pair, app, analytics, keysHook, dashboard, keysPage, quickstart, session, connector] = await Promise.all([
     readFile(new URL("../src/hooks/use-pair.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/App.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/hooks/use-analytics.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/hooks/use-keys.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/pages/dashboard.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/components/keys.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/keys/quickstart.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/hooks/use-session.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/components/connector.tsx", import.meta.url), "utf8"),
   ]);
@@ -111,6 +112,13 @@ test("pair registration, persisted providers, owner reads, local filters, and on
   assert.equal((keysPage.match(/useKeys\(\)/g) ?? []).length, 1);
   assert.match(keysPage, /<NetworkBadge\s+network=\{key\.network\}/);
   assert.match(keysPage, /Unable to load keys/);
+  assert.match(keysPage, /<SessionBudgetDialog/);
+  assert.match(keysPage, /const \{ sessionActive \} = useSession\(\)/);
+  assert.match(keysPage, /onCreateSession=\{openSession\}/);
+  assert.match(keysPage, /sessionActive=\{sessionActive\}/);
+  assert.match(quickstart, /onClick=\{onCreateSession\}/);
+  assert.match(quickstart, /disabled=\{sessionActive\}/);
+  assert.match(quickstart, /sessionActive \? "Session Active" : "Create a Session"/);
 
   assert.doesNotMatch(session, /useWalletPair|sdk\.user\./);
   assert.match(session, /sdk\.fetch\("\/api\/session"/);

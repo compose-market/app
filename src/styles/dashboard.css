@@ -2133,9 +2133,25 @@ button.cm-quickstart__step[data-active="true"] {
   box-shadow: 0 0 0.5rem hsl(var(--primary) / 0.15);
 }
 
-button.cm-quickstart__step:hover {
+button.cm-quickstart__step:not(:disabled):hover {
   border-color: hsl(var(--primary) / 0.35);
   background: hsl(var(--primary) / 0.08);
+}
+
+button.cm-quickstart__step:disabled,
+button.cm-quickstart__step[data-complete="true"] {
+  cursor: default;
+  border-color: hsl(var(--border) / 0.55);
+  background: hsl(var(--muted) / 0.16);
+  color: hsl(var(--muted-foreground) / 0.7);
+  box-shadow: none;
+  opacity: 0.78;
+}
+
+button.cm-quickstart__step:disabled strong,
+button.cm-quickstart__step[data-complete="true"] strong {
+  background: hsl(var(--muted) / 0.3);
+  color: hsl(var(--muted-foreground) / 0.8);
 }
 
 .cm-quickstart__client {
