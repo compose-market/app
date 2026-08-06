@@ -7,7 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { getChainByNetwork } from "@/lib/chains";
+import { getChainByNetwork, getExplorerTxUrl } from "@/lib/chains";
 import { buildShareIntentUrl, type MintShareData } from "@/lib/share";
 import { Link } from "wouter";
 
@@ -25,7 +25,7 @@ export function ShareSuccessDialog({ open, onOpenChange, data }: ShareSuccessDia
   const detailPath = `/${type}/${walletAddress}`;
   const chain = getChainByNetwork(network);
   const networkLabel = chain?.name || network || "blockchain";
-  const explorerUrl = chain?.explorer ? `${chain.explorer}/tx/${txHash}` : null;
+  const explorerUrl = getExplorerTxUrl(network, txHash);
   const shareUrl = buildShareIntentUrl(name, type, walletAddress);
 
   const handleShare = () => {
@@ -64,7 +64,7 @@ export function ShareSuccessDialog({ open, onOpenChange, data }: ShareSuccessDia
             </Button>
           </div>
 
-          {explorerUrl && (
+          {explorerUrl !== "#" && (
             <a
               href={explorerUrl}
               target="_blank"

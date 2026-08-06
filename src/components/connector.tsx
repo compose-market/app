@@ -11,7 +11,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { thirdwebClient, getChainObject, getUsdcAddress, isEvmNetwork, evmChainId } from "@/lib/chains";
+import { thirdwebClient, getChainObject, getUsdcAddress, getExplorerUrl, isEvmNetwork, evmChainId } from "@/lib/chains";
 import { useChain } from "@/contexts/Network";
 import { useTotalBalance } from "@/hooks/use-multichain";
 import { useSelectedUserAddress } from "@/hooks/use-address";
@@ -58,6 +58,9 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
     solanaAddress,
     isEvm,
     isResolving: userAddressResolving,
+    isActivated: solanaActivated,
+    requiredFundingLamports,
+    currentFundingLamports,
   } = useSelectedUserAddress();
   const [copied, setCopied] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -247,12 +250,19 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
     ? `${displayAddress.slice(0, 6)}...${displayAddress.slice(-4)}`
     : userAddressResolving || isReconnecting ? "Resolving..." : "Unavailable";
   const accountLabel = isEvm ? "Smart account" : "Solana account";
+  const requiredActivationSol = requiredFundingLamports == null
+    ? null
+    : (Number(requiredFundingLamports) / 1_000_000_000).toFixed(9).replace(/0+$/, "").replace(/\.$/, "");
+  const currentActivationSol = currentFundingLamports == null
+    ? null
+    : (Number(currentFundingLamports) / 1_000_000_000).toFixed(9).replace(/0+$/, "").replace(/\.$/, "");
+  const isActivationFunded = requiredFundingLamports != null
+    && currentFundingLamports != null
+    && currentFundingLamports >= requiredFundingLamports;
   const selectedExplorerUrl = (() => {
     if (!displayAddress) return null;
-    const explorer = chainInfo?.explorer?.replace(/\/$/, "") || "https://explorer.solana.com";
-    if (isEvm) return `${explorer}/address/${displayAddress}`;
-    const cluster = paymentNetwork === "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1" ? "?cluster=devnet" : "";
-    return `${explorer}/address/${displayAddress}${cluster}`;
+    const url = getExplorerUrl(paymentNetwork, "address", displayAddress);
+    return url === "#" ? null : url;
   })();
 
   const handleCopy = async () => {
@@ -333,6 +343,20 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
               ) : null}
             </div>
           </div>
+          {!isEvm && !solanaActivated && requiredActivationSol ? (
+            <div className="mt-2 rounded border border-amber-400/20 bg-amber-400/5 px-2 py-1.5">
+              <p className="text-[10px] font-mono text-amber-300">
+                {isActivationFunded
+                  ? "Ready to activate when you create a session."
+                  : `Fund this address with ${requiredActivationSol} SOL to activate it.`}
+              </p>
+              {currentActivationSol ? (
+                <p className="mt-0.5 text-[9px] font-mono text-muted-foreground">
+                  Detected: {currentActivationSol} SOL
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
         <DropdownMenuItem onClick={handleDisconnect} className="text-destructive focus:text-destructive">

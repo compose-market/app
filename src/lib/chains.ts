@@ -37,6 +37,7 @@ type AppChain = FacilitatorChain & {
     chainId?: number;
     usdcAddress?: `0x${string}`;
     rpcUrl?: string;
+    explorerQuery?: string;
 };
 
 let resolvedChains: AppChain[] = [];
@@ -370,9 +371,21 @@ export function getUsdcContractForNetwork(network: EvmNetworkId) {
     return getUsdcContractForChain(evmChainId(network));
 }
 
-export function getExplorerTxUrl(network: EvmNetworkId, txHash: string): string {
-    const baseUrl = getChainConfig(evmChainId(network))?.explorer;
-    return baseUrl ? `${baseUrl}/tx/${txHash}` : "#";
+export type ExplorerItemType = "tx" | "address" | "block" | "token";
+
+export function getExplorerUrl(network: NetworkId, type: ExplorerItemType, value: string): string {
+    const chain = getChainByNetwork(network);
+    if (!chain?.explorer) return "#";
+    const baseUrl = chain.explorer.replace(/\/$/, "");
+    const fallbackQuery = network === "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1"
+        ? "cluster=devnet"
+        : undefined;
+    const query = chain.explorerQuery ?? fallbackQuery;
+    return `${baseUrl}/${type}/${value}${query ? `?${query}` : ""}`;
+}
+
+export function getExplorerTxUrl(network: NetworkId, txHash: string): string {
+    return getExplorerUrl(network, "tx", txHash);
 }
 
 export function calculateCostUSDC(tokens: number): string {

@@ -16,6 +16,7 @@ import { useWalletAccount } from "@/components/connector";
 import { toast } from "sonner";
 import { sdk } from "@/lib/sdk";
 import { cn } from "@/lib/utils";
+import { getExplorerTxUrl } from "@/lib/chains";
 import type { KeyRecord } from "@compose-market/sdk";
 
 interface SessionBudgetDialogProps {
@@ -110,8 +111,20 @@ export function SessionBudgetDialog({
 
   const handleCreate = async () => {
     const budgetUsdc = selectedBudget / 1_000_000;
-    const success = await createSession(budgetUsdc, duration);
-    if (success) {
+    const result = await createSession(budgetUsdc, duration);
+    for (const transaction of result.transactions) {
+      const explorerUrl = getExplorerTxUrl(transaction.network, transaction.transactionHash);
+      toast.success(transaction.title, {
+        description: transaction.description,
+        ...(explorerUrl !== "#" ? {
+          action: {
+            label: "View transaction",
+            onClick: () => window.open(explorerUrl, "_blank", "noopener,noreferrer"),
+          },
+        } : {}),
+      });
+    }
+    if (result.success) {
       setOpen(false);
     }
   };

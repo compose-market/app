@@ -4,7 +4,7 @@ import { formatMs, formatTokens } from "@/lib/analytics";
 import type { FeedItem, RequestRow } from "@/lib/analytics";
 import { formatUsd, formatWeiUsd, timeAgo, shortTx, settlementTone } from "@/lib/receipts";
 import { formatModelTypeLabel } from "@/lib/models";
-import { useChain } from "@/contexts/Network";
+import { getExplorerTxUrl } from "@/lib/chains";
 import { BlockDropdown } from "./dropdown";
 
 export type ActivityTab = "requests" | "settlements";
@@ -98,7 +98,6 @@ function SettlementsList({ receipts, filter, focused }: {
   filter: SettlementFilter;
   focused: boolean;
 }) {
-  const { getChainByNetworkId } = useChain();
   const visible = useMemo(() => {
     const filtered = receipts.filter((receipt) => {
       if (filter === "all") return true;
@@ -116,7 +115,12 @@ function SettlementsList({ receipts, filter, focused }: {
   return (
     <div className="cm-feed-list">
       {visible.map((receipt) => {
-        const explorer = getChainByNetworkId(receipt.network)?.explorer;
+        const rawExplorerUrl = receipt.transactionHash
+          ? getExplorerTxUrl(receipt.network, receipt.transactionHash)
+          : "#";
+        const explorerUrl = rawExplorerUrl !== "#" && receipt.network.startsWith("solana:")
+          ? `${rawExplorerUrl}${rawExplorerUrl.includes("?") ? "&" : "?"}view=receipt`
+          : rawExplorerUrl;
         return (
           <div key={receipt.id} className="cm-receipt-item">
             <div className="cm-receipt-item__top">
@@ -127,8 +131,8 @@ function SettlementsList({ receipts, filter, focused }: {
               <span className="cm-receipt-item__meta">
                 <span>{timeAgo(receipt.settledAt)}</span>
                 <span className="cm-usage-modality" data-tone={receipt.type}>{formatModelTypeLabel(receipt.type)}</span>
-                {receipt.transactionHash && explorer && (
-                  <a href={`${explorer}/tx/${receipt.transactionHash}`} target="_blank" rel="noopener noreferrer" className="cm-receipt-tx" onClick={(event) => event.stopPropagation()}>
+                {receipt.transactionHash && explorerUrl !== "#" && (
+                  <a href={explorerUrl} target="_blank" rel="noopener noreferrer" className="cm-receipt-tx" onClick={(event) => event.stopPropagation()}>
                     {shortTx(receipt.transactionHash)}<ExternalLink className="w-2.5 h-2.5" />
                   </a>
                 )}

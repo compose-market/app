@@ -10,7 +10,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { EvmNetworkId, NetworkId } from "@compose-market/sdk/chains";
+import type { NetworkId } from "@compose-market/sdk/chains";
 import { getChainConfigByNetwork, getExplorerTxUrl as explorerTxUrl } from "@/lib/chains";
 import { sdk } from "@/lib/sdk";
 
@@ -139,7 +139,7 @@ export function useDispenserClaim() {
  * Get explorer URL for a transaction
  */
 export function getExplorerTxUrl(txHash: string, network: NetworkId): string {
-    return network.startsWith("eip155:") ? explorerTxUrl(network as EvmNetworkId, txHash) : "#";
+    return explorerTxUrl(network, txHash);
 }
 
 /**

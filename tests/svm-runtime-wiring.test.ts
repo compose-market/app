@@ -19,7 +19,11 @@ const connectorSource = readFileSync(new URL("../src/components/connector.tsx", 
 const networkSelectorSource = readFileSync(new URL("../src/components/network-selector.tsx", import.meta.url), "utf8");
 const balancesSource = readFileSync(new URL("../src/hooks/use-multichain.ts", import.meta.url), "utf8");
 const svmHookSource = readFileSync(new URL("../src/hooks/use-svm.ts", import.meta.url), "utf8");
+const addressHookSource = readFileSync(new URL("../src/hooks/use-address.ts", import.meta.url), "utf8");
 const svmSwigSource = readFileSync(new URL("../src/lib/svm/swig.ts", import.meta.url), "utf8");
+const svmJupiterSource = readFileSync(new URL("../src/lib/svm/jupiter.ts", import.meta.url), "utf8");
+const cacheSource = readFileSync(new URL("../src/lib/cache.ts", import.meta.url), "utf8");
+const chainsSource = readFileSync(new URL("../src/lib/chains.ts", import.meta.url), "utf8");
 const playgroundSource = readFileSync(new URL("../src/pages/playground.tsx", import.meta.url), "utf8");
 const agentSource = readFileSync(new URL("../src/pages/agent.tsx", import.meta.url), "utf8");
 const workflowSource = readFileSync(new URL("../src/pages/workflow.tsx", import.meta.url), "utf8");
@@ -86,19 +90,62 @@ test("SVM resolver is selected-network aware and does not loop create checks", (
   assert.match(svmHookSource, /checkedKeyRef/);
   assert.doesNotMatch(svmHookSource, /solanaChains\[0\]/);
   assert.doesNotMatch(svmHookSource, /isCreating\]/);
+  assert.doesNotMatch(svmHookSource, /setInterval\(\(\)\s*=>\s*void create\(\)/);
+  assert.match(svmHookSource, /selectedSolanaRpcUrl, swigAddress\]/);
+  assert.match(addressHookSource, /!solanaAddress\s*\|\|\s*!isActivated\s*\|\|\s*isCreating/);
+  const createSessionSource = sessionSource.slice(
+    sessionSource.indexOf("const createSession"),
+    sessionSource.indexOf("const endSession"),
+  );
+  assert.doesNotMatch(createSessionSource, /!userAddress\s*\|\|\s*userAddressResolving/);
+  assert.match(createSessionSource, /await activateSolana\(\)/);
 });
 
 test("SVM approve builder emits a plain SPL approve without impossible ATA signer", () => {
-  assert.match(svmSwigSource, /AccountRole/);
-  assert.match(svmSwigSource, /new Uint8Array\(9\)/);
-  assert.match(svmSwigSource, /data\[0\]\s*=\s*SPL_APPROVE_DISCRIMINATOR/);
-  assert.doesNotMatch(svmSwigSource, /data\[9\]\s*=/);
-  assert.doesNotMatch(svmSwigSource, /encodeApproveInstructionData\(amount,\s*decimals\)/);
-  assert.match(svmSwigSource, /\{\s*address:\s*sourceAta,\s*role:\s*AccountRole\.WRITABLE\s*\}/);
-  assert.match(svmSwigSource, /\{\s*address:\s*feePayer,\s*role:\s*AccountRole\.WRITABLE\s*\}/);
-  assert.match(svmSwigSource, /\{\s*address:\s*swigWalletAddress,\s*role:\s*AccountRole\.READONLY_SIGNER\s*\}/);
-  assert.doesNotMatch(svmSwigSource, /\{\s*address:\s*sourceAta,\s*role:\s*3\s*\}/);
-  assert.doesNotMatch(svmSwigSource, /AccountRole\.WRITABLE_SIGNER/);
+  const approveSource = svmSwigSource.slice(
+    svmSwigSource.indexOf("function encodeApproveInstructionData"),
+    svmSwigSource.indexOf("export async function buildSwigInstructionTransaction"),
+  );
+  assert.match(approveSource, /new Uint8Array\(9\)/);
+  assert.match(approveSource, /data\[0\]\s*=\s*SPL_APPROVE_DISCRIMINATOR/);
+  assert.doesNotMatch(approveSource, /data\[9\]\s*=/);
+  assert.doesNotMatch(approveSource, /encodeApproveInstructionData\(amount,\s*decimals\)/);
+  assert.match(approveSource, /\{\s*address:\s*sourceAta,\s*role:\s*AccountRole\.WRITABLE\s*\}/);
+  assert.match(approveSource, /\{\s*address:\s*feePayer,\s*role:\s*AccountRole\.WRITABLE\s*\}/);
+  assert.match(approveSource, /\{\s*address:\s*swigWalletAddress,\s*role:\s*AccountRole\.READONLY_SIGNER\s*\}/);
+  assert.doesNotMatch(approveSource, /\{\s*address:\s*sourceAta,\s*role:\s*3\s*\}/);
+  assert.doesNotMatch(approveSource, /AccountRole\.WRITABLE_SIGNER/);
+});
+
+test("SVM activation is funded by the displayed wallet without dummy key material", () => {
+  assert.match(svmSwigSource, /buildSelfFundedCreateSwigTransaction/);
+  assert.match(svmSwigSource, /ASSOCIATED_TOKEN_CREATE_IDEMPOTENT/);
+  assert.match(svmSwigSource, /reimbursementLamports:\s*configRentLamports\s*\+\s*transactionFeeLamports/);
+  assert.match(svmSwigSource, /SVM_ACTIVATION_MINIMUM_LAMPORTS\s*=\s*50_000_000n/);
+  assert.doesNotMatch(svmSwigSource, /getSelfFundedSwigActivationQuote/);
+  assert.doesNotMatch(svmSwigSource, /DUMMY_EVM_PUBLIC_KEY/);
+  assert.match(svmHookSource, /requiredFundingLamports/);
+  assert.match(svmHookSource, /ACTIVATION_POLL_MS/);
+  assert.match(svmSwigSource, /SVM_ACTIVATION_MEMO\s*=\s*"compose\.market: activate account"/);
+  assert.match(svmSwigSource, /SVM_SESSION_APPROVAL_MEMO\s*=\s*"compose\.market: approve session"/);
+  assert.match(sessionSource, /reimbursementLamports/);
+  assert.match(sessionSource, /transactionHash:\s*approval\.signature/);
+});
+
+test("Solana explorer links preserve the selected cluster", () => {
+  assert.match(chainsSource, /chain\.explorerQuery\s*\?\?\s*fallbackQuery/);
+  assert.match(chainsSource, /cluster=devnet/);
+  assert.match(connectorSource, /getExplorerUrl\(paymentNetwork,\s*"address",\s*displayAddress\)/);
+});
+
+test("SVM activation state is cluster-isolated and USDC recovery is mainnet-only", () => {
+  assert.match(cacheSource, /SWIG_CREATED_PREFIX.*adminAddress\.toLowerCase\(\).*network/s);
+  assert.match(svmSwigSource, /solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/);
+  assert.match(svmHookSource, /selectedSolanaNetwork\s*===\s*SOLANA_MAINNET/);
+  assert.match(svmHookSource, /buildUsdcFundedCreateSwigTransaction/);
+  assert.match(svmJupiterSource, /nativeDestinationAccount:\s*input\.walletAddress/);
+  assert.match(svmJupiterSource, /maxAccounts:\s*"20"/);
+  assert.match(svmJupiterSource, /JUPITER_BUILD_URL.*swap\/v2\/build/);
 });
 
 test("SVM approve builder signs the fee payer with the same role Solana runtime exposes", () => {

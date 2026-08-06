@@ -63,11 +63,24 @@ export interface SessionState {
     keyToken: string | null;
 }
 
+export interface SessionSetupTransaction {
+    kind: "activation" | "approval";
+    title: string;
+    description: string;
+    transactionHash: string;
+    network: NetworkId;
+}
+
+export interface SessionCreationResult {
+    success: boolean;
+    transactions: SessionSetupTransaction[];
+}
+
 interface SessionContextValue {
     session: SessionState;
     isCreating: boolean;
     error: string | null;
-    createSession: (budgetUSDC: number, durationHours?: number) => Promise<boolean>;
+    createSession: (budgetUSDC: number, durationHours?: number) => Promise<SessionCreationResult>;
     ensureKeyToken: () => Promise<string | null>;
     endSession: () => void;
     hasBudget: (requiredWei?: number) => boolean;
@@ -133,7 +146,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const connectionStatus = useActiveWalletConnectionStatus();
     const adminWallet = useAdminWallet();
     const { paymentNetwork, solanaChains } = useChain();
-    const { userAddress, isResolving: userAddressResolving, evmSignerAddress, solanaAddress } = useSelectedUserAddress();
+    const {
+        userAddress,
+        isResolving: userAddressResolving,
+        evmSignerAddress,
+        solanaAddress,
+        isActivated: solanaActivated,
+        activate: activateSolana,
+    } = useSelectedUserAddress();
     const posthog = usePostHog();
     const [session, setSession] = useState<SessionState>(defaultSession);
     const [isCreating, setIsCreating] = useState(false);
@@ -372,20 +392,34 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }, [session.isActive, syncSessionFromBackend, userAddress, userAddressResolving]);
 
     const createSession = useCallback(async (budgetUSDC: number, durationHours: number = 24) => {
+        const transactions: SessionSetupTransaction[] = [];
         if (!account) {
             setError("Wallet not connected");
-            return false;
+            return { success: false, transactions };
         }
 
-        if (!userAddress || userAddressResolving) {
+        if (!userAddress) {
             setError("Solana account is still resolving");
-            return false;
+            return { success: false, transactions };
         }
 
         setIsCreating(true);
         setError(null);
 
         try {
+            if (!isEvmNetwork(paymentNetwork) && !solanaActivated) {
+                const activation = await activateSolana();
+                if (activation) {
+                    transactions.push({
+                        kind: "activation",
+                        title: "Solana account activated",
+                        description: `Reimbursed ${(Number(activation.reimbursementLamports) / 1_000_000_000).toFixed(9).replace(/0+$/, "").replace(/\.$/, "")} SOL for account setup.`,
+                        transactionHash: activation.signature,
+                        network: paymentNetwork,
+                    });
+                }
+            }
+
             const budgetWei = Math.floor(budgetUSDC * 1_000_000);
             let evmNetwork: EvmNetworkId | null = null;
             if (isEvmNetwork(paymentNetwork)) {
@@ -416,13 +450,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 }
 
                 if (currentAllowance < BigInt(budgetWei)) {
-                    await sendTransaction({
+                    const approval = await sendTransaction({
                         transaction: approve({
                             contract: usdcContract,
                             spender: TREASURY_WALLET,
                             amountWei: BigInt(budgetWei),
                         }),
                         account,
+                    });
+                    transactions.push({
+                        kind: "approval",
+                        title: "Session spending approved",
+                        description: `Approved $${budgetUSDC.toFixed(6).replace(/0+$/, "").replace(/\.$/, "")} USDC for this session.`,
+                        transactionHash: approval.transactionHash,
+                        network: paymentNetwork,
                     });
                 }
             } else {
@@ -479,8 +520,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                     },
                 });
 
-                await sdk.svm.relay({
+                const approval = await sdk.svm.relay({
                     unsignedTransaction: unsignedApproveTxB64,
+                    network: paymentNetwork,
+                });
+                transactions.push({
+                    kind: "approval",
+                    title: "Session spending approved",
+                    description: `Approved $${budgetUSDC.toFixed(6).replace(/0+$/, "").replace(/\.$/, "")} USDC for this session.`,
+                    transactionHash: approval.signature,
                     network: paymentNetwork,
                 });
             }
@@ -525,7 +573,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 currency: "USDC",
             });
 
-            return true;
+            return { success: true, transactions };
         } catch (createError) {
             const errorMessage = createError instanceof Error
                 ? createError.message
@@ -544,7 +592,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             );
             mpError("session_create", errorMessage);
             setError(errorMessage);
-            return false;
+            return { success: false, transactions };
         } finally {
             setIsCreating(false);
         }
@@ -554,9 +602,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         paymentNetwork,
         posthog,
         userAddress,
-        userAddressResolving,
         evmSignerAddress,
         solanaAddress,
+        solanaActivated,
+        activateSolana,
         solanaChains,
     ]);
 

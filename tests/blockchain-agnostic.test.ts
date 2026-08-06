@@ -73,7 +73,7 @@ test("new metadata writes use network as the primary deployment identity", () =>
 });
 
 test("share state is network-native and not EVM chainId-shaped", () => {
-  assert.match(shareSource, /network:\s*string/);
+  assert.match(shareSource, /network:\s*NetworkId/);
   assert.doesNotMatch(shareSource, /chainId/);
   assert.match(shareDialogSource, /getChainByNetwork\(network\)/);
   assert.doesNotMatch(shareDialogSource, /CHAIN_CONFIG|chainId/);

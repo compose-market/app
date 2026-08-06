@@ -1,4 +1,5 @@
 import type { InferenceAnalytics } from "@compose-market/sdk";
+import type { NetworkId } from "@compose-market/sdk/chains";
 
 import { atomicToUsd } from "@/lib/receipts";
 
@@ -45,7 +46,7 @@ export interface TypeEntry {
 export interface FeedItem {
   id: string;
   requestId: string;
-  network: string;
+  network: NetworkId;
   model: string;
   type: string;
   pricedUnits: InferenceAnalytics.InferencePricedUnit[];
@@ -138,7 +139,7 @@ export function mapFeedItem(settlement: InferenceAnalytics.InferenceSettlement):
   return {
     id: settlement.id,
     requestId: settlement.requestId,
-    network: settlement.network,
+    network: settlement.network as NetworkId,
     model: settlement.model,
     type: settlement.types.join(", "),
     pricedUnits: settlement.pricedUnits,

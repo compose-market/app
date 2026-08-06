@@ -1,9 +1,11 @@
+import type { NetworkId } from "@compose-market/sdk/chains";
+
 export interface MintShareData {
   type: 'agent' | 'workflow';
   name: string;
   walletAddress: string;
   txHash: string;
-  network: string;
+  network: NetworkId;
 }
 
 const STORAGE_KEY = 'mint_share';
