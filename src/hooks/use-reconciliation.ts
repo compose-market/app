@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { DomainEvent } from "@compose-market/sdk";
+import type { Event } from "@compose-market/sdk";
 
 import { createReconciliationController } from "@/lib/reconciliation";
 
@@ -10,7 +10,7 @@ interface SubscriptionOptions {
 
 interface ReconciliationOptions {
   owner: string | null;
-  subscribe: (options: SubscriptionOptions) => AsyncIterable<DomainEvent>;
+  subscribe: (options: SubscriptionOptions) => AsyncIterable<Event>;
   refetch: () => Promise<unknown>;
 }
 

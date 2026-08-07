@@ -416,26 +416,23 @@ export function ModelCard({
                         </ModelSection>
                     )}
 
-                    {/* Dynamic model params */}
+                    {/* Dynamic model params — descriptions live in Hint tooltips
+                        on the section label (hover on desktop, tap on mobile),
+                        consistent with every other field in the app. */}
                     {hasOptionalParams && modelParams && (
                         <>
                             {Object.entries(modelParams.params).filter(([, definition]) => definition.required !== true).map(([key, definition]) => (
-                                <ModelSection key={key} label={<span className="cm-model-card__section-text">{key}</span>} className="cm-model-card__section--param">
+                                <ModelSection key={key} label={(
+                                    <Hint label={definition.description || key}>
+                                        <span className="cm-model-card__section-text">{key}</span>
+                                    </Hint>
+                                )} className="cm-model-card__section--param">
                                     <div className="cm-model-card__param-body">
                                         {renderParamInput(
                                             key,
                                             definition,
                                             paramValues[key],
                                             (nextValue) => onParamValuesChange?.({ ...paramValues, [key]: nextValue }),
-                                        )}
-                                        {definition.description && (
-                                            <Hint label={definition.description}>
-                                                <span className="cm-model-card__param-description">
-                                                    <Excerpt title={key} text={definition.description} lines={2}>
-                                                        {definition.description}
-                                                    </Excerpt>
-                                                </span>
-                                            </Hint>
                                         )}
                                     </div>
                                 </ModelSection>

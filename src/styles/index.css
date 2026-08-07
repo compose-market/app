@@ -93,6 +93,17 @@
       min-width: auto;
     }
 
+    /* Model Card opts out of global touch-target inflation — its buttons,
+       options and select scale proportionally from the card's own
+       container unit (--cm-model-unit) instead. */
+    .cm-model-card button,
+    .cm-model-card [role="button"],
+    .cm-model-card select,
+    .cm-model-card input {
+      min-height: 0;
+      min-width: 0;
+    }
+
     ::-webkit-scrollbar {
       width: 4px;
       height: 4px;
@@ -1166,6 +1177,21 @@ body,
   min-height: 0;
 }
 
+/* ModelCard host cell — anchors the collapse toggle to the pane (not the
+   app chrome). Display/rows stay owned by .cm-split__side (grid at the
+   ≥58rem container breakpoint, hidden below it) so the mobile sheet flow
+   is never disturbed. */
+.cm-playground__pane-cell {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+
+.cm-playground__pane-cell>.cm-model-card {
+  height: 100%;
+  min-height: 0;
+}
+
 
 .cm-playground__chat-toolbar {
   flex: 0 0 auto;
@@ -1298,8 +1324,8 @@ body,
 }
 
 .cm-family-icon {
-  width: 0.85rem;
-  height: 0.85rem;
+  width: calc(var(--cm-model-unit, 1rem) * 0.85);
+  height: calc(var(--cm-model-unit, 1rem) * 0.85);
   flex: 0 0 auto;
   object-fit: contain;
   border-radius: 2px;
