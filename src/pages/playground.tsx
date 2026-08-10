@@ -234,6 +234,7 @@ export default function PlaygroundPage() {
   } = chat;
   const streamer = useStream(chat, {
     onError: (err) => setInferenceError(err.message),
+    onDone: () => setStreaming(false),
   });
   useEffect(() => () => streamer.cancelResponses(), [streamer]);
 

@@ -109,6 +109,7 @@ export interface AttachedFile {
 }
 
 export interface RealtimeSession {
+    responseId: string;
     append: (input: unknown, params?: Record<string, unknown>) => Promise<void>;
     close: () => Promise<void>;
 }
@@ -324,6 +325,7 @@ export interface UseChatReturn {
     realtimeActive: boolean;
     setRealtimeSession: (session: RealtimeSession | null) => void;
     closeRealtime: () => Promise<void>;
+    stopRealtimeArtifacts: (responseId?: string) => void;
 
     // === Audio Recording ===
     isRecording: boolean;
@@ -372,6 +374,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     const audioChunksRef = useRef<Blob[]>([]);
     const mediaStreamRef = useRef<MediaStream | null>(null);
     const realtimeRef = useRef<RealtimeSession | null>(null);
+    const stoppedRealtimeResponsesRef = useRef<Set<string>>(new Set());
     const micRef = useRef<MicStream | null>(null);
 
     // === Streaming refs (synchronous flush, no rAF batching) ===
@@ -560,6 +563,12 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     }, []);
 
     const upsertAssistantArtifact = useCallback((id: string, artifact: Artifact) => {
+        if (
+            artifact.artifactType === "audio"
+            && artifact.partial === true
+            && artifact.responseId
+            && stoppedRealtimeResponsesRef.current.has(artifact.responseId)
+        ) return;
         setMessages((prev) => {
             const next = [...prev];
             const merge = (message: Message): Message => {
@@ -635,8 +644,38 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         setIsRecording(false);
     }, []);
 
+    const stopRealtimeArtifacts = useCallback((responseId?: string) => {
+        if (responseId) stoppedRealtimeResponsesRef.current.add(responseId);
+        setMessages((prev) => prev.map((message) => {
+            let changed = false;
+            const artifacts = message.artifacts?.map((artifact) => {
+                if (
+                    artifact.artifactType !== "audio"
+                    || artifact.partial !== true
+                    || (responseId && artifact.responseId !== responseId)
+                ) return artifact;
+                changed = true;
+                if (artifact.responseId) stoppedRealtimeResponsesRef.current.add(artifact.responseId);
+                return {
+                    ...artifact,
+                    partial: false,
+                    status: "stopped",
+                    raw: { ...artifact.raw, status: "stopped" },
+                };
+            });
+            return changed ? { ...message, artifacts } : message;
+        }));
+        setActivityState((prev) => prev.phase === "error" ? prev : {
+            phase: "idle",
+            label: "",
+            tools: [],
+            updatedAt: Date.now(),
+        });
+    }, []);
+
     const setRealtimeSession = useCallback((session: RealtimeSession | null) => {
         if (!session) stopMic();
+        else stoppedRealtimeResponsesRef.current.delete(session.responseId);
         realtimeRef.current = session;
         setRealtimeActive(Boolean(session));
     }, [stopMic]);
@@ -644,11 +683,12 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     const closeRealtime = useCallback(async () => {
         const session = realtimeRef.current;
         stopMic();
+        stopRealtimeArtifacts(session?.responseId);
         setRealtimeSession(null);
         if (session) {
             await session.close();
         }
-    }, [setRealtimeSession, stopMic]);
+    }, [setRealtimeSession, stopMic, stopRealtimeArtifacts]);
 
     const clearMessages = useCallback(() => {
         void closeRealtime().catch(() => undefined);
@@ -1142,6 +1182,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         realtimeActive,
         setRealtimeSession,
         closeRealtime,
+        stopRealtimeArtifacts,
         // Recording
         isRecording,
         recordingSupported,
@@ -1155,6 +1196,6 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         clearMessages, scheduleStreamUpdate, flushStreamContent,
         clearActivityState, clearActivityStateUnlessError, setActivityPhase, startToolActivity, finishToolActivity,
         isNearBottom, handleFileSelect, handleRemoveFile, clearFiles, cleanupFiles,
-        setRealtimeSession, closeRealtime, startRecording, stopRecording,
+        setRealtimeSession, closeRealtime, stopRealtimeArtifacts, startRecording, stopRecording,
     ]);
 }

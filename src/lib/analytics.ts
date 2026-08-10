@@ -55,6 +55,7 @@ export interface FeedItem {
   finalAmountAtomic: string;
   settlementStatus: InferenceAnalytics.InferenceSettlementStatus;
   transactionHash?: string;
+  paymentIntentId?: string;
   settledAt: number;
 }
 
@@ -136,6 +137,7 @@ export function emptyTotals(): Totals {
 }
 
 export function mapFeedItem(settlement: InferenceAnalytics.InferenceSettlement): FeedItem {
+  const paymentIntentId = (settlement as InferenceAnalytics.InferenceSettlement & { paymentIntentId?: string }).paymentIntentId;
   return {
     id: settlement.id,
     requestId: settlement.requestId,
@@ -148,6 +150,7 @@ export function mapFeedItem(settlement: InferenceAnalytics.InferenceSettlement):
     finalAmountAtomic: settlement.billing.finalAmountAtomic,
     settlementStatus: settlement.status,
     transactionHash: settlement.transactionHash,
+    paymentIntentId,
     settledAt: Date.parse(settlement.settledAt || settlement.createdAt),
   };
 }

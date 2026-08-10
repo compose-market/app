@@ -3,11 +3,24 @@ import test from "node:test";
 
 import { ComposeSDK } from "@compose-market/sdk";
 import {
+  formatModelTypeLabel,
+  getModelTypeClass,
+  getModelTypeVisualId,
   mergeSemanticModelRanks,
   normalizeModelSearchText,
   rankCatalogModels,
   type CatalogModel,
 } from "../src/lib/models";
+
+test("model type labels preserve shared color tones across catalog types", () => {
+  assert.equal(formatModelTypeLabel("music generation"), "Music Generation");
+  assert.equal(getModelTypeClass("text generation"), "cm-type--text");
+  assert.equal(getModelTypeClass("music generation"), "cm-type--audio");
+  assert.equal(getModelTypeClass("object-detection"), "cm-type--image");
+  assert.equal(getModelTypeClass("reranker"), "cm-type--embedding");
+  assert.equal(getModelTypeVisualId("music generation"), "audio");
+  assert.equal(getModelTypeVisualId("realtime"), "conversational");
+});
 
 function catalogModel(modelId: string, name: string, provider = "alibaba"): CatalogModel {
   return {
@@ -174,19 +187,44 @@ test("semantic hits enrich rankings but resolve to canonical catalog models", ()
 
 test("Playground catalog loading uses the durable compact index and independent resources", async () => {
   const { readFile } = await import("node:fs/promises");
-  const [modelsHook, playground, commandBar] = await Promise.all([
+  const [modelsHook, playground, commandBar, capabilities, styles] = await Promise.all([
     readFile(new URL("../src/hooks/use-model.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/pages/playground.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/components/models/command-bar.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/models/capabilities.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/styles/index.css", import.meta.url), "utf8"),
   ]);
 
   assert.match(modelsHook, /sdk\.fetch\("\/v1\/models\/index"/);
   assert.match(modelsHook, /meta:\s*durableQueryMeta/);
+  assert.match(modelsHook, /FLAGSHIPS_CACHE_KEY\s*=\s*\["models-latest-compact",\s*MODELS_ORIGIN,\s*1\]/);
+  assert.match(modelsHook, /\/models\?latest=1&compact=1&limit=200/);
+  assert.match(modelsHook, /cache:\s*"no-cache"/);
+  assert.match(modelsHook, /retry:\s*0/);
+  assert.match(modelsHook, /No flagship models returned/);
   assert.match(modelsHook, /useModelDetails/);
   assert.match(modelsHook, /useModelParams/);
   assert.doesNotMatch(modelsHook, /sdk\.models\.list\(\)/);
   assert.match(playground, /useRegistryMeta\(\{\s*enabled:\s*activeTab\s*===\s*"connectors"\s*\}\)/);
   assert.doesNotMatch(playground, /sdk\.models\.getParams/);
   assert.match(commandBar, /useModels\(\{\s*enabled:\s*open\s*\}\)/);
+  assert.match(commandBar, /\["Flagship",\s*flagshipModels\]/);
+  assert.match(commandBar, /\["Latest",\s*latestModels\]/);
+  assert.doesNotMatch(commandBar, /Flagship ·|Latest ·|cm-command-group__type-label/);
+  assert.match(commandBar, /cm-command-item--flagship/);
+  assert.match(commandBar, /const byId = new Map/);
+  assert.match(commandBar, /\?\?\s*byId\.get\(modelId\)/);
+  assert.match(commandBar, /const flatIndexByKey = useMemo/);
+  assert.match(commandBar, /flatIndexByKey\.get\(rowKey\)/);
+  assert.match(commandBar, /FLAGSHIP_TYPE_ORDER\s*=\s*\["text",\s*"image",\s*"video",\s*"music"\]/);
+  assert.match(commandBar, />\s*Flagship\s*</);
   assert.match(commandBar, /if\s*\(!open\)\s*return\s*\[\]/);
+  assert.match(capabilities, /cm-type-label/);
+  assert.match(capabilities, /getModelTypeClass/);
+  assert.match(capabilities, /cat\.count <= 2/);
+  assert.match(capabilities, />Others…</);
+  assert.match(capabilities, /event\.preventDefault\(\)/);
+  assert.match(capabilities, /otherFamilies\.map\(categoryItem\)/);
+  assert.match(styles, /grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(styles, /\.cm-playground__family-others-grid/);
 });

@@ -635,6 +635,7 @@ function artifactStatus(item: Artifact): string {
     if (item.hydrating) return "Preparing";
     const raw = typeof item.raw?.status === "string" ? item.raw.status : item.status;
     if (raw === "queued") return "Queued";
+    if (raw === "stopped") return "Stopped";
     if (raw === "processing" || raw === "running" || item.partial) return "Generating";
     if (raw === "completed") return "Ready";
     return item.url ? "Ready" : "Generating";
@@ -746,10 +747,20 @@ function LiveAudio({
         nextRef.current = start + buffer.duration;
     }, [base64, item, sequence]);
 
-    useEffect(() => () => {
-        void contextRef.current?.close().catch(() => undefined);
+    const closePlayback = useCallback(() => {
+        const context = contextRef.current;
         contextRef.current = null;
+        nextRef.current = 0;
+        seenRef.current.clear();
+        void context?.close().catch(() => undefined);
     }, []);
+
+    useEffect(() => closePlayback, [closePlayback]);
+
+    const stop = useCallback(() => {
+        closePlayback();
+        onStopRealtime?.();
+    }, [closePlayback, onStopRealtime]);
 
     return (
         <div className="relative">
@@ -760,7 +771,7 @@ function LiveAudio({
                     size="icon"
                     variant="ghost"
                     className="absolute right-2 top-2 h-7 w-7 rounded-full border border-red-500/30 bg-black/50 text-red-200 hover:bg-red-500/20 hover:text-red-100"
-                    onClick={() => onStopRealtime()}
+                    onClick={stop}
                     title="Stop realtime stream"
                     aria-label="Stop realtime stream"
                 >
@@ -797,6 +808,7 @@ function PendingMedia({
             ? <Music />
             : <Video />;
     const label = status || (type === "image" ? "Generating image" : type === "audio" ? "Generating audio" : "Generating video");
+    const stopped = status === "Stopped";
     return (
         <div className="cm-chat-pending-media" data-kind={type}>
             <div className="cm-chat-pending-media__wash" />
@@ -804,9 +816,9 @@ function PendingMedia({
             <div className="cm-chat-pending-media__content">
                 <div className="cm-chat-pending-media__icon">
                     {icon}
-                    <Loader2 className="cm-chat-pending-media__spinner" />
+                    {!stopped && <Loader2 className="cm-chat-pending-media__spinner" />}
                 </div>
-                <span className="cm-chat-pending-media__label">{label}...</span>
+                <span className="cm-chat-pending-media__label">{label}{stopped ? "" : "..."}</span>
             </div>
         </div>
     );

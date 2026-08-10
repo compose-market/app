@@ -13,6 +13,7 @@
  */
 
 import type { Model } from "@compose-market/sdk";
+import { typeClass } from "@compose-market/theme/icons/react";
 
 export type CatalogModel = Model & {
   operations?: unknown[];
@@ -340,7 +341,29 @@ export function getPrimaryModelType(model: CatalogModel): string {
 }
 
 export function formatModelTypeLabel(type: string): string {
-  return type.split("-").map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
+  return type
+    .split(/[\s_-]+/u)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+export function getModelTypeClass(type: string): string {
+  const direct = typeClass(getModelTypeVisualId(type));
+  if (direct) return direct;
+  const id = type.trim().toLowerCase();
+  if (id === "all") return "";
+  return "cm-type--classification";
+}
+
+export function getModelTypeVisualId(type: string): string {
+  const id = type.trim().toLowerCase();
+  if (id.includes("music")) return "audio";
+  if (id.includes("realtime")) return "conversational";
+  if (id.includes("ocr") || id.includes("detection") || id.includes("segmentation")) return "image";
+  if (id.includes("rerank")) return "embedding";
+  if (id.includes("pipe")) return "text";
+  return type;
 }
 
 export function buildTypeCategories(models: CatalogModel[]): ModelCategory[] {

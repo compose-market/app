@@ -185,7 +185,7 @@ export function useStream(
     const openingRef = useRef<Map<string, OpeningResponse>>(new Map());
     const responseControllerRef = useRef<AbortController | null>(null);
 
-    const cancelResponses = useCallback((): void => {
+    const cancelStandardResponses = useCallback((): void => {
         const controller = responseControllerRef.current;
         responseControllerRef.current = null;
         if (controller) abort(controller);
@@ -215,6 +215,11 @@ export function useStream(
         }
     }, []);
 
+    const cancelResponses = useCallback((): void => {
+        cancelStandardResponses();
+        closeRealtime(true);
+    }, [cancelStandardResponses, closeRealtime]);
+
     useEffect(() => {
         const unsubs: Array<() => void> = [
             sdk.events.on("receipt", (event) => callbacksRef.current.onReceipt?.(event.receipt)),
@@ -227,14 +232,15 @@ export function useStream(
     }, []);
 
     useEffect(() => {
-        const unload = () => closeRealtime(true);
+        const unload = () => cancelResponses();
         window.addEventListener("beforeunload", unload);
+        window.addEventListener("pagehide", unload);
         return () => {
             window.removeEventListener("beforeunload", unload);
-            closeRealtime(true);
+            window.removeEventListener("pagehide", unload);
             cancelResponses();
         };
-    }, [cancelResponses, closeRealtime]);
+    }, [cancelResponses]);
 
     const runAgent = useCallback(async (args: AgentStreamArgs): Promise<void> => {
         const c = chatRef.current;
@@ -356,6 +362,7 @@ export function useStream(
                             openingRef.current.delete(model);
                         }
                         chatRef.current.setRealtimeSession({
+                            responseId: id,
                             append: async (input, params) => {
                                 await sdk.inference.responses.append(id, { input, ...(params ? { params } : {}) }, args.options);
                             },
@@ -408,7 +415,7 @@ export function useStream(
     }, []);
 
     const runResponses = useCallback(async (args: ResponsesStreamArgs): Promise<void> => {
-        cancelResponses();
+        cancelStandardResponses();
         const model = modelId(args.params);
         const active = model ? liveRef.current.get(model) : undefined;
         if (model && active) {
@@ -483,7 +490,7 @@ export function useStream(
             cleanup();
             if (responseControllerRef.current === controller) responseControllerRef.current = null;
         }
-    }, [append, cancelResponses, runRealtimeResponses]);
+    }, [append, cancelStandardResponses, runRealtimeResponses]);
 
     const appendResponses = useCallback(async (args: ResponsesAppendArgs): Promise<void> => {
         await sdk.inference.responses.append(args.responseId, {
@@ -538,6 +545,15 @@ function dispatchModel(
 
     chat.applyAssistantModelEvent(assistantId, event);
 
+    const rawStatus = event.raw && typeof event.raw === "object" && "status" in event.raw
+        ? (event.raw as { status?: unknown }).status
+        : undefined;
+    const phase = "phase" in event && typeof event.phase === "string" ? event.phase : rawStatus;
+    if (event.type === "model.status" && phase === "finalizing_payment") {
+        chat.clearActivityStateUnlessError();
+        return;
+    }
+
     if (event.type === "model.text.delta" && event.delta) {
         const blockId = textBlockRef.current ?? nextBlock("text", blockSeqRef);
         textBlockRef.current = blockId;
@@ -558,7 +574,6 @@ function dispatchModel(
             chat.streamedTextRef.current += append;
             chat.scheduleStreamUpdate(chat.streamedTextRef.current);
         }
-        chat.setActivityPhase("thinking", "Finalizing payment");
         return;
     }
 
@@ -572,7 +587,9 @@ function dispatchModel(
     }
 
     if (event.type === "model.done") {
-        chat.setActivityPhase("thinking", "Finalizing payment");
+        chat.stopRealtimeArtifacts(event.responseId);
+        chat.clearActivityStateUnlessError();
+        cbRef.current.onDone?.();
         return;
     }
 

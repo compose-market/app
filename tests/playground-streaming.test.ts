@@ -169,9 +169,12 @@ test("realtime responses abort active and pending streams on page close", () => 
   assert.match(lifecycle, /abort\(item\.controller\)/);
   assert.match(lifecycle, /sdk\.inference\.responses\.cancel\(item\.responseId, item\.options\)/);
   assert.match(lifecycle, /window\.addEventListener\("beforeunload", unload\)/);
+  assert.match(lifecycle, /window\.addEventListener\("pagehide", unload\)/);
   assert.match(lifecycle, /window\.removeEventListener\("beforeunload", unload\)/);
+  assert.match(lifecycle, /window\.removeEventListener\("pagehide", unload\)/);
+  assert.match(lifecycle, /cancelStandardResponses\(\)/);
   assert.match(lifecycle, /closeRealtime\(true\)/);
-  assert.doesNotMatch(lifecycle, /visibilitychange|pagehide/);
+  assert.doesNotMatch(lifecycle, /visibilitychange/);
 });
 
 test("partial realtime audio chunks do not hydrate by fetching the response", () => {
@@ -180,13 +183,33 @@ test("partial realtime audio chunks do not hydrate by fetching the response", ()
   assert.doesNotMatch(chatSource, /hiddenArtifact/);
 });
 
-test("ordinary response streams stay active through payment finalization and can be cancelled", () => {
+test("stopping realtime audio terminalizes web presentation immediately", () => {
+  const realtimeState = section(chatHookSource, "const stopRealtimeArtifacts", "const setRealtimeSession");
+  const liveAudio = section(chatSource, "function LiveAudio", "function DirectMedia");
+  const dispatchModel = section(streamSource, "function dispatchModel", "function dispatchActivity");
+  assert.match(chatHookSource, /stoppedRealtimeResponsesRef/);
+  assert.match(chatHookSource, /artifact\.partial === true[\s\S]{0,180}stoppedRealtimeResponsesRef\.current\.has/);
+  assert.match(realtimeState, /partial:\s*false/);
+  assert.match(realtimeState, /status:\s*"stopped"/);
+  assert.match(realtimeState, /phase:\s*"idle"/);
+  assert.match(liveAudio, /const closePlayback = useCallback/);
+  assert.ok(liveAudio.indexOf("closePlayback();") < liveAudio.indexOf("onStopRealtime?.();"));
+  assert.match(chatSource, /raw === "stopped"/);
+  assert.match(chatSource, /!stopped && <Loader2/);
+  assert.match(dispatchModel, /event\.type === "model\.done"[\s\S]{0,220}stopRealtimeArtifacts/);
+  assert.match(dispatchModel, /event\.type === "model\.done"[\s\S]{0,260}onDone\?\.\(\)/);
+  assert.match(playgroundSource, /onDone:\s*\(\) => setStreaming\(false\)/);
+});
+
+test("ordinary responses stop presenting as live while payment finalizes and remain cancellable", () => {
   const responsesRunner = section(streamSource, "const runResponses", "const appendResponses");
+  const dispatchModel = section(streamSource, "function dispatchModel", "function dispatchActivity");
   assert.match(streamSource, /const responseControllerRef = useRef<AbortController \| null>/);
   assert.match(streamSource, /const cancelResponses = useCallback/);
   assert.match(responsesRunner, /const controller = new AbortController\(\)/);
   assert.match(responsesRunner, /signal: controller\.signal/);
-  assert.match(streamSource, /Finalizing payment/);
+  assert.match(dispatchModel, /event\.type === "model\.status" && phase === "finalizing_payment"[\s\S]{0,120}clearActivityStateUnlessError/);
+  assert.doesNotMatch(dispatchModel, /event\.type === "model\.status" && phase === "finalizing_payment"[\s\S]{0,180}onDone/);
   assert.doesNotMatch(streamSource, /event\.type === "model\.text\.done"[\s\S]{0,400}onDone/);
   assert.match(playgroundSource, /streamer\.cancelResponses\(\)/);
 });

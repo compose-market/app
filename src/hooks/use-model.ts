@@ -32,6 +32,7 @@ export interface UseModelsOptions {
 
 export interface UseModelsReturn {
     models: CatalogModel[];
+    flagships: FlagshipModelRef[];
     filteredModels: CatalogModel[];
     isLoading: boolean;
     isRefetching: boolean;
@@ -41,6 +42,14 @@ export interface UseModelsReturn {
     typeCategories: ModelCategory[];
 }
 
+export interface FlagshipModelRef {
+    modelId: string;
+    provider: string;
+    family?: string;
+    isFlagship: boolean;
+    isLatest: boolean;
+}
+
 // =============================================================================
 // Constants
 // =============================================================================
@@ -48,6 +57,8 @@ export interface UseModelsReturn {
 const STALE_TIME = 6 * 60 * 60 * 1000; // 6 hours
 const CACHE_KEY = ["models-catalog-index"];
 const MODELS_URL = (import.meta.env.VITE_MODELS_URL ?? "https://models.compose.market").replace(/\/+$/u, "");
+const MODELS_ORIGIN = new URL(MODELS_URL).origin;
+const FLAGSHIPS_CACHE_KEY = ["models-latest-compact", MODELS_ORIGIN, 1];
 
 // =============================================================================
 // Hook
@@ -71,6 +82,31 @@ async function fetchCatalog(): Promise<CatalogModel[]> {
     return result.data as CatalogModel[];
 }
 
+async function fetchFlagships(): Promise<FlagshipModelRef[]> {
+    const response = await fetch(`${MODELS_ORIGIN}/models?latest=1&compact=1&limit=200`, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        cache: "no-cache",
+    });
+    if (!response.ok) throw new Error(`Failed to load flagship models: ${response.status}`);
+    const body = await response.json() as { data?: unknown };
+    if (!Array.isArray(body.data)) throw new Error("Invalid flagship model response");
+    const flagships = body.data.flatMap((item): FlagshipModelRef[] => {
+        if (!item || typeof item !== "object") return [];
+        const row = item as Record<string, unknown>;
+        if (row.isLatest !== true || typeof row.modelId !== "string" || typeof row.provider !== "string") return [];
+        return [{
+            modelId: row.modelId,
+            provider: row.provider,
+            ...(typeof row.family === "string" ? { family: row.family } : {}),
+            isFlagship: row.isFlagship === true,
+            isLatest: true,
+        }];
+    });
+    if (flagships.length === 0) throw new Error("No flagship models returned");
+    return flagships;
+}
+
 export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
     const { type, family, search, enabled = true } = options;
     const queryClient = useQueryClient();
@@ -89,6 +125,16 @@ export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
         enabled,
         meta: durableQueryMeta,
     });
+    const flagshipQuery = useQuery<FlagshipModelRef[], Error>({
+        queryKey: FLAGSHIPS_CACHE_KEY,
+        queryFn: fetchFlagships,
+        staleTime: 5 * 60 * 1000,
+        gcTime: DURABLE_CACHE_MAX_AGE,
+        enabled,
+        retry: 0,
+        meta: durableQueryMeta,
+    });
+    const flagships = flagshipQuery.data ?? [];
 
     // Filter models based on options
     const filteredModels = useMemo(() => {
@@ -113,16 +159,20 @@ export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
 
     // Manual refresh - named distinctly to avoid collision with query.refetch
     const forceRefresh = useCallback(async () => {
-        await queryClient.invalidateQueries({ queryKey: CACHE_KEY });
+        await Promise.all([
+            queryClient.invalidateQueries({ queryKey: CACHE_KEY }),
+            queryClient.invalidateQueries({ queryKey: FLAGSHIPS_CACHE_KEY }),
+        ]);
     }, [queryClient]);
 
     const lastUpdated = dataUpdatedAt ? new Date(dataUpdatedAt) : null;
 
     return {
         models,
+        flagships,
         filteredModels,
         isLoading,
-        isRefetching: isFetching && !isLoading,
+        isRefetching: (isFetching && !isLoading) || flagshipQuery.isFetching,
         error: error || null,
         forceRefresh,
         lastUpdated,
