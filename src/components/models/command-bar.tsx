@@ -15,6 +15,8 @@ import {
   getPrimaryModelType,
   getDefaultModelPricingSections,
   getModelTypeValues,
+  getModelTypeClass,
+  getModelTypeVisualId,
   getFamilyLogoUrl,
   mergeSemanticModelRanks,
   normalizeModelSearchText,
@@ -88,6 +90,24 @@ function selectionKey(model: CatalogModel): string {
   return `${model.provider.toLowerCase()}:${model.modelId.toLowerCase()}`;
 }
 
+const FLAGSHIP_TYPE_ORDER = ["text", "image", "video", "music"] as const;
+type FlagshipType = typeof FLAGSHIP_TYPE_ORDER[number];
+
+function flagshipType(model: CatalogModel): FlagshipType {
+  const types = getModelTypeValues(model);
+  const outputs = Array.isArray(model.output)
+    ? model.output.filter((value): value is string => typeof value === "string")
+    : typeof model.output === "string" ? [model.output] : [];
+  if (types.includes("image generation") || outputs.includes("image")) return "image";
+  if (types.includes("video generation") || outputs.includes("video")) return "video";
+  if (types.includes("music generation") || outputs.includes("audio")) return "music";
+  return "text";
+}
+
+function displayKey(group: string, model: CatalogModel): string {
+  return `${group}:${selectionKey(model)}`;
+}
+
 export function CommandBar({ open, onOpenChange, value, onSelect, type, family }: CommandBarProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [semanticQuery, setSemanticQuery] = useState("");
@@ -96,7 +116,7 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, family }
   const listRef = useRef<HTMLDivElement>(null);
   const selectedKeyRef = useRef<string | null>(null);
 
-  const { models } = useModels({ enabled: open });
+  const { models, flagships } = useModels({ enabled: open });
   const deferredQuery = useDeferredValue(searchQuery);
 
   useEffect(() => {
@@ -144,11 +164,35 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, family }
       .map((entry) => entry.model);
   }, [activeSemanticHits, eligibleModels, localRanks, searchActive]);
 
+  const flagshipKeys = useMemo(
+    () => new Set(flagships.filter((item) => item.isFlagship).flatMap((item) => [
+      `${item.provider.toLowerCase()}:${item.modelId.toLowerCase()}`,
+      `*:${item.modelId.toLowerCase()}`,
+    ])),
+    [flagships],
+  );
+
   // Group by family
   const grouped = useMemo(() => {
     if (searchActive) {
       return [["Best matches", filteredModels] as [string, CatalogModel[]]];
     }
+    const byKey = new Map(filteredModels.map((model) => [selectionKey(model), model]));
+    const byId = new Map(filteredModels.map((model) => [model.modelId.toLowerCase(), model]));
+    const promoted = flagships.flatMap((item) => {
+      const modelId = item.modelId.toLowerCase();
+      const model = byKey.get(`${item.provider.toLowerCase()}:${modelId}`) ?? byId.get(modelId);
+      return model ? [{ model, isFlagship: item.isFlagship }] : [];
+    });
+    const byType = (left: CatalogModel, right: CatalogModel) => (
+      FLAGSHIP_TYPE_ORDER.indexOf(flagshipType(left)) - FLAGSHIP_TYPE_ORDER.indexOf(flagshipType(right))
+    );
+    const latestModels = promoted.map((item) => item.model).sort(byType);
+    const flagshipModels = promoted.filter((item) => item.isFlagship).map((item) => item.model).sort(byType);
+    const flagshipGroups = [
+      ...(flagshipModels.length > 0 ? [["Flagship", flagshipModels] as [string, CatalogModel[]]] : []),
+      ...(latestModels.length > 0 ? [["Latest", latestModels] as [string, CatalogModel[]]] : []),
+    ];
     const groups = new Map<string, CatalogModel[]>();
     for (const m of filteredModels) {
       const fam = m.family || m.provider;
@@ -157,11 +201,19 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, family }
       groups.set(fam, g);
     }
     // Sort groups by size descending
-    return Array.from(groups.entries()).sort((a, b) => b[1].length - a[1].length);
-  }, [filteredModels, searchActive]);
+    const familyGroups = Array.from(groups.entries()).sort((a, b) => b[1].length - a[1].length);
+    return [...flagshipGroups, ...familyGroups];
+  }, [filteredModels, flagships, searchActive]);
 
   // Flat list for keyboard navigation
-  const flatList = useMemo(() => grouped.flatMap(([, models]) => models), [grouped]);
+  const flatList = useMemo(() => grouped.flatMap(([group, models]) => models.map((model) => ({
+    rowKey: displayKey(group, model),
+    model,
+  }))), [grouped]);
+  const flatIndexByKey = useMemo(
+    () => new Map(flatList.map((row, index) => [row.rowKey, index])),
+    [flatList],
+  );
 
   // Reset selection on filter change
   useEffect(() => {
@@ -188,7 +240,7 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, family }
       setSelectedIndex((index) => Math.min(index, Math.max(0, flatList.length - 1)));
       return;
     }
-    const nextIndex = flatList.findIndex((model) => selectionKey(model) === selectedKey);
+    const nextIndex = flatList.findIndex((row) => row.rowKey === selectedKey);
     if (nextIndex >= 0) setSelectedIndex(nextIndex);
   }, [flatList]);
 
@@ -208,7 +260,7 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, family }
           e.preventDefault();
           setSelectedIndex((index) => {
             const next = Math.min(index + 1, Math.max(0, flatList.length - 1));
-            selectedKeyRef.current = flatList[next] ? selectionKey(flatList[next]) : null;
+            selectedKeyRef.current = flatList[next]?.rowKey ?? null;
             return next;
           });
           break;
@@ -216,14 +268,14 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, family }
           e.preventDefault();
           setSelectedIndex((index) => {
             const next = Math.max(index - 1, 0);
-            selectedKeyRef.current = flatList[next] ? selectionKey(flatList[next]) : null;
+            selectedKeyRef.current = flatList[next]?.rowKey ?? null;
             return next;
           });
           break;
         case "Enter":
           e.preventDefault();
           if (flatList[selectedIndex]) {
-            onSelect(flatList[selectedIndex].modelId);
+            onSelect(flatList[selectedIndex].model.modelId);
             onOpenChange(false);
           }
           break;
@@ -262,63 +314,76 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, family }
             grouped.map(([familyName, familyModels]) => {
               const fColor = getFamilyColor(familyName);
               return (
-              <div key={familyName}>
-                <div className="cm-command-group" style={{ color: fColor.text, display: "flex", alignItems: "center", gap: "0.35rem" }}>
-                  {(() => {
-                    const logoUrl = getFamilyLogoUrl(familyName);
-                    if (logoUrl) {
-                      return <img src={logoUrl} alt={familyName} className="cm-family-icon" style={{ width: "0.85rem", height: "0.85rem", borderRadius: "2px" }} />;
-                    }
-                    return null;
-                  })()}
-                  <span>{familyName} ({familyModels.length})</span>
-                </div>
-                {familyModels.map((model) => {
-                  const idx = flatList.indexOf(model);
-                  const modelType = getPrimaryModelType(model);
-                  const modelColor = getFamilyColor(model.family || model.provider);
-                  const isSelected = idx === selectedIndex;
-                  const isCurrent = model.modelId === value;
+                <div key={familyName}>
+                  <div className="cm-command-group" style={{ color: fColor.text, display: "flex", alignItems: "center", gap: "0.35rem" }}>
+                    {(() => {
+                      const logoUrl = getFamilyLogoUrl(familyName);
+                      if (logoUrl) {
+                        return <img src={logoUrl} alt={familyName} className="cm-family-icon" style={{ width: "0.85rem", height: "0.85rem", borderRadius: "2px" }} />;
+                      }
+                      return null;
+                    })()}
+                    <span>{familyName} ({familyModels.length})</span>
+                  </div>
+                  {familyModels.map((model) => {
+                    const rowKey = displayKey(familyName, model);
+                    const idx = flatIndexByKey.get(rowKey) ?? -1;
+                    const modelType = getPrimaryModelType(model);
+                    const modelColor = getFamilyColor(model.family || model.provider);
+                    const isSelected = idx === selectedIndex;
+                    const isCurrent = model.modelId === value;
+                    const isFlagship = flagshipKeys.has(selectionKey(model))
+                      || flagshipKeys.has(`*:${model.modelId.toLowerCase()}`);
+                    const isFlagshipGroup = familyName === "Flagship";
+                    const isFamilyGroup = !isFlagshipGroup
+                      && familyName !== "Latest"
+                      && familyName !== "Best matches";
 
-                  return (
-                    <ShellCommandItem
-                      key={selectionKey(model)}
-                      data-cmd-item
-                      selected={isSelected}
-                      current={isCurrent}
-                      onClick={() => {
-                        onSelect(model.modelId);
-                        onOpenChange(false);
-                      }}
-                      onMouseEnter={() => {
-                        selectedKeyRef.current = selectionKey(model);
-                        setSelectedIndex(idx);
-                      }}
-                      className="flex items-center justify-between gap-2"
-                    >
-                      <div className="flex-1 min-w-0 flex items-center justify-between">
-                        <span className="cm-command-item__name truncate mr-2">
-                          {model.name || model.modelId}
-                        </span>
-                        <span className="inline-flex sm:hidden text-cyan-400 shrink-0 select-none scale-90">
-                          {typeIcon(modelType)}
-                        </span>
-                      </div>
-                      <div className="cm-command-item__meta cm-model-command-meta hidden sm:flex">
-                        <span
-                          className="cm-command-item__family"
-                          style={{ background: modelColor.bg, color: modelColor.text }}
-                        >{model.provider}</span>
-                        <span className="cm-command-item__type">
-                          {formatModelTypeLabel(modelType)}
-                        </span>
-                        <span className="cm-command-item__price">{formatPrice(model)}</span>
-                      </div>
-                    </ShellCommandItem>
-                  );
-                })}
-              </div>
-            );
+                    return (
+                      <ShellCommandItem
+                        key={rowKey}
+                        data-cmd-item
+                        selected={isSelected}
+                        current={isCurrent}
+                        onClick={() => {
+                          onSelect(model.modelId);
+                          onOpenChange(false);
+                        }}
+                        onMouseEnter={() => {
+                          selectedKeyRef.current = rowKey;
+                          setSelectedIndex(idx);
+                        }}
+                        className={`flex items-center justify-between gap-2${isFlagshipGroup ? ` cm-command-item--flagship ${getModelTypeClass(modelType)}` : ""}`}
+                      >
+                        <div className="flex-1 min-w-0 flex items-center justify-between">
+                          <span className="cm-command-item__name truncate mr-2 inline-flex items-center gap-2">
+                            {model.name || model.modelId}
+                            {isFlagship && isFamilyGroup && (
+                              <span className="shrink-0 rounded-full border border-cyan-300/70 bg-cyan-300/15 px-1.5 py-0.5 font-mono text-[0.5rem] font-bold uppercase tracking-[0.14em] text-cyan-200 shadow-[0_0_12px_rgba(103,232,249,0.45)]">
+                                Flagship
+                              </span>
+                            )}
+                          </span>
+                          <span className="inline-flex sm:hidden text-cyan-400 shrink-0 select-none scale-90">
+                            {typeIcon(getModelTypeVisualId(modelType))}
+                          </span>
+                        </div>
+                        <div className="cm-command-item__meta cm-model-command-meta hidden sm:flex">
+                          <span
+                            className="cm-command-item__family"
+                            style={{ background: modelColor.bg, color: modelColor.text }}
+                          >{model.provider}</span>
+                          <span className={`cm-command-item__type ${getModelTypeClass(modelType)}`}>
+                            {typeIcon(modelType)}
+                            {formatModelTypeLabel(modelType)}
+                          </span>
+                          <span className="cm-command-item__price">{formatPrice(model)}</span>
+                        </div>
+                      </ShellCommandItem>
+                    );
+                  })}
+                </div>
+              );
             })
           )}
         </div>

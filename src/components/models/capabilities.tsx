@@ -4,6 +4,7 @@
  * Keeps the current chip/badge treatment, but moves long option sets into
  * dropdown windows so the toolbar never becomes a horizontal scroll rail.
  */
+import { useState } from "react";
 import {
   ChevronDown,
   Cpu,
@@ -14,8 +15,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { type ModelCategory, getFamilyLogoUrl } from "@/lib/models";
-import { typeClass, typeIcon, typeLabel } from "@compose-market/theme/icons/react";
+import { type ModelCategory, getFamilyLogoUrl, getModelTypeClass, getModelTypeVisualId } from "@/lib/models";
+import { typeIcon, typeLabel } from "@compose-market/theme/icons/react";
 
 interface CapabilityChipsProps {
   selectedType: string;
@@ -42,10 +43,9 @@ function familyIcon(familyId: string) {
 
 function categoryClass(cat: ModelCategory, variant: "type" | "family", selected: boolean): string {
   return [
-    "cm-chip",
     "cm-playground__chip-option",
-    variant === "type" ? typeClass(cat.id) : "cm-playground__chip--family",
-    selected ? "cm-chip--active" : "",
+    variant === "family" ? "cm-playground__chip-option--family" : "",
+    selected ? "cm-playground__chip-option--active" : "",
   ].filter(Boolean).join(" ");
 }
 
@@ -74,8 +74,17 @@ function ChipContent({
 }) {
   return (
     <>
-      {variant === "type" ? typeIcon(cat.id) : familyIcon(cat.id)}
-      <span className={isTrigger ? "cm-chip__text hidden sm:inline" : "cm-chip__text"}>{label ?? chipLabel(cat, variant)}</span>
+      {variant === "type" ? (
+        <span className={`cm-type-label ${getModelTypeClass(cat.id)}`}>
+          {typeIcon(getModelTypeVisualId(cat.id))}
+          <span className={isTrigger ? "cm-chip__text hidden sm:inline" : "cm-chip__text"}>{label ?? chipLabel(cat, variant)}</span>
+        </span>
+      ) : (
+        <>
+          {familyIcon(cat.id)}
+          <span className={isTrigger ? "cm-chip__text hidden sm:inline" : "cm-chip__text"}>{label ?? chipLabel(cat, variant)}</span>
+        </>
+      )}
       <span className={isTrigger ? "cm-chip__count hidden sm:inline" : "cm-chip__count"}>{cat.count}</span>
     </>
   );
@@ -101,6 +110,29 @@ function FilterDropdown({
   };
   const selectedCat = categories.find((cat) => cat.id === selected) ?? categories[0] ?? fallback;
   const triggerLabel = selected === "all" ? label : chipLabel(selectedCat, variant);
+  const [showOthers, setShowOthers] = useState(false);
+  const otherFamilies = variant === "family"
+    ? categories.filter((cat) => cat.id !== "all" && cat.count <= 2)
+    : [];
+  const visibleCategories = variant === "family"
+    ? categories.filter((cat) => cat.id === "all" || cat.count > 2)
+    : categories;
+  const othersExpanded = showOthers || otherFamilies.some((cat) => cat.id === selected);
+
+  const categoryItem = (cat: ModelCategory) => {
+    const isActive = selected === cat.id;
+    return (
+      <DropdownMenuItem
+        key={`${variant}-${cat.id}`}
+        aria-selected={isActive}
+        className={categoryClass(cat, variant, isActive)}
+        data-active={isActive ? "true" : undefined}
+        onSelect={() => onChange(cat.id)}
+      >
+        <ChipContent cat={cat} variant={variant} />
+      </DropdownMenuItem>
+    );
+  };
 
   return (
     <DropdownMenu>
@@ -121,21 +153,29 @@ function FilterDropdown({
         className="cm-playground__chip-menu"
         sideOffset={8}
       >
-        <div className="cm-playground__chip-menu-grid">
-          {categories.map((cat) => {
-            const isActive = selected === cat.id;
-            return (
+        <div className={`cm-playground__chip-menu-grid cm-playground__chip-menu-grid--${variant}`}>
+          {visibleCategories.map(categoryItem)}
+          {variant === "family" && otherFamilies.length > 0 && (
+            <div className="cm-playground__family-others">
               <DropdownMenuItem
-                key={`${variant}-${cat.id}`}
-                aria-selected={isActive}
-                className={categoryClass(cat, variant, isActive)}
-                data-active={isActive ? "true" : undefined}
-                onSelect={() => onChange(cat.id)}
+                className="cm-playground__family-others-toggle"
+                aria-expanded={othersExpanded}
+                onSelect={(event) => {
+                  event.preventDefault();
+                  setShowOthers((open) => !open);
+                }}
               >
-                <ChipContent cat={cat} variant={variant} />
+                <span>Others…</span>
+                <span className="cm-playground__family-others-count">{otherFamilies.length} families</span>
+                <ChevronDown className="cm-playground__family-others-chevron" data-open={othersExpanded ? "true" : undefined} />
               </DropdownMenuItem>
-            );
-          })}
+              {othersExpanded && (
+                <div className="cm-playground__family-others-grid">
+                  {otherFamilies.map(categoryItem)}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </DropdownMenuContent>
     </DropdownMenu>
