@@ -90,10 +90,10 @@ function selectionKey(model: CatalogModel): string {
   return `${model.provider.toLowerCase()}:${model.modelId.toLowerCase()}`;
 }
 
-const FLAGSHIP_TYPE_ORDER = ["text", "image", "video", "music"] as const;
-type FlagshipType = typeof FLAGSHIP_TYPE_ORDER[number];
+const FRONTIER_TYPE_ORDER = ["text", "image", "video", "music"] as const;
+type FrontierType = typeof FRONTIER_TYPE_ORDER[number];
 
-function flagshipType(model: CatalogModel): FlagshipType {
+function frontierType(model: CatalogModel): FrontierType {
   const types = getModelTypeValues(model);
   const outputs = Array.isArray(model.output)
     ? model.output.filter((value): value is string => typeof value === "string")
@@ -116,7 +116,7 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, family }
   const listRef = useRef<HTMLDivElement>(null);
   const selectedKeyRef = useRef<string | null>(null);
 
-  const { models, flagships } = useModels({ enabled: open });
+  const { models, frontiers } = useModels({ enabled: open });
   const deferredQuery = useDeferredValue(searchQuery);
 
   useEffect(() => {
@@ -164,12 +164,12 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, family }
       .map((entry) => entry.model);
   }, [activeSemanticHits, eligibleModels, localRanks, searchActive]);
 
-  const flagshipKeys = useMemo(
-    () => new Set(flagships.filter((item) => item.isFlagship).flatMap((item) => [
+  const frontierKeys = useMemo(
+    () => new Set(frontiers.filter((item) => item.isFrontier).flatMap((item) => [
       `${item.provider.toLowerCase()}:${item.modelId.toLowerCase()}`,
       `*:${item.modelId.toLowerCase()}`,
     ])),
-    [flagships],
+    [frontiers],
   );
 
   // Group by family
@@ -179,18 +179,18 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, family }
     }
     const byKey = new Map(filteredModels.map((model) => [selectionKey(model), model]));
     const byId = new Map(filteredModels.map((model) => [model.modelId.toLowerCase(), model]));
-    const promoted = flagships.flatMap((item) => {
+    const promoted = frontiers.flatMap((item) => {
       const modelId = item.modelId.toLowerCase();
       const model = byKey.get(`${item.provider.toLowerCase()}:${modelId}`) ?? byId.get(modelId);
-      return model ? [{ model, isFlagship: item.isFlagship }] : [];
+      return model ? [{ model, isFrontier: item.isFrontier }] : [];
     });
     const byType = (left: CatalogModel, right: CatalogModel) => (
-      FLAGSHIP_TYPE_ORDER.indexOf(flagshipType(left)) - FLAGSHIP_TYPE_ORDER.indexOf(flagshipType(right))
+      FRONTIER_TYPE_ORDER.indexOf(frontierType(left)) - FRONTIER_TYPE_ORDER.indexOf(frontierType(right))
     );
     const latestModels = promoted.map((item) => item.model).sort(byType);
-    const flagshipModels = promoted.filter((item) => item.isFlagship).map((item) => item.model).sort(byType);
-    const flagshipGroups = [
-      ...(flagshipModels.length > 0 ? [["Flagship", flagshipModels] as [string, CatalogModel[]]] : []),
+    const frontierModels = promoted.filter((item) => item.isFrontier).map((item) => item.model).sort(byType);
+    const frontierGroups = [
+      ...(frontierModels.length > 0 ? [["Frontier", frontierModels] as [string, CatalogModel[]]] : []),
       ...(latestModels.length > 0 ? [["Latest", latestModels] as [string, CatalogModel[]]] : []),
     ];
     const groups = new Map<string, CatalogModel[]>();
@@ -202,8 +202,8 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, family }
     }
     // Sort groups by size descending
     const familyGroups = Array.from(groups.entries()).sort((a, b) => b[1].length - a[1].length);
-    return [...flagshipGroups, ...familyGroups];
-  }, [filteredModels, flagships, searchActive]);
+    return [...frontierGroups, ...familyGroups];
+  }, [filteredModels, frontiers, searchActive]);
 
   // Flat list for keyboard navigation
   const flatList = useMemo(() => grouped.flatMap(([group, models]) => models.map((model) => ({
@@ -332,10 +332,10 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, family }
                     const modelColor = getFamilyColor(model.family || model.provider);
                     const isSelected = idx === selectedIndex;
                     const isCurrent = model.modelId === value;
-                    const isFlagship = flagshipKeys.has(selectionKey(model))
-                      || flagshipKeys.has(`*:${model.modelId.toLowerCase()}`);
-                    const isFlagshipGroup = familyName === "Flagship";
-                    const isFamilyGroup = !isFlagshipGroup
+                    const isFrontier = frontierKeys.has(selectionKey(model))
+                      || frontierKeys.has(`*:${model.modelId.toLowerCase()}`);
+                    const isFrontierGroup = familyName === "Frontier";
+                    const isFamilyGroup = !isFrontierGroup
                       && familyName !== "Latest"
                       && familyName !== "Best matches";
 
@@ -353,14 +353,14 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, family }
                           selectedKeyRef.current = rowKey;
                           setSelectedIndex(idx);
                         }}
-                        className={`flex items-center justify-between gap-2${isFlagshipGroup ? ` cm-command-item--flagship ${getModelTypeClass(modelType)}` : ""}`}
+                        className={`flex items-center justify-between gap-2${isFrontierGroup ? ` cm-command-item--frontier ${getModelTypeClass(modelType)}` : ""}`}
                       >
                         <div className="flex-1 min-w-0 flex items-center justify-between">
                           <span className="cm-command-item__name truncate mr-2 inline-flex items-center gap-2">
                             {model.name || model.modelId}
-                            {isFlagship && isFamilyGroup && (
+                            {isFrontier && isFamilyGroup && (
                               <span className="shrink-0 rounded-full border border-cyan-300/70 bg-cyan-300/15 px-1.5 py-0.5 font-mono text-[0.5rem] font-bold uppercase tracking-[0.14em] text-cyan-200 shadow-[0_0_12px_rgba(103,232,249,0.45)]">
-                                Flagship
+                                Frontier
                               </span>
                             )}
                           </span>

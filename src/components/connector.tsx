@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ConnectButton, useActiveAccount, useActiveWallet, useActiveWalletConnectionStatus } from "thirdweb/react";
 import { createWallet, inAppWallet } from "thirdweb/wallets";
 import type { SmartWalletOptions } from "thirdweb/wallets";
-import { ChevronDown, LogOut, Copy, Check, ExternalLink, Wallet } from "lucide-react";
+import { ChevronDown, LogOut, Copy, Check, ExternalLink, Wallet, ShieldCheck } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { mpIdentify, mpReset } from "@/lib/mixpanel";
 import { clearCachedAccount, readCachedAccount, writeCachedAccount } from "@/lib/cache";
 import type { EvmNetworkId } from "@compose-market/sdk/chains";
+import { DisclaimerModal, useDisclaimerConsent } from "@/components/disclaimer";
 
 const wallets = [
   inAppWallet({
@@ -64,6 +65,7 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
   } = useSelectedUserAddress();
   const [copied, setCopied] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [showDisclaimer, setShowDisclaimer] = useState(false);
   // Mount-time snapshot of the previous session's identity. Stable for the
   // page's lifetime: once the live account resolves it takes over everywhere.
   const [cachedAccount] = useState(() => readCachedAccount());
@@ -184,8 +186,8 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
             title: "Welcome to Compose.Market",
             subtitle: "Connect to access the AI Agent marketplace",
           },
-          termsOfServiceUrl: "/terms",
-          privacyPolicyUrl: "/privacy",
+          termsOfServiceUrl: "https://compose.market/terms/",
+          privacyPolicyUrl: "https://compose.market/privacy/",
         }}
         detailsButton={{
           displayBalanceToken: {
@@ -279,92 +281,107 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
   };
 
   return (
-    <DropdownMenu onOpenChange={setMenuOpen}>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          aria-label={`Wallet ${shortAddress}`}
-          data-reconnecting={isReconnecting || undefined}
-          className={cn(
-            "cm-hud-button cm-hud-wallet",
-            isReconnecting && "opacity-80",
-            className
-          )}
-        >
-          <Wallet className="cm-hud-icon cm-hud-wallet__icon" size={18} aria-hidden="true" />
-          <span className="cm-hud-value">
-            {balanceLoading ? "..." : `$${totalBalance}`}
-          </span>
-          <span className="cm-hud-address">{shortAddress}</span>
-          <ChevronDown className="cm-hud-icon" size={13} />
-        </button>
-      </DropdownMenuTrigger>
+    <>
+      <DisclaimerModal
+        forceOpen={showDisclaimer}
+        onOpenChange={setShowDisclaimer}
+      />
 
-      <DropdownMenuContent align="end" className="cm-hud-menu w-64">
-        <div className="px-3 py-3 border-b border-cyan-400/15">
-          <div className="flex items-center gap-2 mb-2">
-            <span className={cn("w-2.5 h-2.5 rounded-full", chainColor)} />
-            <span className="font-mono text-sm font-medium">
-              {chainInfo?.name || "Unknown Chain"}
+      <DropdownMenu onOpenChange={setMenuOpen}>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label={`Wallet ${shortAddress}`}
+            data-reconnecting={isReconnecting || undefined}
+            className={cn(
+              "cm-hud-button cm-hud-wallet",
+              isReconnecting && "opacity-80",
+              className
+            )}
+          >
+            <Wallet className="cm-hud-icon cm-hud-wallet__icon" size={18} aria-hidden="true" />
+            <span className="cm-hud-value">
+              {balanceLoading ? "..." : `$${totalBalance}`}
             </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground text-xs font-mono">Total USDC</span>
-            <span className="text-cyan-400 font-mono font-bold">
-              ${balanceLoading ? "..." : totalBalance}
-            </span>
-          </div>
-          <p className="text-[10px] text-muted-foreground mt-1">
-            Aggregated across all chains
-          </p>
-        </div>
+            <span className="cm-hud-address">{shortAddress}</span>
+            <ChevronDown className="cm-hud-icon" size={13} />
+          </button>
+        </DropdownMenuTrigger>
 
-        <div className="px-3 py-2 border-b border-cyan-400/15">
-          <p className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">{accountLabel}</p>
-          <div className="flex items-center justify-between">
-            <span className="font-mono text-xs text-foreground">{shortAddress}</span>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={handleCopy}
-                disabled={!displayAddress}
-                className="p-1 text-muted-foreground hover:text-cyan-400 transition-colors"
-              >
-                {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
-              </button>
-              {selectedExplorerUrl ? (
-                <a
-                  href={selectedExplorerUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
+        <DropdownMenuContent align="end" className="cm-hud-menu w-64">
+          <div className="px-3 py-3 border-b border-cyan-400/15">
+            <div className="flex items-center gap-2 mb-2">
+              <span className={cn("w-2.5 h-2.5 rounded-full", chainColor)} />
+              <span className="font-mono text-sm font-medium">
+                {chainInfo?.name || "Unknown Chain"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground text-xs font-mono">Total USDC</span>
+              <span className="text-cyan-400 font-mono font-bold">
+                ${balanceLoading ? "..." : totalBalance}
+              </span>
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-1">
+              Aggregated across all chains
+            </p>
+          </div>
+
+          <div className="px-3 py-2 border-b border-cyan-400/15">
+            <p className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">{accountLabel}</p>
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-xs text-foreground">{shortAddress}</span>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={handleCopy}
+                  disabled={!displayAddress}
                   className="p-1 text-muted-foreground hover:text-cyan-400 transition-colors"
                 >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
-              ) : null}
+                  {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+                {selectedExplorerUrl ? (
+                  <a
+                    href={selectedExplorerUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-1 text-muted-foreground hover:text-cyan-400 transition-colors"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                ) : null}
+              </div>
             </div>
-          </div>
-          {!isEvm && !solanaActivated && requiredActivationSol ? (
-            <div className="mt-2 rounded border border-amber-400/20 bg-amber-400/5 px-2 py-1.5">
-              <p className="text-[10px] font-mono text-amber-300">
-                {isActivationFunded
-                  ? "Ready to activate when you create a session."
-                  : `Fund this address with ${requiredActivationSol} SOL to activate it.`}
-              </p>
-              {currentActivationSol ? (
-                <p className="mt-0.5 text-[9px] font-mono text-muted-foreground">
-                  Detected: {currentActivationSol} SOL
+            {!isEvm && !solanaActivated && requiredActivationSol ? (
+              <div className="mt-2 rounded border border-amber-400/20 bg-amber-400/5 px-2 py-1.5">
+                <p className="text-[10px] font-mono text-amber-300">
+                  {isActivationFunded
+                    ? "Ready to activate when you create a session."
+                    : `Fund this address with ${requiredActivationSol} SOL to activate it.`}
                 </p>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
+                {currentActivationSol ? (
+                  <p className="mt-0.5 text-[9px] font-mono text-muted-foreground">
+                    Detected: {currentActivationSol} SOL
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
 
-        <DropdownMenuItem onClick={handleDisconnect} className="text-destructive focus:text-destructive">
-          <LogOut className="w-4 h-4 mr-2" />
-          Disconnect
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+          <DropdownMenuItem
+            onClick={() => setShowDisclaimer(true)}
+            className="text-cyan-400 focus:text-cyan-300 cursor-pointer"
+          >
+            <ShieldCheck className="w-4 h-4 mr-2 text-cyan-400" />
+            AI Disclaimer & Terms
+          </DropdownMenuItem>
+
+          <DropdownMenuItem onClick={handleDisconnect} className="text-destructive focus:text-destructive cursor-pointer">
+            <LogOut className="w-4 h-4 mr-2" />
+            Disconnect
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
   );
 }
 
@@ -381,3 +398,4 @@ export function useWalletAccount() {
 }
 
 export { useActiveAccount, useActiveWallet } from "thirdweb/react";
+export { DisclaimerModal, useDisclaimerConsent } from "@/components/disclaimer";
