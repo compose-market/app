@@ -15,6 +15,7 @@ import { Toaster } from "@/components/ui/toaster";
 const CreateAgent = lazy(() => import("@/pages/create-agent"));
 const Dashboard = lazy(() => import("@/pages/dashboard"));
 const Keys = lazy(() => import("@/pages/keys"));
+const Providers = lazy(() => import("@/pages/providers"));
 // const Compose = lazy(() => import("@/pages/compose"));
 // const Models = lazy(() => import("@/pages/models"));
 // const Agents = lazy(() => import("@/pages/agents"));
@@ -64,6 +65,7 @@ function AppRouter() {
           </Route>
           <Route path="/dashboard" component={Dashboard} />
           <Route path="/keys" component={Keys} />
+          <Route path="/providers" component={Providers} />
           <Route path="/create-agent" component={CreateAgent} />
           <Route path="/playground" component={Playground} />
           {/* <Route path="/market" component={Market} /> */}
