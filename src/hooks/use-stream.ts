@@ -18,7 +18,13 @@ import { createRunProjection, reduceRunProjection } from "@compose-market/sdk";
 
 import { sdk } from "@/lib/sdk";
 import { noticeId, type Artifact, type Plan, type UseChatReturn } from "@/hooks/use-chat";
-import { getModelTypeValues, type CatalogModel } from "@/lib/models";
+import {
+    getModelTypeValues,
+    IMAGE_ATTACHMENT_REQUIRED_MESSAGE,
+    modelRequiresImageAttachment,
+    submissionHasImageAttachment,
+    type CatalogModel,
+} from "@/lib/models";
 
 export interface StreamCallbacks {
     onResponseId?: (responseId: string) => void;
@@ -100,25 +106,29 @@ interface OpeningResponse {
     cleanup: () => void;
 }
 
-const realtime = new Map<string, boolean>();
+const modelCards = new Map<string, Promise<CatalogModel | null>>();
 
 function modelId(params: ResponsesCreateParams): string | null {
     const value = (params as { model?: unknown }).model;
     return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
-async function isRealtimeModel(model: string): Promise<boolean> {
-    const cached = realtime.get(model);
-    if (cached !== undefined) return cached;
-    try {
-        const card = await sdk.models.get(model) as CatalogModel;
-        const active = getModelTypeValues(card).includes("realtime");
-        realtime.set(model, active);
-        return active;
-    } catch {
-        realtime.set(model, false);
-        return false;
-    }
+function modelCard(model: string): Promise<CatalogModel | null> {
+    const cached = modelCards.get(model);
+    if (cached) return cached;
+    const pending = Promise.resolve(sdk.models.get(model))
+        .then((card) => card as CatalogModel)
+        .catch(() => {
+            modelCards.delete(model);
+            return null;
+        });
+    modelCards.set(model, pending);
+    return pending;
+}
+
+async function isRealtimeModel(model: string, card?: CatalogModel | null): Promise<boolean> {
+    const resolved = card === undefined ? await modelCard(model) : card;
+    return resolved ? getModelTypeValues(resolved).includes("realtime") : false;
 }
 
 function paramsWithoutInput(params: ResponsesCreateParams): Record<string, unknown> {
@@ -417,6 +427,14 @@ export function useStream(
     const runResponses = useCallback(async (args: ResponsesStreamArgs): Promise<void> => {
         cancelStandardResponses();
         const model = modelId(args.params);
+        const card = model ? await modelCard(model) : null;
+        if (card && modelRequiresImageAttachment(card) && !submissionHasImageAttachment(args.params)) {
+            const c = chatRef.current;
+            c.setActivityPhase("error", IMAGE_ATTACHMENT_REQUIRED_MESSAGE);
+            c.failAssistant(args.assistantId, IMAGE_ATTACHMENT_REQUIRED_MESSAGE);
+            callbacksRef.current.onError?.({ code: "image_attachment_required", message: IMAGE_ATTACHMENT_REQUIRED_MESSAGE });
+            return;
+        }
         const active = model ? liveRef.current.get(model) : undefined;
         if (model && active) {
             const c = chatRef.current;
@@ -435,7 +453,7 @@ export function useStream(
             return;
         }
 
-        if (model && await isRealtimeModel(model)) {
+        if (model && await isRealtimeModel(model, card)) {
             const opened = liveRef.current.get(model);
             if (opened) {
                 const c = chatRef.current;
