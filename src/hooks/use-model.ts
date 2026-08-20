@@ -83,26 +83,46 @@ async function fetchCatalog(): Promise<CatalogModel[]> {
 }
 
 async function fetchFrontiers(): Promise<FrontierModelRef[]> {
-    const response = await fetch(`${MODELS_ORIGIN}/models?latest=1&compact=1&limit=200`, {
-        method: "GET",
-        headers: { Accept: "application/json" },
-        cache: "no-cache",
-    });
-    if (!response.ok) throw new Error(`Failed to load frontier models: ${response.status}`);
-    const body = await response.json() as { data?: unknown };
-    if (!Array.isArray(body.data)) throw new Error("Invalid frontier model response");
-    const frontiers = body.data.flatMap((item): FrontierModelRef[] => {
-        if (!item || typeof item !== "object") return [];
-        const row = item as Record<string, unknown>;
-        if (row.isLatest !== true || typeof row.modelId !== "string" || typeof row.provider !== "string") return [];
-        return [{
-            modelId: row.modelId,
-            provider: row.provider,
-            ...(typeof row.family === "string" ? { family: row.family } : {}),
-            isFrontier: row.isFrontier === true,
-            isLatest: true,
-        }];
-    });
+    const load = async (filter: "frontier" | "latest") => {
+        const rows: FrontierModelRef[] = [];
+        let cursor: string | null = "0";
+        while (cursor !== null) {
+            const response = await fetch(`${MODELS_ORIGIN}/models?${filter}=1&compact=1&limit=200&cursor=${cursor}`, {
+                method: "GET",
+                headers: { Accept: "application/json" },
+                cache: "no-cache",
+            });
+            if (!response.ok) throw new Error(`Failed to load ${filter} models: ${response.status}`);
+            const body = await response.json() as { data?: unknown; next_cursor?: unknown };
+            if (!Array.isArray(body.data)) throw new Error(`Invalid ${filter} model response`);
+            for (const item of body.data) {
+                if (!item || typeof item !== "object") continue;
+                const row = item as Record<string, unknown>;
+                if (typeof row.modelId !== "string" || typeof row.provider !== "string") continue;
+                rows.push({
+                    modelId: row.modelId,
+                    provider: row.provider,
+                    ...(typeof row.family === "string" ? { family: row.family } : {}),
+                    isFrontier: row.isFrontier === true,
+                    isLatest: row.isLatest === true,
+                });
+            }
+            cursor = typeof body.next_cursor === "string" ? body.next_cursor : null;
+        }
+        return rows;
+    };
+
+    const merged = new Map<string, FrontierModelRef>();
+    for (const item of (await Promise.all([load("frontier"), load("latest")])).flat()) {
+        const key = `${item.provider.toLowerCase()}:${item.modelId.toLowerCase()}`;
+        const current = merged.get(key);
+        merged.set(key, {
+            ...item,
+            isFrontier: Boolean(current?.isFrontier || item.isFrontier),
+            isLatest: Boolean(current?.isLatest || item.isLatest),
+        });
+    }
+    const frontiers = [...merged.values()];
     if (frontiers.length === 0) throw new Error("No frontier models returned");
     return frontiers;
 }
@@ -122,6 +142,7 @@ export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
         queryFn: fetchCatalog,
         staleTime: STALE_TIME,
         gcTime: DURABLE_CACHE_MAX_AGE,
+        refetchOnMount: false,
         enabled,
         meta: durableQueryMeta,
     });
@@ -130,6 +151,7 @@ export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
         queryFn: fetchFrontiers,
         staleTime: 5 * 60 * 1000,
         gcTime: DURABLE_CACHE_MAX_AGE,
+        refetchOnMount: false,
         enabled,
         retry: 0,
         meta: durableQueryMeta,
@@ -159,9 +181,11 @@ export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
 
     // Manual refresh - named distinctly to avoid collision with query.refetch
     const forceRefresh = useCallback(async () => {
+        queryClient.removeQueries({ queryKey: ["model-card"], type: "inactive" });
         await Promise.all([
-            queryClient.invalidateQueries({ queryKey: CACHE_KEY }),
-            queryClient.invalidateQueries({ queryKey: FRONTIERS_CACHE_KEY }),
+            queryClient.refetchQueries({ queryKey: CACHE_KEY, type: "active" }),
+            queryClient.refetchQueries({ queryKey: FRONTIERS_CACHE_KEY, type: "active" }),
+            queryClient.refetchQueries({ queryKey: ["model-card"], type: "active" }),
         ]);
     }, [queryClient]);
 
@@ -207,6 +231,7 @@ export function useModelDetails(modelId: string | null): UseModelResourceReturn<
         enabled: Boolean(modelId),
         staleTime: STALE_TIME,
         gcTime: DURABLE_CACHE_MAX_AGE,
+        refetchOnMount: false,
         meta: durableQueryMeta,
     });
     return { data: result.data ?? null, isLoading: result.isLoading, error: result.error ?? null };
