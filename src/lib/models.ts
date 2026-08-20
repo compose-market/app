@@ -17,8 +17,82 @@ import { typeClass } from "@compose-market/theme/icons/react";
 
 export type CatalogModel = Model & {
   operations?: unknown[];
+  params?: Record<string, unknown>;
   family?: string;
+  requiresImageInput?: boolean;
 };
+
+export const IMAGE_ATTACHMENT_REQUIRED_MESSAGE = "Upload an image to use this model.";
+
+function stringValues(value: unknown): string[] {
+  if (typeof value === "string") return [value.trim().toLowerCase()].filter(Boolean);
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => typeof item === "string" && item.trim() ? [item.trim().toLowerCase()] : []);
+}
+
+function producesImage(operation: string): boolean {
+  return operation.endsWith("to-image")
+    || operation === "image-generation"
+    || operation === "image-edit"
+    || operation === "inpainting"
+    || operation === "outpainting";
+}
+
+function requiresImage(operation: string): boolean {
+  return operation.startsWith("image-to-")
+    || operation === "image-edit"
+    || operation === "inpainting"
+    || operation === "outpainting";
+}
+
+function imageOperation(value: unknown): { operation: string; input: string[]; output: string[] } | null {
+  if (typeof value === "string") {
+    const operation = value.trim().toLowerCase();
+    return operation && producesImage(operation)
+      ? { operation, input: requiresImage(operation) ? ["image"] : ["text"], output: ["image"] }
+      : null;
+  }
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const operation = typeof record.operation === "string" ? record.operation.trim().toLowerCase() : "";
+  const input = stringValues(record.input);
+  const output = stringValues(record.output);
+  return output.includes("image") || producesImage(operation) ? { operation, input, output } : null;
+}
+
+/** True when catalog I/O and operations expose no image-producing path without an image input. */
+export function modelRequiresImageAttachment(model: Pick<CatalogModel, "input" | "operations" | "params" | "capabilities" | "requiresImageInput">): boolean {
+  if (model.requiresImageInput === true) return true;
+  if (model.capabilities && typeof model.capabilities === "object") {
+    const capabilities = model.capabilities as Record<string, unknown>;
+    if (capabilities.requires_image_input === true || capabilities.requiresImageInput === true) return true;
+  }
+
+  const requiredImageParam = Object.entries(model.params || {}).some(([key, value]) => {
+    if (!value || typeof value !== "object") return false;
+    const definition = value as Record<string, unknown>;
+    const imageField = definition.is_image === true || /(?:^|_)(?:image|images)(?:_|$)/i.test(key);
+    return imageField && definition.required === true && definition.minItems !== 0;
+  });
+  if (requiredImageParam) return true;
+
+  const imageOperations = Array.isArray(model.operations)
+    ? model.operations.map(imageOperation).filter((operation): operation is NonNullable<typeof operation> => operation !== null)
+    : [];
+  return stringValues(model.input).includes("image")
+    && imageOperations.length > 0
+    && imageOperations.every((operation) => operation.input.includes("image"));
+}
+
+export function submissionHasImageAttachment(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(submissionHasImageAttachment);
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  const type = typeof record.type === "string" ? record.type.toLowerCase() : "";
+  if (type === "input_image" && typeof record.image_url === "string" && record.image_url.length > 0) return true;
+  if (type === "image" && typeof record.url === "string" && record.url.length > 0) return true;
+  return Object.values(record).some(submissionHasImageAttachment);
+}
 
 export const FAMILY_LOGOS: Record<string, string> = {
   alibaba: "alibabacloud-color.svg",

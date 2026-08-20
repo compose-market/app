@@ -198,8 +198,16 @@ test("Playground catalog loading uses the durable compact index and independent 
   assert.match(modelsHook, /sdk\.fetch\("\/v1\/models\/index"/);
   assert.match(modelsHook, /meta:\s*durableQueryMeta/);
   assert.match(modelsHook, /FRONTIERS_CACHE_KEY\s*=\s*\["models-latest-compact",\s*MODELS_ORIGIN,\s*1\]/);
-  assert.match(modelsHook, /\/models\?latest=1&compact=1&limit=200/);
+  assert.match(modelsHook, /load\("frontier"\)/);
+  assert.match(modelsHook, /load\("latest"\)/);
+  assert.match(modelsHook, /next_cursor/);
   assert.match(modelsHook, /cache:\s*"no-cache"/);
+  assert.doesNotMatch(modelsHook, /refetchOnMount:\s*"always"/);
+  assert.match(modelsHook, /refetchOnMount:\s*false/);
+  assert.match(modelsHook, /refetchQueries\(\{\s*queryKey:\s*CACHE_KEY,\s*type:\s*"active"\s*\}\)/);
+  assert.match(modelsHook, /refetchQueries\(\{\s*queryKey:\s*FRONTIERS_CACHE_KEY,\s*type:\s*"active"\s*\}\)/);
+  assert.match(modelsHook, /refetchQueries\(\{\s*queryKey:\s*\["model-card"\],\s*type:\s*"active"\s*\}\)/);
+  assert.match(modelsHook, /removeQueries\(\{\s*queryKey:\s*\["model-card"\],\s*type:\s*"inactive"\s*\}\)/);
   assert.match(modelsHook, /retry:\s*0/);
   assert.match(modelsHook, /No frontier models returned/);
   assert.match(modelsHook, /useModelDetails/);
@@ -207,6 +215,9 @@ test("Playground catalog loading uses the durable compact index and independent 
   assert.doesNotMatch(modelsHook, /sdk\.models\.list\(\)/);
   assert.match(playground, /useRegistryMeta\(\{\s*enabled:\s*activeTab\s*===\s*"connectors"\s*\}\)/);
   assert.doesNotMatch(playground, /sdk\.models\.getParams/);
+  assert.match(playground, /isRefetching:\s*modelsRefetching/);
+  assert.match(playground, /disabled=\{modelsRefetching\}/);
+  assert.match(playground, /refreshedModelsOnMount/);
   assert.match(commandBar, /useModels\(\{\s*enabled:\s*open\s*\}\)/);
   assert.match(commandBar, /\["Frontier",\s*frontierModels\]/);
   assert.match(commandBar, /\["Latest",\s*latestModels\]/);
@@ -214,6 +225,7 @@ test("Playground catalog loading uses the durable compact index and independent 
   assert.match(commandBar, /cm-command-item--frontier/);
   assert.match(commandBar, /const byId = new Map/);
   assert.match(commandBar, /\?\?\s*byId\.get\(modelId\)/);
+  assert.match(commandBar, /promoted\.filter\(\(item\)\s*=>\s*item\.isLatest\)/);
   assert.match(commandBar, /const flatIndexByKey = useMemo/);
   assert.match(commandBar, /flatIndexByKey\.get\(rowKey\)/);
   assert.match(commandBar, /FRONTIER_TYPE_ORDER\s*=\s*\["text",\s*"image",\s*"video",\s*"music"\]/);

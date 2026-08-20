@@ -8,6 +8,14 @@ export function weiToUsd(wei: string | number | null | undefined): number {
 
 export const atomicToUsd = weiToUsd;
 
+export function addAtomicAmounts(left: string, right: string): string {
+  try {
+    return (BigInt(left) + BigInt(right)).toString();
+  } catch {
+    return left;
+  }
+}
+
 export function formatUsd(value: number): string {
   if (value >= 1) return `$${value.toFixed(2)}`;
   if (value >= 0.01) return `$${value.toFixed(4)}`;

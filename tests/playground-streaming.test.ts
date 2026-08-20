@@ -141,8 +141,8 @@ test("receipt and budget stay side channels, not quality stream blocks", () => {
   assert.doesNotMatch(dispatchActivity, /onReceipt|onBudget/);
   assert.match(streamSource, /sdk\.events\.on\("receipt"/);
   assert.match(streamSource, /sdk\.events\.on\("budget"/);
-  assert.match(receiptSource, /formatReceiptUsd/);
-  assert.match(receiptSource, /formatWeiUsd/);
+  assert.match(receiptSource, /event\.receipt\.finalAmountWei/);
+  assert.match(receiptSource, /receipt\?\.txHash/);
 });
 
 test("realtime responses keep one paid stream while opening and append follow-up input", () => {

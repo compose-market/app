@@ -5,6 +5,7 @@
 @import "./agent-card.css";
 @import "./model-card.css";
 @import "./dashboard.css";
+@import "./benchmarks.css";
 
 
 
@@ -93,16 +94,6 @@
       min-width: auto;
     }
 
-    /* Model Card opts out of global touch-target inflation — its buttons,
-       options and select scale proportionally from the card's own
-       container unit (--cm-model-unit) instead. */
-    .cm-model-card button,
-    .cm-model-card [role="button"],
-    .cm-model-card select,
-    .cm-model-card input {
-      min-height: 0;
-      min-width: 0;
-    }
 
     ::-webkit-scrollbar {
       width: 4px;
@@ -307,8 +298,9 @@ body,
   background:
     radial-gradient(circle at 50% 18%, hsl(var(--primary) / 0.28), transparent 46%),
     radial-gradient(circle at 50% 86%, hsl(var(--accent) / 0.18), transparent 42%);
+  /* Soft radial glow only — the previous hard 1px ring (0 0 0 1px) read as a
+     squared halo around the circular icon at small sizes. */
   box-shadow:
-    0 0 0 1px hsl(var(--primary) / 0.42),
     0 0 18px hsl(var(--primary) / 0.2),
     0 0 22px hsl(var(--accent) / 0.1);
   opacity: 0;
@@ -1187,7 +1179,7 @@ body,
   min-height: 0;
 }
 
-.cm-playground__pane-cell>.cm-model-card {
+.cm-playground__pane-cell > * {
   height: 100%;
   min-height: 0;
 }
@@ -1801,6 +1793,24 @@ body,
     width: var(--cm-hud-size);
     min-width: var(--cm-hud-size);
     padding-inline: 0;
+    /* Base .cm-hud-button is inline-grid/place-items:center — built for a
+       single icon child. The compact wallet keeps TWO children (icon +
+       chevron), which grid-stacked into two rows and looked off-center.
+       Switch to a centered inline-flex row so both sit side by side. */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.12rem;
+  }
+
+  .cm-app-chrome__hud-item[data-priority="medium"] .cm-hud-wallet .cm-hud-icon {
+    width: 0.95rem;
+    height: 0.95rem;
+  }
+
+  .cm-app-chrome__hud-item[data-priority="medium"] .cm-hud-wallet .cm-hud-icon:last-child {
+    width: 0.72rem;
+    height: 0.72rem;
   }
 
   .cm-app-chrome__hud-item[data-priority="medium"] .cm-session-trigger {

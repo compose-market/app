@@ -1,0 +1,787 @@
+/**
+ * Compose.Market — Benchmarks Service CSS
+ *
+ * 100% container-driven, proportional architecture integrated with
+ * @compose-market/theme design tokens, Orbitron / Rajdhani / Fira Code typography,
+ * and luminescent dark aesthetics.
+ *
+ * Universal responsiveness:
+ * - Single root unit `--cm-bm-unit` driven by container size (`cqmin` / `cqi`).
+ * - All dimensions, paddings, gaps, and font scale factors derive proportionally.
+ * - Header rail, controls, tooltips, snap-scrolling and panel scrolling inherit
+ *   the platform-standard theme patterns (market control rail, `Hint`,
+ *   `cm-market-tab-panel--scroll`).
+ * - Desktop high-density sortable table vs. mobile touch-optimized ranked cards.
+ * - Head-to-Head Battle Arena with sticky matrix table & winner podium cards.
+ * - Floating Compare HUD Dock positioned safely above mobile navigation.
+ */
+
+/* ═══════════════════════════════════════════════════════════════
+   Benchmarks Workspace Layout & Container Root
+   ═══════════════════════════════════════════════════════════════ */
+
+.cm-benchmarks-workspace {
+  container-type: size;
+  container-name: cm-benchmarks;
+  --cm-bm-unit: clamp(0.6rem, calc(0.35rem + 1.2cqmin), 1.15rem);
+  --cm-bm-radius: calc(var(--cm-bm-unit) * 0.9);
+  /* Height of the attribution band — shared by the dock's anchor offset so
+     the two neighbors can never drift out of sync. */
+  --cm-bm-attribution: clamp(2.2rem, 5.5dvh, 3rem);
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
+  /* Zero page scroll */
+  display: flex;
+  flex-direction: column;
+  gap: clamp(0.58rem, 1.35cqi, 0.9rem);
+}
+
+.cm-benchmarks-workspace .cm-market-control-rail {
+  flex-shrink: 0;
+  width: 100%;
+}
+
+/* Compact proportional controls opt out of the global 2.75rem mobile
+   touch-target inflation (index.css @layer base) — same pattern as the
+   theme model card / agent card. Without it, pill-shaped buttons deform
+   into vertical ellipses on small screens. */
+@media (max-width: 768px) {
+  .cm-benchmarks-workspace button,
+  .cm-benchmarks-workspace [role="button"],
+  .cm-benchmarks-workspace select,
+  .cm-benchmarks-workspace input,
+  .cm-benchmarks-dock button,
+  .cm-benchmarks-dock [role="button"] {
+    min-height: 0;
+    min-width: 0;
+  }
+
+  /* …but the collapsed switcher trigger keeps its designed pill height —
+     zeroing it crushed the label against the top/bottom borders. */
+  .cm-benchmarks-workspace .cm-control-switcher__trigger {
+    min-height: 2.1rem;
+  }
+}
+
+.cm-benchmarks-content-cell {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 0%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid hsl(var(--primary) / 0.16);
+  border-radius: 16px;
+  background:
+    linear-gradient(145deg, hsl(226 21% 23% / 0.34), hsl(221 50% 9% / 0.26)),
+    hsl(224 36% 13% / 0.18);
+  box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.045);
+  backdrop-filter: blur(16px) saturate(1.1);
+}
+
+.cm-benchmarks__filter-toolbar {
+  gap: calc(var(--cm-bm-unit) * 0.5);
+}
+
+/* Modality select sizing (replaces inline px bounds) — floors match the
+   original 100px/150px bounds so the "Label (count)" never clips, and the
+   select can still grow proportionally on wider containers. */
+.cm-benchmarks__modality-select {
+  min-width: max(6.25rem, 22cqi);
+  max-width: max(9.375rem, 38cqi);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Leaderboard: Desktop Table vs Mobile Cards
+   ═══════════════════════════════════════════════════════════════ */
+
+.cm-benchmarks-table-wrapper {
+  border: 1px solid hsl(var(--primary) / 0.18);
+  border-radius: var(--cm-bm-radius);
+  background: hsl(221 50% 9% / 0.35);
+  backdrop-filter: blur(14px);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.04);
+}
+
+.cm-benchmarks-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono), monospace;
+  font-size: clamp(0.68rem, 1.15cqi, 0.78rem);
+  text-align: left;
+}
+
+.cm-benchmarks-table__rank-col {
+  width: calc(var(--cm-bm-unit) * 2.5);
+  text-align: center;
+}
+
+.cm-benchmarks-table__params {
+  max-width: clamp(7rem, 18cqi, 12rem);
+}
+
+.cm-benchmarks-table__sub {
+  font-size: calc(var(--cm-bm-unit) * 0.62);
+}
+
+.cm-benchmarks-table thead {
+  background: hsl(221 50% 9% / 0.9);
+  border-bottom: 1px solid hsl(var(--primary) / 0.2);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  backdrop-filter: blur(8px);
+}
+
+.cm-benchmarks-table th {
+  padding: calc(var(--cm-bm-unit) * 0.55) calc(var(--cm-bm-unit) * 0.5);
+  font-weight: 700;
+  color: hsl(var(--muted-foreground));
+  font-size: calc(var(--cm-bm-unit) * 0.7);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.cm-benchmarks-table td {
+  padding: calc(var(--cm-bm-unit) * 0.5) calc(var(--cm-bm-unit) * 0.5);
+  border-bottom: 1px solid hsl(var(--primary) / 0.08);
+  color: hsl(var(--foreground));
+  transition: background-color 120ms ease;
+}
+
+.cm-benchmarks-table tr:hover td {
+  background-color: hsl(var(--primary) / 0.06);
+}
+
+.cm-benchmarks-table tr[data-comparing="true"] td {
+  background-color: hsl(var(--primary) / 0.12);
+}
+
+/* Rank column badges — fixed readable floor, matching theme chip sizing */
+.cm-benchmarks-rank {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 999px;
+  font-weight: 800;
+  font-size: 0.7rem;
+}
+
+.cm-benchmarks-rank--1 {
+  background: linear-gradient(135deg, #ffb800, #ff8800);
+  color: #000;
+  box-shadow: 0 0 10px rgba(255, 184, 0, 0.4);
+}
+
+.cm-benchmarks-rank--2 {
+  background: linear-gradient(135deg, #e0e0e0, #a0a0a0);
+  color: #000;
+  box-shadow: 0 0 8px rgba(220, 220, 220, 0.3);
+}
+
+.cm-benchmarks-rank--3 {
+  background: linear-gradient(135deg, #cd7f32, #a05a20);
+  color: #000;
+  box-shadow: 0 0 8px rgba(205, 127, 50, 0.3);
+}
+
+.cm-benchmarks-rank--other {
+  background: hsl(var(--primary) / 0.12);
+  color: hsl(var(--muted-foreground));
+  border: 1px solid hsl(var(--primary) / 0.2);
+}
+
+/* Mobile Ranked Cards Grid */
+.cm-benchmarks-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, clamp(16rem, 42cqi, 18.5rem)), 1fr));
+  gap: clamp(0.72rem, 1.55cqi, 1.1rem);
+}
+
+.cm-benchmarks-card {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--cm-bm-unit) * 0.45);
+  padding: calc(var(--cm-bm-unit) * 0.7);
+  border: 1px solid hsl(var(--primary) / 0.16);
+  border-radius: var(--cm-bm-radius);
+  background:
+    linear-gradient(145deg, hsl(226 21% 23% / 0.4), hsl(221 50% 9% / 0.3)),
+    radial-gradient(circle at 0% 0%, hsl(var(--primary) / 0.09), transparent 36%);
+  box-shadow:
+    inset 0 1px 0 hsl(0 0% 100% / 0.05),
+    0 0 16px hsl(var(--primary) / 0.03);
+  backdrop-filter: blur(14px);
+  transition: all 150ms ease;
+  font-family: var(--font-mono), monospace;
+  position: relative;
+  overflow: hidden;
+}
+
+.cm-benchmarks-card:hover {
+  border-color: hsl(var(--primary) / 0.4);
+  transform: translateY(-1px);
+}
+
+.cm-benchmarks-card[data-comparing="true"] {
+  border-color: hsl(var(--primary) / 0.65);
+  background:
+    linear-gradient(145deg, hsl(226 21% 23% / 0.5), hsl(221 50% 9% / 0.4)),
+    radial-gradient(circle at 0% 0%, hsl(var(--primary) / 0.18), transparent 45%);
+}
+
+.cm-benchmarks-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: calc(var(--cm-bm-unit) * 0.45);
+}
+
+.cm-benchmarks-card__rank-group {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--cm-bm-unit) * 0.45);
+  min-width: 0;
+}
+
+.cm-benchmarks-card__name {
+  margin: 0;
+  font-family: var(--font-sans), sans-serif;
+  font-size: calc(var(--cm-bm-unit) * 0.95);
+  font-weight: 700;
+  color: hsl(var(--foreground));
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.cm-benchmarks-card__meta {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--cm-bm-unit) * 0.35);
+  font-size: calc(var(--cm-bm-unit) * 0.68);
+  color: hsl(var(--muted-foreground));
+  flex-wrap: wrap;
+}
+
+.cm-benchmarks-card__metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: calc(var(--cm-bm-unit) * 0.35);
+  padding: calc(var(--cm-bm-unit) * 0.45);
+  border-radius: calc(var(--cm-bm-radius) * 0.7);
+  background: hsl(221 50% 9% / 0.45);
+  border: 1px solid hsl(var(--primary) / 0.12);
+}
+
+.cm-benchmarks-card__metric-item {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--cm-bm-unit) * 0.08);
+}
+
+.cm-benchmarks-card__metric-label {
+  font-size: calc(var(--cm-bm-unit) * 0.62);
+  color: hsl(var(--muted-foreground));
+  text-transform: uppercase;
+}
+
+.cm-benchmarks-card__metric-value {
+  font-size: calc(var(--cm-bm-unit) * 0.85);
+  font-weight: 700;
+  color: hsl(var(--foreground));
+}
+
+.cm-benchmarks-card__metric-value--primary {
+  color: hsl(var(--primary));
+}
+
+.cm-benchmarks-card__metric-value--speed {
+  color: #ffb800;
+}
+
+.cm-benchmarks-card__metric-value--price {
+  color: #00ff9d;
+}
+
+.cm-benchmarks-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--cm-bm-unit) * 0.45);
+  padding-top: calc(var(--cm-bm-unit) * 0.3);
+  border-top: 1px solid hsl(var(--primary) / 0.1);
+}
+
+/* Zero-scroll container panels with internal snap-scrolling */
+.cm-benchmarks-workspace .cm-market-tabs {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
+  width: 100%;
+}
+
+.cm-benchmarks-workspace .cm-market-tab-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  max-height: 100%;
+  flex: 1 1 0%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scroll-snap-type: y mandatory;
+  -webkit-overflow-scrolling: touch;
+  gap: clamp(0.72rem, 1.55cqi, 1.1rem);
+  padding: clamp(0.45rem, 1.8dvh, 1rem);
+}
+
+.cm-benchmarks-snap-block,
+.cm-benchmarks-card {
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+  scroll-margin-block: clamp(0.45rem, 1.8dvh, 1rem);
+}
+
+.cm-benchmarks-snap-block {
+  width: 100%;
+  min-height: 0;
+  flex-shrink: 0;
+}
+
+/* Battle blocks can exceed the panel height (matrix with many rows), where
+   mandatory snapping would trap the scroll position (MDN). Proximity snaps
+   when near a block edge but never locks the user out of any region. */
+.cm-benchmarks-workspace .cm-market-tab-panel--proximity {
+  scroll-snap-type: y proximity;
+}
+
+/* Fold button for the single-row battle models rail ("+N" overflow menu) */
+.cm-benchmarks-battle__fold {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* Matches the theme chip (1.85rem / 0.72rem) — fixed readable floor. */
+  height: 1.85rem;
+  padding: 0 0.6rem;
+  border-radius: 999px;
+  border: 1px solid hsl(var(--primary) / 0.35);
+  background: hsl(var(--primary) / 0.12);
+  color: hsl(var(--primary));
+  font-family: var(--font-mono), monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 120ms ease;
+}
+
+.cm-benchmarks-battle__fold:hover {
+  background: hsl(var(--primary) / 0.25);
+  border-color: hsl(var(--primary) / 0.55);
+}
+
+/* Container-driven view flip: table on wide containers, cards on narrow */
+@container (max-width: 48rem) {
+  .cm-benchmarks-table-view {
+    display: none !important;
+  }
+
+  .cm-benchmarks-cards-view {
+    display: grid !important;
+  }
+}
+
+@container (min-width: 48.01rem) {
+  .cm-benchmarks-table-view {
+    display: block !important;
+  }
+
+  .cm-benchmarks-cards-view {
+    display: none !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Visual Frontiers Scatter Plot
+   ═══════════════════════════════════════════════════════════════ */
+
+.cm-benchmarks-scatter-pane {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--cm-bm-unit) * 0.5);
+  width: 100%;
+}
+
+.cm-benchmarks-scatter-box {
+  width: 100%;
+  height: clamp(260px, 48cqh, 480px);
+  position: relative;
+  border: 1px solid hsl(var(--primary) / 0.16);
+  border-radius: var(--cm-bm-radius);
+  background: hsl(221 50% 9% / 0.38);
+  backdrop-filter: blur(14px);
+  padding: calc(var(--cm-bm-unit) * 0.4);
+  overflow: hidden;
+}
+
+.cm-benchmarks-scatter-inspector {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--cm-bm-unit) * 0.6);
+  flex-wrap: wrap;
+  padding: calc(var(--cm-bm-unit) * 0.5) calc(var(--cm-bm-unit) * 0.8);
+  border: 1px solid hsl(var(--primary) / 0.35);
+  border-radius: calc(var(--cm-bm-radius) * 0.8);
+  background: hsl(221 50% 9% / 0.85);
+  font-family: var(--font-mono), monospace;
+  font-size: calc(var(--cm-bm-unit) * 0.74);
+  animation: cm-pocket-reveal 150ms ease;
+}
+
+@keyframes cm-pocket-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Head-to-Head Battle Arena
+   ═══════════════════════════════════════════════════════════════ */
+
+.cm-benchmarks-battle {
+  container-type: inline-size;
+  --cm-bm-unit: clamp(0.7rem, 1.6cqi, 1rem);
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--cm-bm-unit) * 1);
+  width: 100%;
+  min-width: 0;
+}
+
+.cm-benchmarks-battle__models-rail {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: calc(var(--cm-bm-unit) * 0.75);
+  /* Single-row rail — chip overflow folds into the "+N" menu (declared
+     with the fold styles earlier in this file) instead of wrapping. */
+  flex-wrap: nowrap;
+  min-width: 0;
+  padding: calc(var(--cm-bm-unit) * 0.65) calc(var(--cm-bm-unit) * 0.85);
+  border: 1px solid hsl(var(--primary) / 0.2);
+  border-radius: calc(var(--cm-bm-unit) * 1.4);
+  background: hsl(221 50% 9% / 0.45);
+  backdrop-filter: blur(14px);
+}
+
+.cm-benchmarks-battle__chips {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--cm-bm-unit) * 0.5);
+  flex-wrap: nowrap;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.cm-benchmarks-battle__chips .cm-chip {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.cm-benchmarks-battle__chips .cm-chip .cm-chip__text,
+.cm-benchmarks-battle__chips .cm-chip .cm-chip__count {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cm-benchmarks-battle__podium {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--cm-bm-unit) * 9.5)), 1fr));
+  gap: calc(var(--cm-bm-unit) * 0.65);
+  width: 100%;
+}
+
+.cm-benchmarks-battle__podium-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: calc(var(--cm-bm-unit) * 0.35);
+  padding: calc(var(--cm-bm-unit) * 0.65) calc(var(--cm-bm-unit) * 0.8);
+  border: 1px solid hsl(var(--primary) / 0.22);
+  border-radius: calc(var(--cm-bm-unit) * 1.2);
+  background: hsl(var(--primary) / 0.08);
+  backdrop-filter: blur(8px);
+  font-family: var(--font-mono), monospace;
+  min-height: calc(var(--cm-bm-unit) * 4.8);
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.cm-benchmarks-battle__podium-card > * {
+  min-width: 0;
+}
+
+.cm-benchmarks-battle__podium-card span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cm-benchmarks-battle__matrix {
+  border: 1px solid hsl(var(--primary) / 0.18);
+  border-radius: calc(var(--cm-bm-unit) * 1.4);
+  background: hsl(221 50% 9% / 0.35);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.cm-benchmarks-battle__matrix table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono), monospace;
+  font-size: clamp(0.68rem, 1.15cqi, 0.78rem);
+}
+
+.cm-benchmarks-battle__matrix th,
+.cm-benchmarks-battle__matrix td {
+  padding: calc(var(--cm-bm-unit) * 0.6) calc(var(--cm-bm-unit) * 0.75);
+  border-bottom: 1px solid hsl(var(--primary) / 0.1);
+  white-space: nowrap;
+}
+
+.cm-benchmarks-battle__matrix th:first-child,
+.cm-benchmarks-battle__matrix td:first-child {
+  position: sticky;
+  left: 0;
+  background: hsl(221 50% 9% / 0.95);
+  backdrop-filter: blur(8px);
+  z-index: 10;
+  border-right: 1px solid hsl(var(--primary) / 0.15);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Floating Compare Tray (HUD Dock)
+   ═══════════════════════════════════════════════════════════════ */
+
+.cm-benchmarks-dock {
+  position: fixed;
+  /* Anchored above the page chrome purely from shared proportional vars:
+     main's bottom padding + the attribution band + one root unit of air.
+     Mobile swaps main's desktop padding for the nav zone (--cm-hud-size). */
+  bottom: calc(
+    env(safe-area-inset-bottom)
+    + clamp(0.85rem, 2vw, 1.55rem)
+    + var(--cm-bm-attribution)
+    + var(--cm-bm-unit)
+  );
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: clamp(0.5rem, 1.5cqi, 0.85rem);
+  max-width: min(calc(100vw - 2 * var(--cm-bm-unit)), calc(var(--cm-bm-unit) * 46));
+  width: auto;
+  min-width: 0;
+  padding: calc(var(--cm-bm-unit) * 0.4) clamp(0.75rem, 2.5cqi, 1.1rem);
+  border: 1px solid hsl(var(--primary) / 0.45);
+  border-radius: 999px;
+  background:
+    linear-gradient(145deg, hsl(226 21% 23% / 0.94), hsl(221 50% 9% / 0.96)),
+    radial-gradient(circle at 50% 0%, hsl(var(--primary) / 0.25), transparent 60%);
+  box-shadow:
+    0 8px 32px hsl(221 50% 9% / 0.8),
+    0 0 24px hsl(var(--primary) / 0.18),
+    inset 0 1px 0 hsl(0 0% 100% / 0.15);
+  backdrop-filter: blur(20px) saturate(1.2);
+  animation: cm-dock-float 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  font-family: var(--font-mono), monospace;
+  /* Readable at every size — text never scales below legibility. */
+  font-size: clamp(0.68rem, 1.4cqi, 0.78rem);
+  /* Draggable — the user can grab the bar (not its buttons) and park it
+     anywhere. touch-action: none lets pointer drags win over scrolling. */
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.cm-benchmarks-dock[data-dragging="true"] {
+  cursor: grabbing;
+  animation: none;
+}
+
+@media (max-width: 48rem) {
+  .cm-benchmarks-dock {
+    bottom: calc(
+      env(safe-area-inset-bottom)
+      + var(--cm-hud-size, 2.65rem)
+      + clamp(1.2rem, 4vw, 1.55rem)
+      + var(--cm-bm-attribution)
+      + var(--cm-bm-unit)
+    );
+  }
+}
+
+@keyframes cm-dock-float {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+.cm-benchmarks-dock__grip {
+  display: inline-flex;
+  align-items: center;
+  color: hsl(var(--muted-foreground) / 0.7);
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  transition: color 120ms ease;
+}
+
+.cm-benchmarks-dock__grip:hover,
+.cm-benchmarks-dock__grip:focus-visible {
+  color: hsl(var(--foreground));
+  outline: none;
+}
+
+/* Folded state — a compact draggable chip that keeps the Battle CTA's cyan
+   highlight so it stays immediately noticeable, with the grip dots as the
+   re-expand affordance. */
+.cm-benchmarks-dock--folded {
+  gap: 0.35rem;
+  padding: 0.55rem 0.85rem;
+  font-weight: 700;
+  color: hsl(222 47% 3%);
+  background: linear-gradient(145deg, hsl(188 95% 43%), hsl(188 95% 36%));
+  border-color: hsl(188 95% 60% / 0.7);
+  box-shadow:
+    0 0 18px hsl(188 95% 43% / 0.45),
+    0 8px 32px hsl(221 50% 9% / 0.8),
+    inset 0 1px 0 hsl(0 0% 100% / 0.25);
+}
+
+.cm-benchmarks-dock__folded-count {
+  font-size: inherit;
+}
+
+/* Small containers: the Battle CTA collapses to its scale icon; the label
+   reappears on hover/focus so the action stays discoverable. */
+@container cm-benchmarks (max-width: 48rem) {
+  .cm-benchmarks-dock__battle-label {
+    display: none;
+  }
+
+  .cm-benchmarks-dock__battle:hover .cm-benchmarks-dock__battle-label,
+  .cm-benchmarks-dock__battle:focus-visible .cm-benchmarks-dock__battle-label,
+  .cm-benchmarks-dock__battle:focus .cm-benchmarks-dock__battle-label {
+    display: inline;
+  }
+}
+
+.cm-benchmarks-dock__models {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.cm-benchmarks-dock__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  max-width: 11rem;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid hsl(var(--primary) / 0.35);
+  background: hsl(var(--primary) / 0.15);
+  color: hsl(var(--primary));
+  /* Fixed readable size, matching the theme chip convention (0.72rem) —
+     micro-copy must never scale below legibility. */
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
+.cm-benchmarks-dock__pill-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cm-benchmarks-dock__pill--more {
+  flex-shrink: 0;
+  max-width: none;
+  cursor: pointer;
+  font-weight: 700;
+  transition: all 120ms ease;
+}
+
+.cm-benchmarks-dock__pill--more:hover {
+  background: hsl(var(--primary) / 0.3);
+  border-color: hsl(var(--primary) / 0.6);
+}
+
+.cm-benchmarks-dock__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.cm-benchmarks-attribution {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--cm-bm-unit) * 0.5);
+  /* Never wraps to two rows — the trailing span truncates instead. */
+  flex-wrap: nowrap;
+  /* The band is taller than the text and the text is vertically centered,
+     keeping the row equidistant between the border line above and the
+     page footer below — proportional via dvh, no fixed assumptions. */
+  min-block-size: var(--cm-bm-attribution);
+  padding: 0 clamp(0.4rem, 2cqi, 0.75rem);
+  font-family: var(--font-mono), monospace;
+  font-size: clamp(0.7rem, 1.6cqi, 0.8rem);
+  line-height: 1.35;
+  color: hsl(var(--muted-foreground));
+  border-top: 1px solid hsl(var(--primary) / 0.1);
+  flex-shrink: 0;
+}
+
+.cm-benchmarks-attribution > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

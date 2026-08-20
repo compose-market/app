@@ -11,7 +11,7 @@ import { isStandaloneAppRoute } from "@/lib/utils";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/toaster";
 
-// const Market = lazy(() => import("@/pages/market"));
+const Market = lazy(() => import("@/pages/market"));
 const CreateAgent = lazy(() => import("@/pages/create-agent"));
 const Dashboard = lazy(() => import("@/pages/dashboard"));
 const Keys = lazy(() => import("@/pages/keys"));
@@ -23,6 +23,7 @@ const Providers = lazy(() => import("@/pages/providers"));
 // const Registry = lazy(() => import("@/pages/registry"));
 // const MyAssets = lazy(() => import("@/pages/my-assets"));
 const Playground = lazy(() => import("@/pages/playground"));
+const Benchmarks = lazy(() => import("@/pages/benchmarks"));
 // const Workflow = lazy(() => import("@/pages/workflow"));
 // const ConnectLocal = lazy(() => import("@/pages/connect-local"));
 // const InstallLocal = lazy(() => import("@/pages/install-local"));
@@ -68,14 +69,14 @@ function AppRouter() {
           <Route path="/providers" component={Providers} />
           <Route path="/create-agent" component={CreateAgent} />
           <Route path="/playground" component={Playground} />
-          {/* <Route path="/market" component={Market} /> */}
+          <Route path="/benchmarks" component={Benchmarks} />
+          <Route path="/market" component={Market} />
           {/* <Route path="/compose" component={Compose} /> */}
           {/* <Route path="/models" component={Models} /> */}
           {/* <Route path="/agents" component={Agents} /> */}
           {/* <Route path="/agent/:id" component={AgentDetail} /> */}
           {/* <Route path="/registry" component={Registry} /> */}
           {/* <Route path="/my-assets" component={MyAssets} /> */}
-          <Route path="/playground" component={Playground} />
           {/* <Route path="/workflow/:id" component={Workflow} /> */}
           <Route component={NotFound} />
         </Switch>

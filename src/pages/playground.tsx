@@ -12,12 +12,13 @@
  */
 import { Suspense, lazy, useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { usePostHog } from "@posthog/react";
+import { useLocation } from "wouter";
 import { mpTrack } from "@/lib/mixpanel";
 import { useActiveWallet, useActiveAccount } from "thirdweb/react";
 import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
 import { sdk } from "@/lib/sdk";
-import { toAttachment, toMessage, type ResponseMessage } from "@/hooks/use-chat";
+import { toMessage, type ResponseMessage } from "@/hooks/use-chat";
 import { useChain } from "@/contexts/Network";
 import { Button } from "@/components/ui/button";
 import { Tabs } from "@/components/ui/tabs";
@@ -39,11 +40,13 @@ import {
   Image as ImageIcon,
   Mic,
   Video,
+  BarChart3,
 } from "lucide-react";
 import { MultimodalCanvas } from "@/components/chat";
 import { ModelCard, type ModelParamsSchema } from "@/components/models/card";
 import { ModelSelector } from "@/components/models/selector";
 import { CapabilityChips } from "@/components/models/capabilities";
+import { benchmarkOperationForCatalogModel, catalogModelSupportsBenchmarks } from "@/lib/benchmarks";
 import { useChat } from "@/hooks/use-chat";
 import { useModelDetails, useModelParams, useModels } from "@/hooks/use-model";
 import { CostReceiptIndicator } from "@/components/receipt-indicator";
@@ -58,6 +61,7 @@ import {
   formatModelTypeLabel,
   getModelTypeValues,
   getModelValueList,
+  modelRequiresImageAttachment,
   type CatalogModel,
 } from "@/lib/models";
 
@@ -151,12 +155,19 @@ export default function PlaygroundPage() {
   const {
     models,
     filteredModels,
-    isLoading: modelsLoading,
+    frontiers,
+    isRefetching: modelsRefetching,
     forceRefresh: forceRefreshModels,
   } = useModels({
     type: selectedType === "all" ? undefined : selectedType,
     family: selectedFamily === "all" ? undefined : selectedFamily,
   });
+  const refreshedModelsOnMount = useRef(false);
+  useEffect(() => {
+    if (refreshedModelsOnMount.current) return;
+    refreshedModelsOnMount.current = true;
+    void forceRefreshModels();
+  }, [forceRefreshModels]);
 
   const playgroundTabs = useMemo<Option<"model" | "connectors">[]>(() => [
     { value: "model", label: "Models", icon: Bot, count: models.length > 0 ? String(models.length) : undefined },
@@ -195,13 +206,14 @@ export default function PlaygroundPage() {
   const [selectedModel, setSelectedModel] = useState<string>(() => {
     // Deep-link support: /playground?model=<public-catalog-id> pre-selects a model.
     const requested = new URLSearchParams(window.location.search).get("model");
-    return requested && requested.trim().length > 0 ? requested.trim() : "gpt-4o";
+    return requested && requested.trim().length > 0 ? requested.trim() : "";
   });
   const [commandBarOpen, setCommandBarOpen] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState("");
   const [showSessionDialog, setShowSessionDialog] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [inferenceError, setInferenceError] = useState<string | null>(null);
+  const [, setLocation] = useLocation();
 
   // Mobile pane sheet
   const [mobilePaneOpen, setMobilePaneOpen] = useState(false);
@@ -252,12 +264,25 @@ export default function PlaygroundPage() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  // Auto-select first model from the filtered list when filters change.
+  // Auto-select the active modality's current frontier model; fall back to the
+  // first catalog match when the frontier overlay is temporarily unavailable.
   useEffect(() => {
-    if (filteredModels.length > 0 && (!selectedModel || !filteredModels.some((m) => m.modelId === selectedModel))) {
-      setSelectedModel(filteredModels[0].modelId);
-    }
-  }, [filteredModels, selectedModel]);
+    if (filteredModels.length === 0 || filteredModels.some((m) => m.modelId === selectedModel)) return;
+    const frontierKeys = new Set(frontiers.map((model) => `${model.provider.toLowerCase()}:${model.modelId.toLowerCase()}`));
+    const frontierModel = filteredModels.find((model) =>
+      frontierKeys.has(`${model.provider.toLowerCase()}:${model.modelId.toLowerCase()}`)
+    );
+    setSelectedModel((frontierModel ?? filteredModels[0]).modelId);
+  }, [filteredModels, frontiers, selectedModel]);
+
+  // Keep deep links truthful after user-driven model changes.
+  useEffect(() => {
+    if (!selectedModel) return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("model") === selectedModel) return;
+    url.searchParams.set("model", selectedModel);
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+  }, [selectedModel]);
 
   // Track conversation context boundary on model switch
   const [conversationStartIndex, setConversationStartIndex] = useState(0);
@@ -282,6 +307,7 @@ export default function PlaygroundPage() {
   );
   const { data: selectedModelDetails } = useModelDetails(selectedModel);
   const selectedModelInfo = selectedModelDetails ?? selectedModelIndex;
+  const selectedModelSupportsBenchmarks = catalogModelSupportsBenchmarks(selectedModelInfo);
   const { data: rawModelParams } = useModelParams<ModelParamsSchema>(selectedModel);
   const modelParams = useMemo(() => (
     rawModelParams && Object.keys(rawModelParams.params).length > 0 ? rawModelParams : null
@@ -323,7 +349,11 @@ export default function PlaygroundPage() {
     const currentConversationStartIndex = conversationStartIndexRef.current;
 
     if (currentAttachedFiles.some(f => f.uploading)) return;
-    if ((!currentInputValue.trim() && currentAttachedFiles.length === 0) || currentStreaming || !currentSelectedModel || !currentSelectedModelInfo) return;
+    if ((!currentInputValue.trim() && currentAttachedFiles.length === 0) || currentStreaming || !currentSelectedModel || !selectedModelDetails || !currentSelectedModelInfo) return;
+    if (
+      modelRequiresImageAttachment(selectedModelDetails)
+      && !currentAttachedFiles.some((file) => file.type === "image" && Boolean(file.url))
+    ) return false;
 
     if (!sessionActive || budgetRemaining <= 0) {
       toast({
@@ -336,9 +366,6 @@ export default function PlaygroundPage() {
     }
 
     const attached = currentAttachedFiles[0];
-    const attachments = currentAttachedFiles
-      .map(toAttachment)
-      .filter((attachment): attachment is NonNullable<typeof attachment> => Boolean(attachment));
     const userMessage = {
       id: crypto.randomUUID(),
       role: "user" as const,
@@ -407,7 +434,6 @@ export default function PlaygroundPage() {
           model: currentSelectedModelInfo.modelId,
           input,
           stream: true,
-          ...(attachments.length > 0 ? { attachments } : {}),
           ...currentParamValues,
         },
         assistantId,
@@ -422,7 +448,7 @@ export default function PlaygroundPage() {
     } finally {
       setStreaming(false);
     }
-  }, [wallet, account, budgetRemaining, clearFiles, sessionActive, keyToken, ensureKeyToken, paymentNetwork, toast, posthog, chat, setMessages, streamer, userAddress, userAddressResolving]);
+  }, [wallet, account, budgetRemaining, clearFiles, sessionActive, keyToken, ensureKeyToken, paymentNetwork, toast, posthog, chat, setMessages, streamer, userAddress, userAddressResolving, selectedModelDetails]);
   const handleClearChat = useCallback(() => {
     streamer.cancelResponses();
     clearMessages();
@@ -454,7 +480,21 @@ export default function PlaygroundPage() {
           />
         </Tabs>
 
-        <div className="cm-playground__toolbar-right">
+        <div className="cm-playground__toolbar-right flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const operation = benchmarkOperationForCatalogModel(selectedModelInfo);
+              setLocation(`/benchmarks?operation=${operation}${selectedModel ? `&models=${encodeURIComponent(selectedModel)}` : ""}`);
+            }}
+            className="cm-shell-button cm-shell-button--outline text-xs font-mono text-cyan-400 border-cyan-500/30 hover:border-cyan-400 gap-1.5 h-8 px-2.5"
+            title="Open Model Benchmarks & Intelligence Index"
+          >
+            <BarChart3 className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Benchmarks</span>
+          </Button>
+
           {activeTab === "model" && (
             <Button
               variant="ghost"
@@ -493,15 +533,18 @@ export default function PlaygroundPage() {
                 familyCategories={familyCategories}
               />
 
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => forceRefreshModels()}
-                disabled={modelsLoading}
-                className="cm-shell-button cm-shell-button--ghost cm-shell-button--icon ml-auto"
-              >
-                <RefreshCw className={`h-4 w-4 ${modelsLoading ? "animate-spin" : ""}`} />
-              </Button>
+              <div className="ml-auto flex items-center gap-1.5">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => void forceRefreshModels()}
+                  disabled={modelsRefetching}
+                  className="cm-shell-button cm-shell-button--ghost cm-shell-button--icon"
+                  aria-label="Refresh model catalog"
+                >
+                  <RefreshCw className={`h-4 w-4 ${modelsRefetching ? "animate-spin" : ""}`} />
+                </Button>
+              </div>
             </div>
 
             {/* ── Chat-internal input row ── */}
@@ -537,6 +580,8 @@ export default function PlaygroundPage() {
               error={inferenceError}
               sessionActive={sessionActive}
               attachedFiles={attachedFiles}
+              imageRequired={Boolean(selectedModelDetails && modelRequiresImageAttachment(selectedModelDetails))}
+              submitDisabled={!selectedModelDetails}
               onFileSelect={() => fileInputRef.current?.click()}
               onRemoveFile={handleRemoveFile}
               fileInputRef={fileInputRef}
