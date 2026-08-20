@@ -9,6 +9,7 @@ import {
   Layers,
   MoreHorizontal,
   PlusCircle,
+  Scale,
   Search,
   Sparkles,
 } from "lucide-react";
@@ -31,11 +32,12 @@ const links = [
   { href: "/keys", icon: Key, label: "API Keys" },
   { href: "/create-agent", icon: PlusCircle, label: "Create Agent" },
   { href: "/playground", icon: Sparkles, label: "Playground" },
+  { href: "/benchmarks", icon: Scale, label: "Benchmarks" },
   // { href: "/my-assets", icon: Activity, label: "My Assets" },
 ];
 
 export function Layout({ children }: LayoutProps) {
-  const [location] = useLocation();
+  const [location, setLocation] = useLocation();
   const [searchOpen, setSearchOpen] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const hudRef = useRef<HTMLDivElement | null>(null);
@@ -106,11 +108,13 @@ export function Layout({ children }: LayoutProps) {
                   setSearchOpen(false);
                 }
               }}
+              onOpenBenchmarks={() => {
+                setOverflowOpen(false);
+                setLocation("/benchmarks");
+              }}
             />
           </div>
         </div>
-
-
 
         <main className="cm-app-chrome__main cm-web-main">
           <div className="cm-shell-page cm-web-workspace animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -206,9 +210,11 @@ function SearchControl({
 function OverflowControl({
   open,
   onOpenChange,
+  onOpenBenchmarks,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onOpenBenchmarks: () => void;
 }) {
   return (
     <div className="cm-app-chrome__hud-fold">
@@ -233,6 +239,14 @@ function OverflowControl({
               <span className="cm-app-chrome__hud-popover-title text-xs text-muted-foreground font-mono">Funds</span>
               <DispenserButton />
             </div>
+            <button
+              type="button"
+              onClick={onOpenBenchmarks}
+              className="cm-hud-button w-full justify-start mt-1 text-cyan-400 hover:text-cyan-300"
+            >
+              <BarChart3 className="cm-hud-icon" size={16} />
+              <span className="cm-hud-label">Model Benchmarks</span>
+            </button>
             <button type="button" className="cm-hud-button w-full justify-start mt-1">
               <Bell className="cm-hud-icon" size={16} />
               <span className="cm-hud-label">Alerts</span>

@@ -8,43 +8,13 @@
 import { useEffect, useState } from "react";
 import { Receipt as ReceiptIcon } from "lucide-react";
 import { sdk } from "@/lib/sdk";
+import { addAtomicAmounts, formatWeiUsd, shortTx } from "@/lib/receipts";
 import { useSession } from "@/hooks/use-session";
 import type { NetworkId } from "@compose-market/sdk/chains";
-import type { Receipt, Bill, CumulativeBill, ListResponse } from "@compose-market/sdk";
-
-function formatUsd(value: number): string {
-    if (value >= 1) return `$${value.toFixed(2)}`;
-    if (value >= 0.01) return `$${value.toFixed(4)}`;
-    return `$${value.toFixed(6)}`;
-}
-
-function formatWeiUsd(wei: string | undefined): string | null {
-    if (!wei) return null;
-    const n = Number(wei);
-    if (!Number.isFinite(n) || n < 0) return null;
-    return formatUsd(n / 1_000_000);
-}
-
-function formatReceiptUsd(total: string | undefined): string | null {
-    if (!total) return null;
-    if (total.includes("$")) return total;
-    const match = total.match(/([0-9]+(?:\.[0-9]+)?)/);
-    if (!match) return null;
-    const amount = Number(match[1]);
-    return Number.isFinite(amount) ? formatUsd(amount) : null;
-}
-
-function shortTx(hash: string | undefined): string | null {
-    if (!hash) return null;
-    return `${hash.slice(0, 6)}…${hash.slice(-4)}`;
-}
-
-function receiptTotal(receipt: Receipt | null): string | null {
-    return formatReceiptUsd(receipt?.bills?.[0]?.total);
-}
+import type { Receipt, CumulativeBill, ListResponse } from "@compose-market/sdk";
 
 function receiptTx(receipt: Receipt | null): string | undefined {
-    return receipt?.bills?.find((bill: Bill) => bill.txId)?.txId;
+    return receipt?.txHash;
 }
 
 async function listReceipts(network: NetworkId, signal: AbortSignal): Promise<ListResponse> {
@@ -81,7 +51,7 @@ export function CostReceiptIndicator({ className }: { className?: string }) {
             if (event.receipt) {
                 setCumulative((prev) => prev ? {
                     ...prev,
-                    totalAmountWei: String(Number(prev.totalAmountWei) + Number(event.receipt?.bills?.[0]?.total ?? 0)),
+                    totalAmountWei: addAtomicAmounts(prev.totalAmountWei, event.receipt.finalAmountWei),
                     receiptCount: prev.receiptCount + 1,
                 } : prev);
             }
@@ -89,7 +59,6 @@ export function CostReceiptIndicator({ className }: { className?: string }) {
     }, []);
 
     const totalUsd = formatWeiUsd(cumulative?.totalAmountWei);
-    const lastTotal = receiptTotal(receipt);
     const txHash = shortTx(receiptTx(receipt));
 
     if (!keyToken) return null;

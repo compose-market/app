@@ -182,12 +182,12 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, family }
     const promoted = frontiers.flatMap((item) => {
       const modelId = item.modelId.toLowerCase();
       const model = byKey.get(`${item.provider.toLowerCase()}:${modelId}`) ?? byId.get(modelId);
-      return model ? [{ model, isFrontier: item.isFrontier }] : [];
+      return model ? [{ model, isFrontier: item.isFrontier, isLatest: item.isLatest }] : [];
     });
     const byType = (left: CatalogModel, right: CatalogModel) => (
       FRONTIER_TYPE_ORDER.indexOf(frontierType(left)) - FRONTIER_TYPE_ORDER.indexOf(frontierType(right))
     );
-    const latestModels = promoted.map((item) => item.model).sort(byType);
+    const latestModels = promoted.filter((item) => item.isLatest).map((item) => item.model).sort(byType);
     const frontierModels = promoted.filter((item) => item.isFrontier).map((item) => item.model).sort(byType);
     const frontierGroups = [
       ...(frontierModels.length > 0 ? [["Frontier", frontierModels] as [string, CatalogModel[]]] : []),

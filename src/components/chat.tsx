@@ -54,6 +54,8 @@ import {
     ChevronDown,
     FileText,
     Image as ImageIcon,
+    ImagePlus,
+    CircleAlert,
     Maximize2,
     Download,
 } from "lucide-react";
@@ -1102,6 +1104,8 @@ export interface MultimodalCanvasProps {
     sessionActive?: boolean;
     onStartSession?: () => void;
     attachedFiles?: AttachedFile[];
+    imageRequired?: boolean;
+    submitDisabled?: boolean;
     onFileSelect?: () => void;
     onRemoveFile?: (file: File) => void;
     fileInputRef?: React.RefObject<HTMLInputElement | null>;
@@ -1170,6 +1174,8 @@ export function MultimodalCanvas({
     activityState,
     error,
     attachedFiles = [],
+    imageRequired = false,
+    submitDisabled = false,
     onFileSelect,
     onRemoveFile,
     fileInputRef,
@@ -1207,7 +1213,13 @@ export function MultimodalCanvas({
         setSlashSelectedIndex(0);
     }, [inputValue]);
 
-    const canSend = (!sending || continuous) && (inputValue.trim() || attachedFiles.length > 0);
+    const hasReadyImage = attachedFiles.some((file) => file.type === "image" && !file.uploading && Boolean(file.url));
+    const imageRequirementMissing = imageRequired && !hasReadyImage;
+    const imageRequirementId = React.useId();
+    const canSend = (!sending || continuous)
+        && (inputValue.trim() || attachedFiles.length > 0)
+        && !submitDisabled
+        && !imageRequirementMissing;
     const isUploading = attachedFiles.some(f => f.uploading);
 
     const focusTextarea = useCallback(() => {
@@ -1398,6 +1410,34 @@ export function MultimodalCanvas({
             <div className="cm-chat__composer">
                 {error && <div className="text-xs text-red-400 mb-2 p-2 bg-red-500/10 rounded">{error}</div>}
 
+                {imageRequirementMissing && onFileSelect && (
+                    <div
+                        id={imageRequirementId}
+                        role="alert"
+                        aria-live="polite"
+                        className="mb-3 flex flex-col gap-3 rounded-md border-2 border-amber-400/70 bg-amber-400/15 p-3 shadow-[0_0_24px_hsl(45_100%_55%/0.12)] sm:flex-row sm:items-center"
+                    >
+                        <CircleAlert className="h-6 w-6 shrink-0 text-amber-300" aria-hidden="true" />
+                        <div className="min-w-0 flex-1">
+                            <p className="text-sm font-bold text-amber-100">Image required</p>
+                            <p className="mt-0.5 text-sm leading-snug text-foreground/90">
+                                This model needs an image as input before it can run. Upload an image to continue.
+                            </p>
+                        </div>
+                        <Button
+                            type="button"
+                            size="sm"
+                            onClick={onFileSelect}
+                            disabled={(sending && !continuous) || isRecording}
+                            className="w-full shrink-0 bg-amber-300 font-bold text-black hover:bg-amber-200 sm:w-auto"
+                            aria-label="Upload required image"
+                        >
+                            <ImagePlus className="h-4 w-4" />
+                            Upload image
+                        </Button>
+                    </div>
+                )}
+
                 {attachedFiles.length > 0 && (
                     <div className="cm-chat__attachments">
                         {attachedFiles.map((file, index) => (
@@ -1446,7 +1486,15 @@ export function MultimodalCanvas({
                     )}
 
                     {onFileSelect && (
-                        <Button variant="ghost" size="icon" onClick={onFileSelect} disabled={(sending && !continuous) || isRecording} className="cm-chat__icon-action shrink-0 cursor-pointer" title="Attach file">
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={onFileSelect}
+                            disabled={(sending && !continuous) || isRecording}
+                            className="cm-chat__icon-action shrink-0 cursor-pointer"
+                            title={imageRequired ? "Upload required image" : "Attach file"}
+                            aria-label={imageRequired ? "Upload required image" : "Attach file"}
+                        >
                             <Paperclip className="w-4 h-4" />
                         </Button>
                     )}
@@ -1495,16 +1543,24 @@ export function MultimodalCanvas({
                             rows={1}
                             className={cn("resize-none w-full", variant === "workflow" && "font-mono text-sm")}
                             disabled={sending && !continuous}
+                            aria-invalid={imageRequirementMissing || undefined}
+                            aria-describedby={imageRequirementMissing ? imageRequirementId : undefined}
                         />
                     </div>
 
-                    <Button onClick={() => void handleSend()} disabled={!canSend || isUploading} className={cn("cm-chat__send", config.sendButton)}>
+                    <Button
+                        onClick={() => void handleSend()}
+                        disabled={!canSend || isUploading}
+                        className={cn("cm-chat__send", config.sendButton)}
+                        aria-describedby={imageRequirementMissing ? imageRequirementId : undefined}
+                        title={imageRequirementMissing ? "Upload an image to continue" : undefined}
+                    >
                         {sending && !continuous ? <Loader2 className="w-4 h-4 animate-spin" /> : variant === "workflow" ? <Play className="w-4 h-4" /> : <Send className="w-4 h-4" />}
                     </Button>
                 </div>
 
                 {fileInputRef && onFileInputChange && (
-                    <input type="file" ref={fileInputRef} onChange={onFileInputChange} accept="image/*,audio/*,video/*,application/pdf,.pdf,.txt,.md,.json,.csv,.html,.xml,text/*,application/json" className="hidden" />
+                    <input type="file" ref={fileInputRef} onChange={onFileInputChange} accept={imageRequired ? "image/*" : "image/*,audio/*,video/*,application/pdf,.pdf,.txt,.md,.json,.csv,.html,.xml,text/*,application/json"} className="hidden" />
                 )}
             </div>
         </div>
