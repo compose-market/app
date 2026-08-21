@@ -365,6 +365,49 @@ test("dashboard uses the platform rail, picker stats, and composite mobile grid"
   assert.match(styles, /\.cm-feed-list\s*\{[\s\S]*?overscroll-behavior:\s*contain/);
 });
 
+test("playground header keeps the platform title and tab counts visible everywhere", () => {
+  const playground = read("src/pages/playground.tsx");
+  const styles = read("src/styles/index.css");
+  const shell = readFileSync(resolve(repo, "packages/theme/src/shell/shell.css"), "utf8");
+
+  // Standard page title convention (same as market/dashboard).
+  assert.match(playground, /cm-page-header__title cm-playground__toolbar-title/);
+  assert.match(playground, /<span className="text-fuchsia-500 mr-2">\/\/<\/span>/);
+  assert.doesNotMatch(playground, /cm-playground__title|Sparkles/);
+  // The leftover Benchmarks header button is gone (it lives in the model card tab).
+  assert.doesNotMatch(playground, /Open Model Benchmarks|benchmarkOperationForCatalogModel|BarChart3/);
+  // One-line default model before user selection (deep link still wins).
+  assert.match(playground, /const DEFAULT_MODEL = "[^"]+"/);
+  assert.match(playground, /requested\.trim\(\) : DEFAULT_MODEL/);
+  // The title never hides — it scales + ellipsizes via the toolbar container.
+  assert.match(styles, /\.cm-playground__toolbar-title\s*\{[\s\S]*?font-size:\s*clamp\(0\.7rem,\s*3cqi,\s*1\.12rem\)/);
+  assert.doesNotMatch(styles, /cm-playground__title-text|cm-playground__model-count/);
+  // The page root keeps the standard separation (rail ↔ composition ↔ edges).
+  assert.match(styles, /\.cm-playground\s*\{[\s\S]*?gap:\s*clamp\(0\.4rem,\s*1cqi,\s*0\.7rem\)/);
+  assert.match(styles, /\.cm-playground\s*\{[\s\S]*?padding:\s*clamp\(0\.4rem,\s*1cqi,\s*0\.7rem\)/);
+  // Collapsed switchers keep their count badge on ultra-narrow containers.
+  assert.doesNotMatch(shell, /cm-control-switcher__badge\s*\{[\s\S]*?display:\s*none/);
+});
+
+test("keys page uses the standard title and a contained central panel", () => {
+  const keys = read("src/components/keys.tsx");
+  const styles = read("src/styles/dashboard.css");
+
+  // Standard page title convention (same as market/dashboard/playground).
+  assert.match(keys, /cm-page-header__title cm-keys-header__title/);
+  assert.match(keys, /<span className="text-fuchsia-500 mr-2">\/\/<\/span>/);
+  assert.doesNotMatch(keys, /cm-keys-header__title-icon/);
+  assert.doesNotMatch(styles, /cm-keys-header__title-icon/);
+  assert.match(styles, /\.cm-keys-header__title\s*\{[\s\S]*?font-size:\s*clamp\(0\.7rem,\s*3cqi,\s*1\.12rem\)/);
+
+  // Central composition is a contained panel (like .cm-quickstart beside it)
+  // with internal list scrolling — never a bare transparent region.
+  assert.match(styles, /\.cm-keys-main\s*\{[\s\S]*?border:\s*1px solid hsl\(var\(--primary\)/);
+  assert.match(styles, /\.cm-keys-main\s*\{[\s\S]*?backdrop-filter:\s*blur/);
+  assert.match(styles, /\.cm-keys-main\s*\{[\s\S]*?overflow:\s*hidden/);
+  assert.match(styles, /\.cm-keys-list\s*\{[\s\S]*?overflow-y:\s*auto[\s\S]*?overscroll-behavior:\s*contain/);
+});
+
 test("backpack rows and binary controls use high-contrast theme primitives", () => {
   const backpack = read("src/components/backpack.tsx");
   const sw = read("src/components/ui/switch.tsx");

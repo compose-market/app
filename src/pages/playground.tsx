@@ -12,7 +12,6 @@
  */
 import { Suspense, lazy, useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { usePostHog } from "@posthog/react";
-import { useLocation } from "wouter";
 import { mpTrack } from "@/lib/mixpanel";
 import { useActiveWallet, useActiveAccount } from "thirdweb/react";
 import { useSession } from "@/hooks/use-session.tsx";
@@ -31,7 +30,6 @@ import {
 import {
   Bot,
   Settings2,
-  Sparkles,
   RefreshCw,
   Plug,
   ChevronLeft,
@@ -40,13 +38,11 @@ import {
   Image as ImageIcon,
   Mic,
   Video,
-  BarChart3,
 } from "lucide-react";
 import { MultimodalCanvas } from "@/components/chat";
 import { ModelCard, type ModelParamsSchema } from "@/components/models/card";
 import { ModelSelector } from "@/components/models/selector";
 import { CapabilityChips } from "@/components/models/capabilities";
-import { benchmarkOperationForCatalogModel, catalogModelSupportsBenchmarks } from "@/lib/benchmarks";
 import { useChat } from "@/hooks/use-chat";
 import { useModelDetails, useModelParams, useModels } from "@/hooks/use-model";
 import { CostReceiptIndicator } from "@/components/receipt-indicator";
@@ -66,6 +62,11 @@ import {
 } from "@/lib/models";
 
 const PANE_COLLAPSED_KEY = "playground_pane_collapsed";
+
+// ── Default model before user selection.
+// If it doesn't exist (e.g., deprecated) in the catalog anymore,
+// the auto-select effect will fall back to the latest frontier model.
+const DEFAULT_MODEL = "gemini-3.7-flash";
 
 type PlaygroundTab = "model" | "connectors";
 
@@ -206,14 +207,13 @@ export default function PlaygroundPage() {
   const [selectedModel, setSelectedModel] = useState<string>(() => {
     // Deep-link support: /playground?model=<public-catalog-id> pre-selects a model.
     const requested = new URLSearchParams(window.location.search).get("model");
-    return requested && requested.trim().length > 0 ? requested.trim() : "";
+    return requested && requested.trim().length > 0 ? requested.trim() : DEFAULT_MODEL;
   });
   const [commandBarOpen, setCommandBarOpen] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState("");
   const [showSessionDialog, setShowSessionDialog] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [inferenceError, setInferenceError] = useState<string | null>(null);
-  const [, setLocation] = useLocation();
 
   // Mobile pane sheet
   const [mobilePaneOpen, setMobilePaneOpen] = useState(false);
@@ -307,7 +307,6 @@ export default function PlaygroundPage() {
   );
   const { data: selectedModelDetails } = useModelDetails(selectedModel);
   const selectedModelInfo = selectedModelDetails ?? selectedModelIndex;
-  const selectedModelSupportsBenchmarks = catalogModelSupportsBenchmarks(selectedModelInfo);
   const { data: rawModelParams } = useModelParams<ModelParamsSchema>(selectedModel);
   const modelParams = useMemo(() => (
     rawModelParams && Object.keys(rawModelParams.params).length > 0 ? rawModelParams : null
@@ -466,10 +465,10 @@ export default function PlaygroundPage() {
     <div className="cm-playground">
       {/* ── Top-Level Toolbar: Page info only ─────────────────── */}
       <div className="cm-playground__toolbar">
-        <div className="cm-playground__title">
-          <Sparkles className="cm-playground__title-icon" />
-          <span className="cm-playground__title-text">Playground</span>
-        </div>
+        <h1 className="cm-page-header__title cm-playground__toolbar-title">
+          <span className="text-fuchsia-500 mr-2">//</span>
+          PLAYGROUND
+        </h1>
 
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as PlaygroundTab)}>
           <Switcher
@@ -481,20 +480,6 @@ export default function PlaygroundPage() {
         </Tabs>
 
         <div className="cm-playground__toolbar-right flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              const operation = benchmarkOperationForCatalogModel(selectedModelInfo);
-              setLocation(`/benchmarks?operation=${operation}${selectedModel ? `&models=${encodeURIComponent(selectedModel)}` : ""}`);
-            }}
-            className="cm-shell-button cm-shell-button--outline text-xs font-mono text-cyan-400 border-cyan-500/30 hover:border-cyan-400 gap-1.5 h-8 px-2.5"
-            title="Open Model Benchmarks & Intelligence Index"
-          >
-            <BarChart3 className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Benchmarks</span>
-          </Button>
-
           {activeTab === "model" && (
             <Button
               variant="ghost"
