@@ -10,7 +10,7 @@ function read(path: string): string {
   return readFileSync(resolve(root, path), "utf8");
 }
 
-test("root route redirects to keys while home and market stay outside the app graph", () => {
+test("root route redirects to keys while home stays outside the app graph", () => {
   const app = read("src/App.tsx");
   const layout = read("src/components/layout/Layout.tsx");
 
@@ -19,10 +19,8 @@ test("root route redirects to keys while home and market stay outside the app gr
   assert.match(app, /<Redirect\s+to="\/keys"\s+replace\s*\/>/);
   assert.match(app, /const Dashboard = lazy\(\(\) => import\("@\/pages\/dashboard"\)\);/);
   assert.match(app, /<Route path="\/dashboard" component=\{Dashboard\} \/>/);
-  assert.match(app, /\/\/ const Market = lazy\(\(\) => import\("@\/pages\/market"\)\);/);
-  assert.match(app, /\{\/\* <Route path="\/market" component=\{Market\} \/> \*\/\}/);
-  assert.doesNotMatch(app, /^const Market =/m);
-  assert.doesNotMatch(app, /^\s*<Route path="\/market"/m);
+  assert.match(app, /const Market = lazy\(\(\) => import\("@\/pages\/market"\)\);/);
+  assert.match(app, /<Route path="\/market" component=\{Market\} \/>/);
   assert.doesNotMatch(layout, /label:\s*"Home"/);
 });
 
@@ -39,6 +37,7 @@ test("network selector lives in the nav utility, not the top HUD or overflow", (
 test("market agent cards use root open handlers without nested links", () => {
   const market = read("src/pages/market.tsx");
   const card = read("src/components/agent-card.tsx");
+  const networks = read("src/lib/networks.ts");
 
   assert.match(market, /cm-market-agent-canvas/);
   assert.match(market, /onOpen=\{\(\) => setLocation\(agentPageUrl\)\}/);
@@ -49,16 +48,18 @@ test("market agent cards use root open handlers without nested links", () => {
   assert.match(card, /cm-agent-card__verified/);
   assert.match(card, /cm-agent-card__network/);
   assert.doesNotMatch(card, /logo\.dev|chainLogoUrl|VITE_PUBLIC_LOGO_DEV_PUBLISHABLE_KEY/);
-  assert.match(card, /"eip155:43113": "\/networks\/avalancheFuji\.jpeg"/);
-  assert.match(card, /"eip155:43114": "\/networks\/avalanche\.jpeg"/);
-  assert.match(card, /"eip155:421614": "\/networks\/arbitrumSepolia\.png"/);
-  assert.match(card, /"eip155:42161": "\/networks\/arbitrum\.png"/);
-  assert.match(card, /"eip155:5042002": "\/networks\/arcTestnet\.jpeg"/);
-  assert.match(card, /"eip155:5042": "\/networks\/arc\.jpeg"/);
-  assert.match(card, /"eip155:1328": "\/networks\/seiTestnet\.jpeg"/);
-  assert.match(card, /"eip155:1329": "\/networks\/sei\.jpeg"/);
-  assert.match(card, /"solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1": "\/networks\/solanaDevnet\.jpeg"/);
-  assert.match(card, /"solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp": "\/networks\/solana\.jpeg"/);
+  assert.match(card, /@\/lib\/networks/);
+  // Chain logos live in the shared network module (dashboard filter reuses it).
+  assert.match(networks, /"eip155:43113": "\/networks\/avalancheFuji\.jpeg"/);
+  assert.match(networks, /"eip155:43114": "\/networks\/avalanche\.jpeg"/);
+  assert.match(networks, /"eip155:421614": "\/networks\/arbitrumSepolia\.png"/);
+  assert.match(networks, /"eip155:42161": "\/networks\/arbitrum\.png"/);
+  assert.match(networks, /"eip155:5042002": "\/networks\/arcTestnet\.jpeg"/);
+  assert.match(networks, /"eip155:5042": "\/networks\/arc\.jpeg"/);
+  assert.match(networks, /"eip155:1328": "\/networks\/seiTestnet\.jpeg"/);
+  assert.match(networks, /"eip155:1329": "\/networks\/sei\.jpeg"/);
+  assert.match(networks, /"solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1": "\/networks\/solanaDevnet\.jpeg"/);
+  assert.match(networks, /"solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp": "\/networks\/solana\.jpeg"/);
   assert.match(card, /!isMarketCard && apiEndpoint/);
   assert.match(card, /navigator\.clipboard\.writeText\(apiEndpoint\)/);
   assert.match(card, /title=\{apiEndpoint\}/);
@@ -120,24 +121,27 @@ test("model card owns its responsive styles in the theme module", () => {
   assert.match(model, /container-type:\s*inline-size/);
   assert.match(model, /\.cm-model-card__content\s*\{[\s\S]*height:\s*100%/);
   assert.match(model, /\.cm-model-card__body\s*>?\s*\.cm-model-card__content:first-child:last-child\s*\{[\s\S]*grid-row:\s*1 \/ -1/);
-  assert.match(model, /\.cm-model-card__details,\s*\n\.cm-model-card__custom-content\s*\{[\s\S]*grid-auto-rows:\s*minmax\(min-content,\s*1fr\)/);
-  assert.match(model, /\.cm-model-card__details,\s*\n\.cm-model-card__custom-content\s*\{[\s\S]*height:\s*100%/);
-  assert.match(model, /\.cm-model-card__details,\s*\n\.cm-model-card__custom-content\s*\{[\s\S]*align-content:\s*stretch/);
-  assert.match(model, /--cm-model-section-min:\s*clamp/);
-  assert.match(model, /--cm-model-flow-size:\s*clamp/);
-  assert.match(model, /--cm-model-format-size:\s*clamp/);
-  assert.match(model, /--cm-model-label-size:\s*clamp/);
-  assert.match(model, /\.cm-model-card__details\s*\{[\s\S]*grid-auto-rows:\s*minmax\(var\(--cm-model-section-min\),\s*1fr\)[\s\S]*align-content:\s*stretch/);
-  assert.doesNotMatch(model, /\.cm-model-card__details\s*\{[\s\S]*align-content:\s*space-between/);
+  // max-content tracks + start alignment are the deliberate Chrome fix: plain
+  // auto rows collapse into equal slices inside definite-height scroll
+  // containers and clip every section (documented in model.css).
+  assert.match(model, /\.cm-model-card__details,\s*\n\.cm-model-card__custom-content\s*\{[\s\S]*?grid-auto-rows:\s*max-content/);
+  assert.match(model, /\.cm-model-card__details,\s*\n\.cm-model-card__custom-content\s*\{[\s\S]*?height:\s*100%/);
+  assert.match(model, /\.cm-model-card__details,\s*\n\.cm-model-card__custom-content\s*\{[\s\S]*?align-content:\s*start/);
+  assert.match(model, /--cm-model-cell-min:\s*calc/);
+  assert.match(model, /--cm-model-flow-size:\s*calc/);
+  assert.match(model, /--cm-model-format-size:\s*calc/);
+  assert.match(model, /--cm-model-label-size:\s*calc/);
+  assert.match(model, /\.cm-model-card__details\s*\{[\s\S]*?grid-auto-rows:\s*max-content[\s\S]*?align-content:\s*start/);
+  assert.doesNotMatch(model, /\.cm-model-card__details\s*\{[\s\S]*?align-content:\s*space-between/);
   assert.match(model, /\.cm-model-card__icon-label\s*\{[\s\S]*width:\s*var\(--cm-model-flow-size\)/);
   assert.match(model, /\.cm-model-card__format-badge\s*\{[\s\S]*width:\s*var\(--cm-model-format-size\)/);
   assert.match(model, /\.cm-model-card__icon-label--section\s*\{[\s\S]*width:\s*var\(--cm-model-section-icon-size\)/);
   assert.match(model, /--cm-model-unit:\s*clamp/);
-  assert.match(model, /\.cm-model-card__details \.cm-model-card__kv-grid,[\s\S]*grid-auto-rows:\s*minmax\(0,\s*1fr\)[\s\S]*height:\s*100%[\s\S]*align-content:\s*center/);
-  assert.match(model, /\.cm-model-card__details \.cm-model-card__kv-row,[\s\S]*grid-template-columns:\s*auto auto[\s\S]*justify-content:\s*center[\s\S]*height:\s*min\(var\(--cm-model-cell-max\),\s*100%\)/);
-  assert.doesNotMatch(model, /\.cm-model-card__details \.cm-model-card__kv-row,[\s\S]*height:\s*auto/);
+  assert.match(model, /\.cm-model-card__details \.cm-model-card__kv-grid,[\s\S]*?grid-auto-rows:\s*auto;[\s\S]*?align-content:\s*center/);
+  assert.match(model, /\.cm-model-card__details \.cm-model-card__kv-row,[\s\S]*?grid-template-columns:\s*auto auto[\s\S]*?justify-content:\s*center[\s\S]*?min-height:\s*var\(--cm-model-cell-min\)/);
+  assert.doesNotMatch(model, /\.cm-model-card__details \.cm-model-card__kv-row,[^}]*height:\s*auto/);
   assert.match(model, /grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
-  assert.match(model, /@container \(max-width:\s*28rem\)/);
+  assert.match(model, /@container \(max-width:\s*18rem\)/);
   assert.doesNotMatch(model, /@container cm-model \(max-height:\s*44rem\)/);
   assert.doesNotMatch(model, /@container cm-model \(max-height:\s*34rem\)/);
   assert.doesNotMatch(model, /from "\.\.\/entity"/);
@@ -153,7 +157,7 @@ test("model card owns its responsive styles in the theme module", () => {
   assert.match(model, /\.cm-model-card__format-badge/);
   assert.match(model, /\.cm-model-card__option-grid/);
   assert.match(model, /\.cm-model-card__option-grid\s*\{[\s\S]*display:\s*grid/);
-  assert.match(model, /\.cm-model-card__option-grid\s*\{[\s\S]*repeat\(auto-fit,\s*minmax\(min\(100%,\s*4\.5rem\),\s*1fr\)\)/);
+  assert.match(model, /\.cm-model-card__option-grid\s*\{[\s\S]*repeat\(auto-fit,\s*minmax\(min\(100%,\s*calc\(var\(--cm-model-unit\) \* 7\)\),\s*1fr\)\)/);
   assert.doesNotMatch(model, /\.cm-model-card__option-grid\s*\{[\s\S]{0,220}flex-wrap/);
   assert.match(model, /\.cm-model-card__section--custom/);
   assert.match(modelIndex, /export function ModelCard/);
@@ -294,6 +298,71 @@ test("fixed page shells keep whole-page canvases locked and move overflow into e
   assert.match(assets, /cm-market-tabs/);
   assert.match(assets, /cm-market-tab-panel cm-market-tab-panel--agents/);
   assert.match(assets, /cm-market-tab-panel cm-market-tab-panel--scroll/);
+});
+
+test("dashboard uses the platform rail, picker stats, and composite mobile grid", () => {
+  const dashboard = read("src/pages/dashboard.tsx");
+  const networks = read("src/components/dashboard/networks.tsx");
+  const overview = read("src/components/dashboard/overview.tsx");
+  const spending = read("src/components/dashboard/spending.tsx");
+  const styles = read("src/styles/dashboard.css");
+
+  // Header is the standard control rail with the standard page title naming.
+  assert.match(dashboard, /cm-control-rail cm-dashboard-control-rail/);
+  assert.match(dashboard, /cm-page-header__title/);
+  assert.match(dashboard, /<Switcher/);
+  assert.match(dashboard, /cm-control-icon-button/);
+  assert.match(dashboard, /title="Refresh analytics"/);
+  assert.doesNotMatch(dashboard, /cm-dashboard__header|cm-time-range|<Filter/);
+
+  // Network selector: single merged module, STANDARD switcher chrome
+  // (cm-shell-tab pill, centered content), logo-driven, shared menu.
+  assert.match(networks, /export function toggleNetworkSelection/);
+  assert.match(networks, /export function NetworkFilter/);
+  assert.match(networks, /@\/lib\/networks/);
+  assert.match(networks, /cm-shell-tab cm-network-filter/);
+  assert.match(networks, /cm-control-switcher__label/);
+  assert.match(networks, /cm-control-switcher__chevron/);
+  assert.match(networks, /title=\{tooltip\}/);
+  assert.match(styles, /\.cm-network-filter\s*\{[\s\S]*?justify-content:\s*center/);
+  assert.doesNotMatch(networks, /cm-network-filter__trigger/);
+  assert.doesNotMatch(styles, /cm-network-filter__trigger/);
+  // Narrow rails: network trigger folds to the centered icon only
+  // (scoped to .cm-network-filter — the range Switcher keeps its label).
+  assert.match(styles, /@container \(max-width: 45rem\) \{[\s\S]*?\.cm-network-filter \.cm-control-switcher__label,[\s\S]*?display:\s*none/);
+
+  // Stats: picker card swaps the visible stat; the dead fold toggle is gone.
+  assert.match(overview, /data-selected-stat/);
+  assert.match(overview, /cm-stat-card--picker/);
+  assert.match(overview, /DropdownMenuTrigger/);
+  assert.doesNotMatch(overview, /fold-toggle|data-fold|cm-stat-card--fold/);
+  assert.match(styles, /button\.cm-stat-card--picker/);
+  // Picker is hidden on wide containers (specificity-locked against the
+  // base .cm-stat-card display rule) and only appears in the narrow query.
+  assert.match(styles, /button\.cm-stat-card--picker\s*\{[^}]*display:\s*none/);
+  assert.doesNotMatch(styles, /cm-overview__fold|cm-stat-card--fold/);
+
+  // Chart metric tabs follow the block convention: compact BlockDropdown in
+  // smaller/non-focused view (like MODELS ▼ / REQUESTS ▼), pills only when
+  // the block is focused and has room.
+  assert.match(spending, /cm-time-range/);
+  assert.match(spending, /BlockDropdown/);
+  assert.match(spending, /focused \?/);
+  assert.doesNotMatch(spending, /<Switcher/);
+
+  // Composite narrow layout: hero row + two full-width stacked rows whose
+  // combined height equals the old shared row, focus-aware areas.
+  assert.match(styles, /"main"/);
+  assert.match(styles, /"sideA"/);
+  assert.match(styles, /"sideB"/);
+  assert.match(styles, /grid-template-rows:\s*auto auto minmax\(0,\s*1\.35fr\) minmax\(0,\s*0\.5fr\) minmax\(0,\s*0\.5fr\)/);
+  assert.match(styles, /\.cm-dashboard\[data-focus="models"\] \.cm-block\[data-block="models"\]\s*\{\s*grid-area:\s*main/);
+  assert.match(styles, /\.cm-dashboard\[data-focus="feed"\] \.cm-block\[data-block="feed"\]\s*\{\s*grid-area:\s*main/);
+  assert.doesNotMatch(styles, /repeat\(3, minmax\(10rem/);
+  assert.doesNotMatch(styles, /"sideA\s+sideB"/);
+  // Internal scrollers contain overscroll instead of chaining to the shell.
+  assert.match(styles, /\.cm-block__body\s*\{[\s\S]*?overscroll-behavior:\s*contain/);
+  assert.match(styles, /\.cm-feed-list\s*\{[\s\S]*?overscroll-behavior:\s*contain/);
 });
 
 test("backpack rows and binary controls use high-contrast theme primitives", () => {

@@ -1,8 +1,14 @@
-import { useId, useMemo, useState } from "react";
-import { Activity, ChevronDown, Coins, DollarSign, Gauge, Rocket } from "lucide-react";
+import { useId, useMemo, useState, type ComponentType, type ReactNode } from "react";
+import { Activity, ChevronDown, Coins, DollarSign, Gauge, LayoutGrid, Rocket } from "lucide-react";
 import type { Summary } from "@/lib/analytics";
 import { formatMs, formatPct, formatTokens, numberLabel } from "@/lib/analytics";
 import { atomicToUsd, formatUsd } from "@/lib/receipts";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 function successTone(rate: number | null): "emerald" | "amber" | "danger" | undefined {
   if (rate === null) return undefined;
@@ -49,80 +55,141 @@ function Sparkline({ values }: { values: number[] }) {
   );
 }
 
+type StatId = "spent" | "requests" | "latency" | "ttft" | "tokens";
+
+interface StatDefinition {
+  id: StatId;
+  label: string;
+  icon: ComponentType<{ className?: string }>;
+  value: string;
+  tone?: "primary" | "accent";
+  sub: ReactNode;
+  spark?: number[];
+}
+
+function buildStats(summary: Summary, spendSeries: number[]): StatDefinition[] {
+  const tone = successTone(summary.successRate);
+  return [
+    {
+      id: "spent",
+      label: "Total Spent",
+      icon: DollarSign,
+      value: formatUsd(summary.totalUsd),
+      tone: "primary",
+      sub: `${numberLabel(summary.requestCount)} requests settled`,
+      spark: spendSeries,
+    },
+    {
+      id: "requests",
+      label: "Requests",
+      icon: Activity,
+      value: numberLabel(summary.requestCount),
+      sub: (
+        <>
+          <span className="cm-stat-card__pill" data-tone={tone}>{formatPct(summary.successRate)} success</span>
+          {summary.streamedShare !== null ? ` · ${formatPct(summary.streamedShare, 0)} streamed` : ""}
+        </>
+      ),
+    },
+    {
+      id: "latency",
+      label: "Avg Latency",
+      icon: Gauge,
+      value: summary.avgLatencyMs !== null ? formatMs(summary.avgLatencyMs) : "—",
+      sub: `P95 ${formatMs(summary.p95LatencyMs ?? 0)}`,
+    },
+    {
+      id: "ttft",
+      label: "Avg TTFT",
+      icon: Rocket,
+      value: summary.avgTtftMs !== null ? formatMs(summary.avgTtftMs) : "—",
+      tone: "accent",
+      sub: "time to first token",
+    },
+    {
+      id: "tokens",
+      label: "Tokens",
+      icon: Coins,
+      value: formatTokens(summary.tokensIn + summary.tokensOut),
+      sub: (
+        <>
+          {formatTokens(summary.tokensIn)} in <span aria-hidden="true">→</span> {formatTokens(summary.tokensOut)} out
+        </>
+      ),
+    },
+  ];
+}
+
+function StatCard({ stat }: { stat: StatDefinition }) {
+  const Icon = stat.icon;
+  return (
+    <div className="cm-stat-card" data-stat={stat.id}>
+      <span className="cm-stat-card__label">
+        <Icon className="cm-stat-card__label-icon" />
+        {stat.label}
+      </span>
+      <span className="cm-stat-card__value" data-tone={stat.tone}>{stat.value}</span>
+      <span className="cm-stat-card__sub">{stat.sub}</span>
+      {stat.spark ? <Sparkline values={stat.spark} /> : null}
+    </div>
+  );
+}
+
 export function OverviewCards({ summary }: { summary: Summary }) {
-  const [foldOpen, setFoldOpen] = useState(false);
+  const [selectedStat, setSelectedStat] = useState<StatId>("spent");
   const spendSeries = useMemo(
     () => summary.timeline.map((bucket) => atomicToUsd(bucket.totals.billing.finalAmountAtomic)),
     [summary.timeline],
   );
-  const tone = successTone(summary.successRate);
+  const stats = useMemo(() => buildStats(summary, spendSeries), [summary, spendSeries]);
+  const others = stats.filter((stat) => stat.id !== selectedStat);
+  const selected = stats.find((stat) => stat.id === selectedStat) ?? stats[0];
 
   return (
-    <div className="cm-overview" data-fold-open={foldOpen ? "true" : undefined}>
+    <div className="cm-overview" data-selected-stat={selected.id}>
       <div className="cm-overview-grid">
-      <div className="cm-stat-card">
-        <span className="cm-stat-card__label">
-          <DollarSign className="cm-stat-card__label-icon" />
-          Total Spent
-        </span>
-        <span className="cm-stat-card__value" data-tone="primary">{formatUsd(summary.totalUsd)}</span>
-        <span className="cm-stat-card__sub">{numberLabel(summary.requestCount)} requests settled</span>
-        <Sparkline values={spendSeries} />
-      </div>
+        {stats.map((stat) => (
+          <StatCard key={stat.id} stat={stat} />
+        ))}
 
-      <div className="cm-stat-card">
-        <span className="cm-stat-card__label">
-          <Activity className="cm-stat-card__label-icon" />
-          Requests
-        </span>
-        <span className="cm-stat-card__value">{numberLabel(summary.requestCount)}</span>
-        <span className="cm-stat-card__sub">
-          <span className="cm-stat-card__pill" data-tone={tone}>{formatPct(summary.successRate)} success</span>
-          {summary.streamedShare !== null ? ` · ${formatPct(summary.streamedShare, 0)} streamed` : ""}
-        </span>
+        {/* Narrow-container stat picker — same footprint as a stat card. */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="cm-stat-card cm-stat-card--picker"
+              aria-label={`More stats: ${others.map((stat) => stat.label).join(", ")}`}
+              title="More stats"
+            >
+              <span className="cm-stat-card__label">
+                <LayoutGrid className="cm-stat-card__label-icon" />
+                More stats
+              </span>
+              <span className="cm-stat-card--picker__value">
+                <span className="cm-stat-card__value">{others.length}</span>
+                <ChevronDown className="cm-stat-card--picker__chevron" />
+              </span>
+              <span className="cm-stat-card__sub">swap this card</span>
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" sideOffset={8} className="cm-control-menu">
+            {others.map((stat) => {
+              const Icon = stat.icon;
+              return (
+                <DropdownMenuItem
+                  key={stat.id}
+                  className="cm-control-menu__item"
+                  onSelect={() => setSelectedStat(stat.id)}
+                >
+                  <Icon className="cm-control-menu__icon" />
+                  <span className="cm-control-menu__label">{stat.label}</span>
+                  <span className="cm-stat-card--picker__item-value">{stat.value}</span>
+                </DropdownMenuItem>
+              );
+            })}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
-
-      <div className="cm-stat-card">
-        <span className="cm-stat-card__label">
-          <Gauge className="cm-stat-card__label-icon" />
-          Avg Latency
-        </span>
-        <span className="cm-stat-card__value">{summary.avgLatencyMs !== null ? formatMs(summary.avgLatencyMs) : "—"}</span>
-        <span className="cm-stat-card__sub">P95 {formatMs(summary.p95LatencyMs ?? 0)}</span>
-      </div>
-
-      <div className="cm-stat-card cm-stat-card--fold">
-        <span className="cm-stat-card__label">
-          <Rocket className="cm-stat-card__label-icon" />
-          Avg TTFT
-        </span>
-        <span className="cm-stat-card__value" data-tone="accent">
-          {summary.avgTtftMs !== null ? formatMs(summary.avgTtftMs) : "—"}
-        </span>
-        <span className="cm-stat-card__sub">time to first token</span>
-      </div>
-
-      <div className="cm-stat-card cm-stat-card--fold">
-        <span className="cm-stat-card__label">
-          <Coins className="cm-stat-card__label-icon" />
-          Tokens
-        </span>
-        <span className="cm-stat-card__value">{formatTokens(summary.tokensIn + summary.tokensOut)}</span>
-        <span className="cm-stat-card__sub">
-          {formatTokens(summary.tokensIn)} in <span aria-hidden="true">→</span> {formatTokens(summary.tokensOut)} out
-        </span>
-      </div>
-      </div>
-
-      <button
-        type="button"
-        className="cm-overview__fold-toggle"
-        aria-expanded={foldOpen}
-        onClick={() => setFoldOpen((open) => !open)}
-      >
-        {foldOpen ? "Less stats" : "More stats"}
-        <ChevronDown className="cm-overview__fold-icon" data-open={foldOpen ? "true" : undefined} />
-      </button>
     </div>
   );
 }

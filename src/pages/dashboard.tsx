@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { BarChart3, Filter, RefreshCw, Wallet } from "lucide-react";
+import { Calendar, CalendarDays, CalendarRange, Clock, RefreshCw, Wallet } from "lucide-react";
 import type { InferenceAnalytics } from "@compose-market/sdk";
 import type { NetworkId } from "@compose-market/sdk/chains";
 
@@ -10,14 +10,8 @@ import { OverviewCards } from "@/components/dashboard/overview";
 import { SpendingChart } from "@/components/dashboard/spending";
 import { ModelUsageTable } from "@/components/dashboard/models";
 import { ReceiptFeed } from "@/components/dashboard/receipts";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { toggleNetworkSelection } from "@/components/dashboard/networks";
+import { NetworkFilter } from "@/components/dashboard/networks";
+import { Switcher, type Option } from "@/components/control";
 
 const RANGES = [
   { label: "24h", ms: 86_400_000, interval: "hour" },
@@ -25,6 +19,15 @@ const RANGES = [
   { label: "30d", ms: 30 * 86_400_000, interval: "day" },
   { label: "180d", ms: 180 * 86_400_000, interval: "day" },
 ] as const;
+
+const RANGE_OPTIONS: Option<string>[] = [
+  { value: "24h", label: "24h", icon: Clock },
+  { value: "7d", label: "7d", icon: CalendarRange },
+  { value: "30d", label: "30d", icon: Calendar },
+  { value: "180d", label: "180d", icon: CalendarDays },
+];
+
+type RangeId = (typeof RANGES)[number]["label"];
 
 type StableFilters = Omit<
   InferenceAnalytics.InferenceAnalyticsFilters,
@@ -67,77 +70,42 @@ export default function DashboardPage() {
     filters,
   });
 
-  const networkLabel = selectedNetworks.length === 0
-    ? "All networks"
-    : selectedNetworks.length === 1
-      ? supportedNetworks.find((chain) => chain.network === selectedNetworks[0])?.name ?? selectedNetworks[0]
-      : `${selectedNetworks.length} networks`;
-
   const header = (
-    <div className="cm-dashboard__header">
-      <div className="cm-dashboard__title">
-        <BarChart3 className="cm-dashboard__title-icon" />
-        <span>Dashboard</span>
-        {isRefetching ? <span className="text-xs font-normal text-muted-foreground">Updating…</span> : null}
+    <div className="cm-control-rail cm-dashboard-control-rail">
+      <div className="cm-dashboard-control-rail__brand">
+        <h1 className="cm-page-header__title cm-dashboard-control-rail__title">
+          <span className="text-fuchsia-500 mr-2">//</span>
+          DASHBOARD
+        </h1>
+        {isRefetching ? (
+          <span className="cm-dashboard__updating" title="Updating analytics">Updating…</span>
+        ) : null}
       </div>
-      <div className="cm-dashboard__actions">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="cm-shell-button cm-shell-button--ghost">
-              <Filter className="h-4 w-4" />
-              {networkLabel}
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-56">
-            <DropdownMenuCheckboxItem
-              checked={selectedNetworks.length === 0}
-              onCheckedChange={(checked) => {
-                if (checked) setSelectedNetworks([]);
-              }}
-              onSelect={(event) => event.preventDefault()}
-            >
-              All
-            </DropdownMenuCheckboxItem>
-            {supportedNetworks.map((chain) => (
-              <DropdownMenuCheckboxItem
-                key={chain.network}
-                checked={selectedNetworks.includes(chain.network)}
-                onCheckedChange={(checked) => {
-                  setSelectedNetworks((current) => toggleNetworkSelection(
-                    current,
-                    chain.network,
-                    checked === true,
-                  ) as NetworkId[]);
-                }}
-                onSelect={(event) => event.preventDefault()}
-              >
-                {chain.name}
-              </DropdownMenuCheckboxItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <div className="cm-time-range">
-          {RANGES.map((option) => (
-            <button
-              key={option.label}
-              className="cm-time-range__option"
-              data-active={range === option}
-              onClick={() => setRange(option)}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-        <Button
-          variant="ghost"
-          size="icon"
+      <div className="cm-dashboard-control-rail__actions">
+        <NetworkFilter
+          chains={supportedNetworks}
+          selected={selectedNetworks}
+          onChange={setSelectedNetworks}
+        />
+        <Switcher
+          value={range.label}
+          options={RANGE_OPTIONS}
+          label="Time range"
+          onChange={(value) => {
+            const next = RANGES.find((option) => option.label === (value as RangeId));
+            if (next) setRange(next);
+          }}
+        />
+        <button
+          type="button"
           onClick={() => void forceRefresh()}
           disabled={!owner || isRefetching || isLoading}
-          className="cm-shell-button cm-shell-button--ghost cm-shell-button--icon"
+          className="cm-control-icon-button"
+          title="Refresh analytics"
           aria-label="Refresh analytics"
         >
-          <RefreshCw className={`h-4 w-4 ${isRefetching ? "animate-spin" : ""}`} />
-        </Button>
+          <RefreshCw className={`cm-control-icon-button__icon ${isRefetching ? "animate-spin" : ""}`} />
+        </button>
       </div>
     </div>
   );

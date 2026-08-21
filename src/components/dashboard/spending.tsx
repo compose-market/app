@@ -2,15 +2,16 @@ import { Suspense, lazy, useMemo, useState } from "react";
 import type { AnalyticsInterval, TimelineBucket } from "@/lib/analytics";
 import { formatMs, formatTokens, numberLabel } from "@/lib/analytics";
 import { atomicToUsd, formatUsd } from "@/lib/receipts";
+import { BlockDropdown } from "./dropdown";
 import type { ChartTab } from "./usage";
 
 const UsageChart = lazy(() => import("./usage"));
 
-const TABS: Array<{ id: ChartTab; label: string }> = [
-  { id: "spend", label: "Spend" },
-  { id: "requests", label: "Requests" },
-  { id: "tokens", label: "Tokens" },
-  { id: "latency", label: "Latency" },
+const TABS: Array<{ value: ChartTab; label: string }> = [
+  { value: "spend", label: "Spend" },
+  { value: "requests", label: "Requests" },
+  { value: "tokens", label: "Tokens" },
+  { value: "latency", label: "Latency" },
 ];
 
 function usePeriodBadge(timeline: TimelineBucket[], tab: ChartTab): string {
@@ -62,19 +63,25 @@ export function SpendingChart({
   return (
     <div className="cm-block" data-block={dataBlock} data-focused={focused} onClick={onClick}>
       <div className="cm-block__header">
-        <div className="cm-time-range" onClick={(event) => event.stopPropagation()}>
-          {TABS.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              className="cm-time-range__option"
-              data-active={tab === option.id}
-              onClick={() => setTab(option.id)}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
+        {focused ? (
+          <div className="cm-time-range" onClick={(event) => event.stopPropagation()}>
+            {TABS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className="cm-time-range__option"
+                data-active={tab === option.value}
+                onClick={() => setTab(option.value)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="cm-block__header-side" onClick={(event) => event.stopPropagation()}>
+            <BlockDropdown value={tab} options={TABS} label="Metric" onChange={setTab} align="start" />
+          </div>
+        )}
         <span className="cm-block__badge">{badge}</span>
       </div>
       {timeline.length === 0 ? (

@@ -58,71 +58,174 @@
 
 @container (max-width: 42rem) {
 
+  /* Composite mobile layout: the focused block (default: chart) owns a
+     full-width hero row; the other two stack below it at full width —
+     each half the height of the shared row, so together they fill the
+     same vertical space the side-by-side row occupied. */
   .cm-dashboard,
   .cm-dashboard[data-focus] {
     grid-template-areas:
       "header"
       "stats"
-      "chart"
-      "models"
-      "feed";
+      "main"
+      "sideA"
+      "sideB";
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto auto repeat(3, minmax(10rem, 1fr));
+    grid-template-rows: auto auto minmax(0, 1.35fr) minmax(0, 0.5fr) minmax(0, 0.5fr);
+  }
+
+  /* Specificity bump (0-3-0) beats the wide-area assignments above. */
+  .cm-dashboard .cm-block[data-block="chart"] {
+    grid-area: main;
+  }
+
+  .cm-dashboard .cm-block[data-block="models"] {
+    grid-area: sideA;
+  }
+
+  .cm-dashboard .cm-block[data-block="feed"] {
+    grid-area: sideB;
+  }
+
+  .cm-dashboard[data-focus="models"] .cm-block[data-block="models"] {
+    grid-area: main;
+  }
+
+  .cm-dashboard[data-focus="models"] .cm-block[data-block="chart"] {
+    grid-area: sideA;
+  }
+
+  .cm-dashboard[data-focus="models"] .cm-block[data-block="feed"] {
+    grid-area: sideB;
+  }
+
+  .cm-dashboard[data-focus="feed"] .cm-block[data-block="feed"] {
+    grid-area: main;
+  }
+
+  .cm-dashboard[data-focus="feed"] .cm-block[data-block="chart"] {
+    grid-area: sideA;
+  }
+
+  .cm-dashboard[data-focus="feed"] .cm-block[data-block="models"] {
+    grid-area: sideB;
   }
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   Header
+   Header — platform control rail (same idiom as market/playground):
+   3-zone grid, single row on every viewport, nowrap + horizontal
+   scroll fallback comes from .cm-control-rail (packages/theme/shell).
    ═══════════════════════════════════════════════════════════════ */
 
-.cm-dashboard__header {
+.cm-dashboard-control-rail {
   grid-area: header;
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr) minmax(0, auto);
+  align-items: center;
+  gap: clamp(0.5rem, 1.25cqi, 0.8rem);
+  min-width: 0;
+}
+
+.cm-dashboard-control-rail__brand {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: clamp(0.42rem, 1cqi, 0.62rem);
+  flex: 0 1 auto;
+  justify-self: start;
+  overflow: hidden;
+}
+
+.cm-dashboard-control-rail__title {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* Scale with the rail so the title stays fully visible on narrow
+     containers instead of pinning at the floor (market idiom). */
+  font-size: clamp(0.7rem, 3cqi, 1.12rem);
+}
+
+.cm-dashboard__updating {
+  flex: 0 0 auto;
+  color: hsl(var(--muted-foreground));
+  font-family: var(--font-mono), monospace;
+  font-size: clamp(0.5rem, 1cqi, 0.65rem);
+}
+
+@container (max-width: 30rem) {
+  .cm-dashboard__updating {
+    display: none;
+  }
+}
+
+.cm-dashboard-control-rail__actions {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: clamp(0.4rem, 1.5cqi, 1rem);
-  flex-wrap: wrap;
-  padding: clamp(0.45rem, 1.2cqi, 0.75rem);
-  border: 1px solid hsl(var(--primary) / 0.14);
-  border-radius: clamp(0.5rem, 1.2cqi, 0.875rem);
-  background:
-    linear-gradient(145deg, hsl(240 6% 14% / 0.38), hsl(240 10% 4% / 0.32)),
-    radial-gradient(circle at 0% 0%, hsl(var(--primary) / 0.1), transparent 36%);
-  box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.055);
-  backdrop-filter: blur(16px) saturate(1.12);
+  gap: clamp(0.4rem, 1cqi, 0.65rem);
+  min-width: 0;
+  justify-content: flex-end;
+  justify-self: end;
+  flex-wrap: nowrap;
+  /* Rail-scoped HUD sizing (market idiom): icon buttons shrink
+     proportionally with the rail instead of pinning at the floor. */
+  --cm-hud-size: clamp(1.85rem, 7cqi, 2.55rem);
 }
 
-/* When stats has no header (stats grid is separate), override */
-.cm-dashboard[data-has-header="false"] .cm-dashboard__header {
-  display: none;
+/* ── Network filter — standard selector chrome: `cm-shell-tab` pill with
+      the collapsed-switcher frame (identical to the time-range Switcher),
+      content ALWAYS centered, logo sized to the standard switcher icon. ── */
+
+.cm-network-filter {
+  justify-content: center;
+  max-width: 100%;
+  min-width: 0;
+  flex: 0 1 auto;
+  border-color: hsl(var(--primary) / 0.24);
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--foreground));
+  box-shadow: inset 0 1px 0 hsl(var(--primary) / 0.12);
 }
 
-.cm-dashboard__title {
+.cm-network-filter:hover {
+  border-color: hsl(var(--primary) / 0.36);
+}
+
+.cm-network-filter__logo {
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 999px;
+  object-fit: cover;
+  flex: 0 0 auto;
+}
+
+.cm-network-filter__stack {
   display: inline-flex;
   align-items: center;
-  gap: clamp(0.3rem, 0.8cqi, 0.5rem);
-  min-width: 0;
-  color: hsl(var(--foreground));
-  font-family: var(--font-mono), monospace;
-  font-size: clamp(0.62rem, 1.4cqi, 0.82rem);
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  justify-content: center;
+  flex: 0 0 auto;
 }
 
-.cm-dashboard__title-icon {
-  width: clamp(0.8rem, 1.6cqi, 1.1rem);
-  height: clamp(0.8rem, 1.6cqi, 1.1rem);
-  color: hsl(var(--primary));
-  filter: drop-shadow(0 0 10px hsl(var(--primary) / 0.44));
+.cm-network-filter__stack > * + * {
+  margin-left: -0.3rem;
 }
 
-.cm-dashboard__actions {
-  display: flex;
-  align-items: center;
-  gap: clamp(0.3rem, 0.8cqi, 0.5rem);
-  min-width: 0;
-  flex-wrap: wrap;
+/* Narrow rails: icon-only trigger (the 'All' globe or the selected
+   network's logo), always centered — label and chevron fold away.
+   Scoped strictly to .cm-network-filter so the time-range Switcher
+   beside it keeps its label. */
+@container (max-width: 45rem) {
+  .cm-network-filter {
+    flex: 0 0 auto;
+    padding-inline: 0.55rem;
+    gap: 0;
+  }
+
+  .cm-network-filter .cm-control-switcher__label,
+  .cm-network-filter .cm-control-switcher__chevron {
+    display: none;
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -143,56 +246,64 @@
   gap: clamp(0.35rem, 0.8cqi, 0.6rem);
 }
 
-/* Stats fold — on narrow containers only 3 cards stay visible, the rest
-   fold behind a toggle (SearchFold idiom: data-open attribute). */
-.cm-overview__fold-toggle {
+/* Stats picker — on narrow containers the stats grid collapses to exactly
+   two cards: the selected stat (default "Total Spent") and a "More stats"
+   picker card with the same footprint. Choosing a stat from the picker swaps
+   it into the visible slot; the previous stat moves into the picker menu.
+   Visibility is driven by data-selected-stat on .cm-overview.
+   NOTE: the picker is a <button>, so `button.` prefixes keep these rules
+   stronger than the base `.cm-stat-card { display: flex }` regardless of
+   source order. */
+button.cm-stat-card--picker {
   display: none;
-  align-items: center;
-  justify-content: center;
-  gap: clamp(0.2rem, 0.5cqi, 0.35rem);
-  align-self: center;
-  min-height: clamp(1.2rem, 2.8cqi, 1.6rem);
-  padding: 0 clamp(0.4rem, 1cqi, 0.65rem);
-  border: 1px solid hsl(var(--primary) / 0.14);
-  border-radius: 999px;
-  background: transparent;
-  color: hsl(var(--muted-foreground));
-  font-family: var(--font-mono), monospace;
-  font-size: clamp(0.42rem, 0.9cqi, 0.58rem);
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
-  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
-}
-
-.cm-overview__fold-toggle:hover {
-  border-color: hsl(var(--primary) / 0.28);
-  color: hsl(var(--foreground) / 0.7);
-}
-
-.cm-overview__fold-icon {
-  width: clamp(0.55rem, 1.2cqi, 0.75rem);
-  height: clamp(0.55rem, 1.2cqi, 0.75rem);
-  transition: transform 160ms ease;
-}
-
-.cm-overview__fold-icon[data-open="true"] {
-  transform: rotate(180deg);
 }
 
 @container (max-width: 42rem) {
-  .cm-overview__fold-toggle {
-    display: inline-flex;
+  .cm-overview-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .cm-stat-card--fold {
+  .cm-stat-card[data-stat] {
     display: none;
   }
 
-  .cm-overview[data-fold-open="true"] .cm-stat-card--fold {
+  .cm-overview[data-selected-stat="spent"] .cm-stat-card[data-stat="spent"],
+  .cm-overview[data-selected-stat="requests"] .cm-stat-card[data-stat="requests"],
+  .cm-overview[data-selected-stat="latency"] .cm-stat-card[data-stat="latency"],
+  .cm-overview[data-selected-stat="ttft"] .cm-stat-card[data-stat="ttft"],
+  .cm-overview[data-selected-stat="tokens"] .cm-stat-card[data-stat="tokens"] {
     display: flex;
   }
+
+  button.cm-stat-card--picker {
+    display: flex;
+  }
+}
+
+.cm-stat-card--picker:hover {
+  border-color: hsl(var(--primary) / 0.35);
+}
+
+.cm-stat-card--picker__value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: clamp(0.2rem, 0.5cqi, 0.4rem);
+}
+
+.cm-stat-card--picker__chevron {
+  width: clamp(0.7rem, 1.5cqi, 0.95rem);
+  height: clamp(0.7rem, 1.5cqi, 0.95rem);
+  color: hsl(var(--muted-foreground));
+}
+
+.cm-stat-card--picker__item-value {
+  margin-left: auto;
+  color: hsl(var(--primary));
+  font-weight: 700;
 }
 
 .cm-stat-card {
@@ -328,6 +439,7 @@
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
   scrollbar-width: thin;
 }
 
@@ -1257,6 +1369,7 @@
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
   scrollbar-width: thin;
 }
 
@@ -2365,7 +2478,7 @@ button.cm-quickstart__step[data-complete="true"] strong {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-    Time Range Selector (kept for header)
+    Time Range Selector (chart block tabs + keys quickstart)
     ═══════════════════════════════════════════════════════════════ */
 
 .cm-time-range {

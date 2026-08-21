@@ -6,7 +6,7 @@ import {
   buildAnalyticsQueryKey,
   buildRollingAnalyticsFilters,
 } from "../src/lib/analytics.ts";
-import { toggleNetworkSelection } from "../src/components/dashboard/networks.ts";
+import { toggleNetworkSelection } from "../src/components/dashboard/networks.tsx";
 import { createReconciliationController } from "../src/lib/reconciliation.ts";
 import { shouldPersistQuery } from "../src/lib/queryClient.ts";
 
@@ -73,12 +73,13 @@ test("persistence allowlist accepts only successful explicitly marked durable qu
 });
 
 test("pair registration, persisted providers, owner reads, local filters, and one Keys hook stay within scope", async () => {
-  const [pair, app, analytics, keysHook, dashboard, keysPage, quickstart, session, connector] = await Promise.all([
+  const [pair, app, analytics, keysHook, dashboard, networks, keysPage, quickstart, session, connector] = await Promise.all([
     readFile(new URL("../src/hooks/use-pair.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/App.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/hooks/use-analytics.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/hooks/use-keys.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/pages/dashboard.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/dashboard/networks.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/components/keys.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/components/keys/quickstart.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/hooks/use-session.tsx", import.meta.url), "utf8"),
@@ -106,8 +107,14 @@ test("pair registration, persisted providers, owner reads, local filters, and on
   assert.match(keysHook, /enabled:\s*Boolean\(owner\)/);
   assert.match(keysHook, /useReconciliation/);
 
-  assert.match(dashboard, /toggleNetworkSelection/);
-  assert.match(dashboard, /DropdownMenuCheckboxItem/);
+  // The page composes the standard rail network selector; the merged
+  // networks module owns the multi-select reducer and the dropdown surface.
+  assert.match(dashboard, /<NetworkFilter/);
+  assert.match(dashboard, /@\/components\/dashboard\/networks/);
+  assert.match(networks, /toggleNetworkSelection/);
+  assert.match(networks, /DropdownMenuCheckboxItem/);
+  assert.match(networks, /cm-control-menu/);
+  assert.match(networks, /cm-shell-tab cm-network-filter/);
   assert.doesNotMatch(dashboard, /anchor|setAnchor|Date\.now\(\)/);
   assert.equal((keysPage.match(/useKeys\(\)/g) ?? []).length, 1);
   assert.match(keysPage, /<NetworkBadge\s+network=\{key\.network\}/);
