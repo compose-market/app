@@ -1623,24 +1623,31 @@ button.cm-stat-card--picker {
   backdrop-filter: blur(16px) saturate(1.12);
 }
 
-.cm-keys-header__title {
-  display: inline-flex;
-  align-items: center;
-  gap: clamp(0.3rem, 0.8cqi, 0.5rem);
+.cm-keys-header__brand {
+  display: flex;
   min-width: 0;
-  color: hsl(var(--foreground));
-  font-family: var(--font-mono), monospace;
-  font-size: clamp(0.62rem, 1.4cqi, 0.82rem);
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  align-items: center;
+  gap: clamp(0.42rem, 1cqi, 0.62rem);
+  flex: 0 1 auto;
+  overflow: hidden;
 }
 
-.cm-keys-header__title-icon {
-  width: clamp(0.8rem, 1.6cqi, 1.1rem);
-  height: clamp(0.8rem, 1.6cqi, 1.1rem);
-  color: hsl(var(--primary));
-  filter: drop-shadow(0 0 10px hsl(var(--primary) / 0.44));
+/* Platform title convention (// API KEYS via .cm-page-header__title) —
+   scales with the container and ellipsizes instead of hiding (market idiom). */
+.cm-keys-header__title {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: clamp(0.7rem, 3cqi, 1.12rem);
+}
+
+.cm-keys-header__count {
+  flex: 0 0 auto;
+  color: hsl(var(--muted-foreground));
+  font-family: var(--font-mono), monospace;
+  font-size: clamp(0.5rem, 1cqi, 0.65rem);
+  white-space: nowrap;
 }
 
 .cm-keys-header__actions {
@@ -1655,8 +1662,12 @@ button.cm-stat-card--picker {
   display: flex;
   flex-direction: column;
   gap: clamp(0.3rem, 0.8cqi, 0.55rem);
+  flex: 1 1 auto;
   min-height: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
   padding: clamp(0.15rem, 0.4cqi, 0.25rem);
 }
 
@@ -1978,6 +1989,10 @@ button.cm-stat-card--picker {
     Keys Page — app-standard cm-split layout + mobile guide sheet
     ═══════════════════════════════════════════════════════════════ */
 
+/* Central composition — standard inner container (same chrome as the
+   .cm-quickstart sibling panel, the dashboard blocks, and the chat cell):
+   the panel fills the split's main cell at the side card's height, clips at
+   its own radius, and only the list scrolls inside it. */
 .cm-keys-main {
   display: flex;
   flex-direction: column;
@@ -1986,9 +2001,23 @@ button.cm-stat-card--picker {
   height: 100%;
   min-width: 0;
   min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  scrollbar-width: thin;
+  overflow: hidden;
+  padding: clamp(0.45rem, 1.2cqi, 0.75rem);
+  border: 1px solid hsl(var(--primary) / 0.14);
+  border-radius: clamp(0.5rem, 1.2cqi, 0.875rem);
+  background:
+    linear-gradient(145deg, hsl(240 6% 14% / 0.34), hsl(240 10% 4% / 0.26)),
+    radial-gradient(circle at 0% 0%, hsl(var(--primary) / 0.06), transparent 40%),
+    hsl(240 8% 8% / 0.18);
+  box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.045);
+  backdrop-filter: blur(16px) saturate(1.1);
+}
+
+/* Empty states inside the panel fill the remaining space (they are the only
+   child in the gate/empty branches, or follow the toolbar when filtered). */
+.cm-keys-main .cm-dashboard__empty {
+  flex: 1 1 auto;
+  height: auto;
 }
 
 .cm-keys-toolbar {

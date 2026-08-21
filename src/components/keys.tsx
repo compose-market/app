@@ -413,11 +413,13 @@ function KeysHeader({
 }) {
   return (
     <div className="cm-keys-header">
-      <div className="cm-keys-header__title">
-        <Key className="cm-keys-header__title-icon" />
-        <span>API Keys</span>
+      <div className="cm-keys-header__brand">
+        <h1 className="cm-page-header__title cm-keys-header__title">
+          <span className="text-fuchsia-500 mr-2">//</span>
+          API KEYS
+        </h1>
         {activeCount !== undefined && activeCount > 0 && (
-          <span className="cm-stat-card__sub" style={{ fontSize: "0.65rem" }}>
+          <span className="cm-keys-header__count">
             {activeCount} active
           </span>
         )}

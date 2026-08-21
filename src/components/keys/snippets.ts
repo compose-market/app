@@ -23,7 +23,7 @@ export const CURL_RESPONSES = `curl https://api.compose.market/v1/responses \\
   -H "Content-Type: application/json" \\
   -H "x-network-id: eip155:* | solana:*" \ \\
   -d '{
-    "model": "gpt-5.5",
+    "model": "gemini-3.7-flash",
     "input": "Write a terse deployment checklist."
   }'`;
 
@@ -33,7 +33,7 @@ export const CURL_EXTERNAL = `curl https://api.compose.market/external/v1/ \\
   -H "Content-Type: application/json" \\
   -H "x-network-id: eip155:* | solana:*" \\
   -d '{
-    "model": "gpt-5.5",
+    "model": "gemini-3.7-flash",
     "messages": [
       { "role": "user", "content": "Hello from an OpenAI-compatible client." }
     ]
@@ -48,7 +48,7 @@ client = OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="gpt-5.5",
+    model="gemini-3.7-flash",
     messages=[{"role": "user", "content": "Hello from Compose."}],
 )
 
@@ -62,7 +62,7 @@ const client = new OpenAI({
 });
 
 const response = await client.chat.completions.create({
-  model: "gpt-5.5",
+  model: "gemini-3.7-flash",
   messages: [{ role: "user", content: "Hello from Compose." }],
 });
 
