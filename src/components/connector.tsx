@@ -356,7 +356,7 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
                 <p className="text-[10px] font-mono text-amber-300">
                   {isActivationFunded
                     ? "Ready to activate when you create a session."
-                    : `Fund this address with ${requiredActivationSol} SOL to activate it.`}
+                    : `Fund this address with ${requiredActivationSol} SOL or 10 USDC to activate it.`}
                 </p>
                 {currentActivationSol ? (
                   <p className="mt-0.5 text-[9px] font-mono text-muted-foreground">

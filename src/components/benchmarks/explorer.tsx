@@ -56,6 +56,7 @@ import { Hint } from "@compose-market/theme/shell";
 import { Ordering, SearchFold, Switcher, type Option } from "@/components/control";
 import { BenchmarkScatterPlot } from "./scatterplot";
 import { ModelComparisonView } from "./comparison";
+import { FamilyLogo } from "./family";
 import { useBenchmarks } from "@/hooks/use-benchmarks";
 import { useIsMobile } from "@/hooks/use-mobile";
 import {
@@ -478,6 +479,7 @@ export function BenchmarksExplorer({
                                                                 {cleanName}
                                                             </button>
                                                             <div className="cm-benchmarks-table__sub text-muted-foreground flex items-center gap-1.5">
+                                                                <FamilyLogo family={model.family} />
                                                                 <span>{model.family}</span>
                                                                 {model.isFrontier && (
                                                                     <span className="text-fuchsia-400 font-semibold">Frontier</span>
@@ -545,6 +547,7 @@ export function BenchmarksExplorer({
                                                         <div>
                                                             <h3 className="cm-benchmarks-card__name">{cleanName}</h3>
                                                             <div className="cm-benchmarks-card__meta">
+                                                                <FamilyLogo family={model.family} />
                                                                 <span>{model.family}</span>
                                                                 {model.isFrontier && (
                                                                     <span className="text-fuchsia-400 font-semibold flex items-center gap-0.5">
@@ -688,6 +691,7 @@ export function BenchmarksExplorer({
                                                     <div className="flex items-center gap-1.5 truncate">
                                                         <span className="text-cyan-400 font-bold">{index + 1}.</span>
                                                         <span className="font-bold text-foreground truncate">{cleanName}</span>
+                                                        <FamilyLogo family={model.family} />
                                                         <span className="text-muted-foreground text-[10px]">({model.family})</span>
                                                     </div>
                                                     <div className="flex items-center gap-2 shrink-0">

@@ -408,6 +408,38 @@ test("keys page uses the standard title and a contained central panel", () => {
   assert.match(styles, /\.cm-keys-list\s*\{[\s\S]*?overflow-y:\s*auto[\s\S]*?overscroll-behavior:\s*contain/);
 });
 
+test("benchmark surfaces show family logos with proportional, non-breaking sizing", () => {
+  const explorer = read("src/components/benchmarks/explorer.tsx");
+  const comparison = read("src/components/benchmarks/comparison.tsx");
+  const scatterplot = read("src/components/benchmarks/scatterplot.tsx");
+  const family = read("src/components/benchmarks/family.tsx");
+  const models = read("src/lib/models.ts");
+  const benchmarks = read("src/styles/benchmarks.css");
+  const styles = read("src/styles/index.css");
+
+  // Shared renderer reuses the platform logo map + cm-family-icon class and
+  // renders nothing for unmapped families (text fallback never shifts).
+  assert.match(family, /getFamilyLogoUrl/);
+  assert.match(family, /cm-family-icon/);
+  assert.match(family, /if \(!logoUrl\) return null/);
+
+  // Every benchmark surface that prints a family name carries the logo.
+  assert.match(explorer, /<FamilyLogo family=\{model\.family\} \/>/);
+  assert.match(comparison, /<FamilyLogo family=\{candidate\.family\} \/>/);
+  assert.match(scatterplot, /<FamilyLogo family=\{data\.family\} \/>/);
+  assert.match(scatterplot, /<FamilyLogo family=\{inspectedModel\.family\} \/>/);
+
+  // The map covers the newly added families.
+  assert.match(models, /anthropic:\s*"anthropic\.png"/);
+  assert.match(models, /tencent:\s*"tencent\.png"/);
+  assert.match(models, /pixverse:\s*"pixverse\.png"/);
+
+  // Base class can never stretch a row; workspace rule keeps logos
+  // proportional to the benchmarks unit on small screens.
+  assert.match(styles, /\.cm-family-icon\s*\{[\s\S]*?flex:\s*0 0 auto[\s\S]*?object-fit:\s*contain/);
+  assert.match(benchmarks, /\.cm-benchmarks-workspace \.cm-family-icon[\s\S]*?calc\(var\(--cm-bm-unit\) \* 0\.85\)/);
+});
+
 test("backpack rows and binary controls use high-contrast theme primitives", () => {
   const backpack = read("src/components/backpack.tsx");
   const sw = read("src/components/ui/switch.tsx");

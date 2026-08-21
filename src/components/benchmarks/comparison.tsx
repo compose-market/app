@@ -36,6 +36,7 @@ import {
 
 import { Hint, ShellChip } from "@compose-market/theme/shell";
 import { BenchmarkRadarChart } from "./radar";
+import { FamilyLogo } from "./family";
 import { useBenchmarks, useCompareModels } from "@/hooks/use-benchmarks";
 import { useIsMobile } from "@/hooks/use-mobile";
 import {
@@ -264,7 +265,8 @@ export function ModelComparisonView({
                                                     {candidate.isFrontier && <Flame className="w-3 h-3 text-fuchsia-400 shrink-0" />}
                                                     <span className="font-semibold text-foreground truncate">{cleanName}</span>
                                                 </div>
-                                                <span className="text-[10px] text-muted-foreground uppercase shrink-0">
+                                                <span className="text-[10px] text-muted-foreground uppercase shrink-0 flex items-center gap-1">
+                                                    <FamilyLogo family={candidate.family} />
                                                     {candidate.family}
                                                 </span>
                                             </button>

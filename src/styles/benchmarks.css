@@ -46,6 +46,16 @@
   width: 100%;
 }
 
+/* Family logos scale with the workspace's own unit (like every other
+   element) instead of pinning at the global fallback size — keeps rows,
+   cards, tooltips, and inspectors proportional at every container size.
+   cm-family-icon already carries flex: 0 0 auto + object-fit: contain. */
+.cm-benchmarks-workspace .cm-family-icon,
+.cm-benchmarks-dock .cm-family-icon {
+  width: calc(var(--cm-bm-unit) * 0.85);
+  height: calc(var(--cm-bm-unit) * 0.85);
+}
+
 /* Compact proportional controls opt out of the global 2.75rem mobile
    touch-target inflation (index.css @layer base) — same pattern as the
    theme model card / agent card. Without it, pill-shaped buttons deform

@@ -23,6 +23,7 @@ import {
 import { Sparkles, DollarSign, Zap, Trophy, Plus, Check, Play, Scale } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { benchmarkMetric, formatBenchmarkMetric, cleanBenchmarkDisplayName } from "@/lib/benchmarks";
+import { FamilyLogo } from "./family";
 import type { ModelBenchmark } from "@/types/benchmarks";
 
 export interface BenchmarkScatterPlotProps {
@@ -59,7 +60,10 @@ function CustomScatterTooltip({ active, payload }: { active?: boolean; payload?:
             <div className="space-y-1 text-muted-foreground">
                 <div className="flex justify-between">
                     <span>Family:</span>
-                    <span className="text-foreground font-medium">{data.family}</span>
+                    <span className="text-foreground font-medium flex items-center gap-1.5">
+                        <FamilyLogo family={data.family} />
+                        {data.family}
+                    </span>
                 </div>
                 <div className="flex justify-between">
                     <span>Intelligence Index:</span>
@@ -305,6 +309,7 @@ export function BenchmarkScatterPlot({
                                 )}
                             </div>
                             <div className="text-[11px] text-muted-foreground flex items-center gap-2 mt-0.5">
+                                <FamilyLogo family={inspectedModel.family} />
                                 <span>{inspectedModel.family}</span>
                                 <span>·</span>
                                 <span className="text-cyan-400">Score: {inspectedModel.intelligenceIndex ?? "—"}</span>
