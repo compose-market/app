@@ -19,7 +19,7 @@ const Providers = lazy(() => import("@/pages/providers"));
 // const Compose = lazy(() => import("@/pages/compose"));
 // const Models = lazy(() => import("@/pages/models"));
 // const Agents = lazy(() => import("@/pages/agents"));
-// const AgentDetail = lazy(() => import("@/pages/agent"));
+const AgentDetail = lazy(() => import("@/pages/agent"));
 // const Registry = lazy(() => import("@/pages/registry"));
 // const MyAssets = lazy(() => import("@/pages/my-assets"));
 const Playground = lazy(() => import("@/pages/playground"));
@@ -74,7 +74,7 @@ function AppRouter() {
           {/* <Route path="/compose" component={Compose} /> */}
           {/* <Route path="/models" component={Models} /> */}
           {/* <Route path="/agents" component={Agents} /> */}
-          {/* <Route path="/agent/:id" component={AgentDetail} /> */}
+          <Route path="/agent/:id" component={AgentDetail} />
           {/* <Route path="/registry" component={Registry} /> */}
           {/* <Route path="/my-assets" component={MyAssets} /> */}
           {/* <Route path="/workflow/:id" component={Workflow} /> */}
